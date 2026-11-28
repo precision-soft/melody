@@ -43,9 +43,6 @@ func TestRoleVoter_DeniesWhenTokenNotAuthenticated(t *testing.T) {
     }
 }
 
-/* The token is the application's: a nil pointer of its own token type reaches the voter as a non-nil
-interface, IsAuthenticated answers true without touching the receiver, and Roles() would then dereference
-the nil on the authorization path. */
 func TestRoleVoter_DeniesATypedNilToken(t *testing.T) {
     voter := NewRoleVoter()
 

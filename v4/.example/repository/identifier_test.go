@@ -5,8 +5,6 @@ import (
     "testing"
 )
 
-/* the next identifier continues the seeded numbering; an identifier whose tail is not a number is skipped rather than treated as zero, which is what lets the currencies keep their spelled-out identifiers without blocking a numeric one from ever being handed out */
-
 func TestHighestIdSuffixSkipsWhatItCannotParse(t *testing.T) {
     highest := highestIdSuffix([]string{"cur-eur", "cur-usd", "cur-ron"}, "cur-")
     if 0 != highest {
@@ -28,8 +26,6 @@ func TestHighestIdSuffixReadsTheLargestTail(t *testing.T) {
         t.Fatalf("expected the numbering to continue, got %q", nextProductId([]string{"prod-1", "prod-9"}))
     }
 }
-
-/* a prefix that no identifier carries must not raise the count: an empty catalogue starts at one */
 
 func TestHighestIdSuffixOnAnEmptyList(t *testing.T) {
     if 0 != highestIdSuffix(nil, "cat-") {

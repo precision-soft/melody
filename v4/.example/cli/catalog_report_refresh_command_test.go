@@ -29,7 +29,6 @@ import (
     melodylockcontract "github.com/precision-soft/melody/v4/lock/contract"
 )
 
-/* refreshSequence is the one ledger every collaborator of the refresh writes into — the lock, the cache the reading lands in, the archive, the sink — so the ORDER the command drove them in is a list the test can read, not a set of counters that agree with any order. */
 type refreshSequence struct {
     mutex  sync.Mutex
     events []string
@@ -80,7 +79,6 @@ func (instance *refreshSequence) indexOf(event string) int {
     return -1
 }
 
-/* sequenceLocker hands out a lock that records its turns and can be told to answer that the lock is held elsewhere */
 type sequenceLocker struct {
     sequence   *refreshSequence
     inner      melodylockcontract.Locker
@@ -128,7 +126,6 @@ func (instance *sequenceLock) Refresh(runtimeInstance melodycontainercontract.Ru
     return instance.inner.Refresh(runtimeInstance, options)
 }
 
-/* sequenceCache records the moment the reading lands in the cache, which is the moment Refresh took it: the product list the reading counts is cached through the same door, so the key is what tells the reading's own write apart */
 type sequenceCache struct {
     melodycachecontract.Cache
 
@@ -146,7 +143,6 @@ func (instance *sequenceCache) Set(runtimeInstance melodycontainercontract.Runti
     return instance.Cache.Set(runtimeInstance, key, value, ttl, options)
 }
 
-/* sequenceArchive is the archive as the command reaches it: one row per instant, refused as the real ones refuse it, every append on the ledger */
 type sequenceArchive struct {
     sequence *refreshSequence
     mutex    sync.Mutex
@@ -213,7 +209,6 @@ type refreshFixtureOption struct {
     sinkStatus     int
 }
 
-/* newRefreshFixture is the composition root of the refresh, on doubles that write into one ledger: the report service and the exporter are registered by TYPE, as the generated wiring registers them, and the archive, the locker and the export client by NAME, as the composition root registers them */
 func newRefreshFixture(t *testing.T, option refreshFixtureOption) *refreshFixture {
     t.Helper()
 
@@ -221,7 +216,6 @@ func newRefreshFixture(t *testing.T, option refreshFixtureOption) *refreshFixtur
     archive := &sequenceArchive{sequence: sequence}
     clockInstance := melodyclock.NewFrozenClock(time.Date(2026, time.September, 13, 9, 0, 0, 0, time.UTC))
 
-    /* the serializer the composition root registers: under the json one a cached list comes back as []any, so a second run over the same cache would fail on the product list before it reached the archive */
     backend := melodycache.NewInMemoryBackend(melodycache.InMemoryBackendConfig{Clock: clockInstance})
     cacheInstance := &sequenceCache{Cache: melodycache.NewManager(backend, examplecache.NewGobSerializer(), melodycache.ManagerConfig{OwnsBackend: true}), sequence: sequence}
 
@@ -318,7 +312,6 @@ func runRefresh(t *testing.T, fixture *refreshFixture) (string, error) {
     return buffer.String(), runErr
 }
 
-/* the run is one unit under the lock, taken first and released last, with the archive written before the sink is told: that is the order the ledger has to read, and the one every mutant of the command changes */
 func TestCatalogReportRefreshCommandDrivesLockRefreshArchiveExportInThatOrder(t *testing.T) {
     fixture := newRefreshFixture(t, refreshFixtureOption{})
 
@@ -337,7 +330,6 @@ func TestCatalogReportRefreshCommandDrivesLockRefreshArchiveExportInThatOrder(t 
     }
 }
 
-/* the reading is taken under the runtime the lock hands its holder, which is cancelled before the lease could lapse, not under the command's own: a run that lost its lease is told to stop */
 func TestCatalogReportRefreshCommandTakesTheReadingUnderTheRuntimeTheLockHolds(t *testing.T) {
     fixture := newRefreshFixture(t, refreshFixtureOption{})
 
@@ -353,13 +345,11 @@ func TestCatalogReportRefreshCommandTakesTheReadingUnderTheRuntimeTheLockHolds(t
         t.Fatalf("expected the reading taken under the held runtime, not the one the lock was taken under")
     }
 
-    /* the held runtime ends with the hold, the command's own outlives it: a runtime over the command's own context would still be live */
     if nil == refreshRuntime.Context().Err() || nil != acquireRuntime.Context().Err() {
         t.Fatalf("expected the reading's runtime cancelled with the hold and the command's still live")
     }
 }
 
-/* a reading the archive already holds at that instant is not a failure, and the run exits zero; the table alone would answer ARCHIVED false with nothing beside it, which reads as an archive that did not record the reading, so the console says why nothing was written */
 func TestCatalogReportRefreshCommandSaysWhyAReadingAlreadyRecordedIsNotArchivedAgain(t *testing.T) {
     fixture := newRefreshFixture(t, refreshFixtureOption{})
 
@@ -381,7 +371,6 @@ func TestCatalogReportRefreshCommandSaysWhyAReadingAlreadyRecordedIsNotArchivedA
     }
 }
 
-/* a lock held elsewhere means another process is taking this reading right now: this one takes none, exports none, records none, and says so with a zero exit */
 func TestCatalogReportRefreshCommandSkipsTheWholeRunWhenTheLockIsHeldElsewhere(t *testing.T) {
     sequenceHolder := &refreshSequence{}
     fixture := newRefreshFixture(t, refreshFixtureOption{
@@ -404,12 +393,10 @@ func TestCatalogReportRefreshCommandSkipsTheWholeRunWhenTheLockIsHeldElsewhere(t
     }
 }
 
-/* a locker that is registered and cannot be resolved is the archive being unreachable (its provider opens the postgres handle), and that is a failure handed back, not read as "no archive wired" with a zero exit over a reading never recorded. It is handed back after the reading and the export, which need nothing from postgres: the archive's outage does not take the two halves that do not depend on it. */
 func TestCatalogReportRefreshCommandHandsBackAnUnreachableArchiveAfterReadingAndExporting(t *testing.T) {
     refusal := errors.New("dial tcp 172.18.0.10:5432: connect: connection refused")
     fixture := newRefreshFixture(t, refreshFixtureOption{
         lockerProvider: func(resolver melodycontainercontract.Resolver) (melodylockcontract.Locker, error) {
-            /* what the composition root's provider hands back: the archive database named with where it is, the driver's refusal as the cause */
             return nil, exception.NewError("the archive database at postgres:5432/melody_example_v4 could not be opened", nil, refusal)
         },
     })
@@ -436,9 +423,6 @@ func TestCatalogReportRefreshCommandHandsBackAnUnreachableArchiveAfterReadingAnd
     }
 }
 
-/* the locker is registered on every wiring — in-process without postgres — so a container without one is not a
-   state the application can be in: the door hands back the resolution's refusal, and the run goes on without
-   the archive and fails at the end, the way an unreachable archive does */
 func TestCatalogReportRefreshCommandTreatsAMissingLockerAsAnUnreachableArchive(t *testing.T) {
     fixture := newRefreshFixture(t, refreshFixtureOption{withoutLocker: true})
 
@@ -456,7 +440,6 @@ func TestCatalogReportRefreshCommandTreatsAMissingLockerAsAnUnreachableArchive(t
     }
 }
 
-/* the archive is the durable half and depends on nothing the sink does: a sink that refuses still takes the exit code, after the row is there — and the operator is told the archive holds what the sink did not receive */
 func TestCatalogReportRefreshCommandArchivesTheReadingEvenWhenTheSinkRefusesIt(t *testing.T) {
     fixture := newRefreshFixture(t, refreshFixtureOption{sinkStatus: http.StatusInternalServerError})
 
@@ -478,7 +461,6 @@ func TestCatalogReportRefreshCommandArchivesTheReadingEvenWhenTheSinkRefusesIt(t
     }
 }
 
-/* the archive's own refusal — the database named with where it is — reaches the console in the message, with the step it stopped, not under a headline that names neither */
 func TestCatalogReportRefreshCommandNamesTheArchivesOwnRefusalOnTheConsole(t *testing.T) {
     own := exception.NewError("the archive database at postgres:1/melody_example_v4 could not be opened", nil, errors.New("connection refused"))
     fixture := newRefreshFixture(t, refreshFixtureOption{
@@ -497,8 +479,6 @@ func TestCatalogReportRefreshCommandNamesTheArchivesOwnRefusalOnTheConsole(t *te
     }
 }
 
-/* an error taking the lock, not a lock held elsewhere, is the archive being unreachable, and the reading and the export go on without it, so a connection lost between the open and the advisory lock does not cost the tick its reading and its export */
-/* a stop during the acquire is not a contender: the run says it was stopped, exits with the stop, and names no other process */
 func TestCatalogReportRefreshCommandSaysAStopDuringTheAcquireIsNotAnotherProcess(t *testing.T) {
     sequence := &refreshSequence{}
     fixture := newRefreshFixture(t, refreshFixtureOption{
@@ -544,7 +524,6 @@ func TestCatalogReportRefreshCommandReadsAndExportsWhenTheLockCannotBeTaken(t *t
     }
 }
 
-/* the archive's own refusal on the Archive branch reaches the console, which the cli engine renders from the message alone, with the database it names and the step that did not complete both in the message */
 func TestCatalogReportRefreshCommandKeepsTheArchivesOwnRefusalOnTheArchiveBranch(t *testing.T) {
     fixture := newRefreshFixture(t, refreshFixtureOption{})
     own := exception.NewError("the archive database at postgres:5432/melody_example_v4 refused the insert", nil, errors.New("connection reset"))
@@ -559,8 +538,6 @@ func TestCatalogReportRefreshCommandKeepsTheArchivesOwnRefusalOnTheArchiveBranch
         t.Fatalf("expected the console line to name the database and the step, got %q", runErr.Error())
     }
 
-    /* a second fixture: the first run's cache holds the product list serialized, and a second run over it reads
-       a map where the service asserts a type (a failure of the double, not of the door) */
     foreign := newRefreshFixture(t, refreshFixtureOption{})
     foreign.archive.refusal = errors.New("driver: bad connection")
 
@@ -570,7 +547,6 @@ func TestCatalogReportRefreshCommandKeepsTheArchivesOwnRefusalOnTheArchiveBranch
     }
 }
 
-/* both halves failing: the console names the archive's refusal beside the sink's and the exit carries both, so neither hides the other */
 func TestCatalogReportRefreshCommandReportsBothHalvesWhenBothRefuse(t *testing.T) {
     fixture := newRefreshFixture(t, refreshFixtureOption{sinkStatus: http.StatusInternalServerError})
     own := exception.NewError("the archive database at postgres:5432/melody_example_v4 refused the insert", nil, errors.New("connection reset"))
@@ -585,7 +561,6 @@ func TestCatalogReportRefreshCommandReportsBothHalvesWhenBothRefuse(t *testing.T
         t.Fatalf("expected the exit to carry the sink's refusal as well, got %v", runErr)
     }
 
-    /* the cli engine escapes a newline in a failure's message, so a joined error's own rendering would reach the console as a literal \n between the two halves */
     if true == strings.Contains(runErr.Error(), "\n") {
         t.Fatalf("expected the two halves on one line, got %q", runErr.Error())
     }
@@ -595,8 +570,6 @@ func TestCatalogReportRefreshCommandReportsBothHalvesWhenBothRefuse(t *testing.T
     }
 }
 
-/* the console says "exported" only when something was exported: with no sink configured the reading was taken
-   and the archive refused, and the line says exactly that */
 func TestCatalogReportRefreshCommandDoesNotClaimAnExportThatDidNotHappen(t *testing.T) {
     fixture := newRefreshFixture(t, refreshFixtureOption{withoutSink: true})
     fixture.archive.refusal = errors.New("driver: bad connection")

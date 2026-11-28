@@ -66,7 +66,6 @@ func (instance *refreshFailingLock) Refresh(runtimeInstance containercontract.Ru
     return exception.NewError("lease lost", nil, nil)
 }
 
-/* contextCancelledAcquireLock stands in for a backend round trip cut short by a SIGTERM: Acquire fails with the runtime cancellation wrapped in a store error, as a real locker reports an in-flight Acquire whose context is cancelled. */
 type contextCancelledAcquireLocker struct{}
 
 func (instance *contextCancelledAcquireLocker) CreateLock(name string, options lockcontract.CreateLockOptions) (lockcontract.Lock, error) {
@@ -100,7 +99,6 @@ func TestRunExclusive_RunsAndReleases(t *testing.T) {
         t.Fatalf("expected first run to execute: ran=%v err=%v", ran, runErr)
     }
 
-    /* the lock must be released right after the run, not after the ttl */
     ranSecond := false
     ran, runErr = RunExclusive(runtimeInstance, locker, "cron:tick", ExclusiveOptions{Ttl: bound.Of(time.Minute)}, func(childRuntime containercontract.Runtime) error {
         ranSecond = true
@@ -153,7 +151,6 @@ func TestRunExclusive_FailsClosedOnAcquireError(t *testing.T) {
 }
 
 func TestRunExclusive_AcquireCancellationIsShutdownNotError(t *testing.T) {
-    /* a SIGTERM cancels the context the backend is called with, so an in-flight Acquire fails with the cancellation; that is the stop itself and reads as a clean skip, not a failed run */
     cancelledContext, cancel := context.WithCancel(context.Background())
     cancel()
 
@@ -232,7 +229,6 @@ func TestRunExclusive_ReleasesEvenWhenCallerContextIsCancelled(t *testing.T) {
         t.Fatalf("expected the run to execute: ran=%v err=%v", ran, runErr)
     }
 
-    /* the release must have gone through on the detached runtime despite the cancelled caller context */
     contender := mustCreateLock(locker.CreateLock("cron:sigterm", lockcontract.CreateLockOptions{Ttl: bound.Of(time.Minute)}))
     acquired, _ := contender.Acquire(testRuntime())
     if false == acquired {
@@ -240,7 +236,6 @@ func TestRunExclusive_ReleasesEvenWhenCallerContextIsCancelled(t *testing.T) {
     }
 }
 
-/* recordingRefreshLocker captures the ttl each Refresh is asked to write, so a test can assert the lease margin the refresher gives a lease-style backend. */
 type recordingRefreshLocker struct {
     inner      lockcontract.Locker
     refreshTtl chan bound.Duration
@@ -272,7 +267,6 @@ func (instance *recordingRefreshLock) Refresh(runtimeInstance containercontract.
     return instance.inner.Refresh(runtimeInstance, options)
 }
 
-/* blockingRefreshLock blocks inside Refresh until its runtime context is cancelled, standing in for a backend whose connection has been blackholed by a network partition. */
 type blockingRefreshLocker struct {
     entered chan struct{}
 }
@@ -305,7 +299,6 @@ func (instance *blockingRefreshLock) Refresh(runtimeInstance containercontract.R
     return exception.NewError("refresh aborted", nil, runtimeInstance.Context().Err())
 }
 
-/* A lease-style backend rewrites the lease to now+ttl on Refresh. Handing it the probe interval itself would renew the lease exactly as it expires, so every probe races its own expiry: callback is cancelled spuriously and the lapsed lease lets a second instance run alongside it. The probe must renew for a multiple of its own cadence, and the derived interval must never reach time.NewTicker as zero. */
 func TestResolveRefreshSchedule(t *testing.T) {
     for _, testCase := range []struct {
         name             string
@@ -331,7 +324,6 @@ func TestResolveRefreshSchedule(t *testing.T) {
                 t.Fatal("a non-positive interval would panic time.NewTicker")
             }
 
-            /* a ttl below the floor is a misconfiguration the lock cannot rescue — the lease expires before any renewal can land — but it must not panic; every sane ttl renews with slack to spare */
             if minimumRefreshInterval <= testCase.ttl.Value || true == testCase.ttl.Unlimited {
                 if 0 >= refreshTtl-interval {
                     t.Fatalf("the refresh ttl %s gives no margin over the %s cadence", refreshTtl, interval)
@@ -383,7 +375,6 @@ func TestRunExclusive_TheMinimumLeaseRenewsBeforeItsDemotionInstant(t *testing.T
     }
 }
 
-/* createLockForbiddenLocker fails the test when a lock is created, for the refusals that must land before the locker is asked. */
 type createLockForbiddenLocker struct {
     t *testing.T
 }
@@ -394,7 +385,6 @@ func (instance *createLockForbiddenLocker) CreateLock(name string, options lockc
     return nil, nil
 }
 
-/* waitForRefreshInFlight blocks until the blocking locker's Refresh has been entered. A loaded runner can schedule the refresh goroutine past the demotion instant, which then demotes without ever calling Refresh; the child runtime's cancellation ends the wait with an error instead of parking the test until the package timeout. */
 func waitForRefreshInFlight(childRuntime containercontract.Runtime, entered <-chan struct{}) error {
     select {
     case <-entered:
@@ -404,7 +394,6 @@ func waitForRefreshInFlight(childRuntime containercontract.Runtime, entered <-ch
     }
 }
 
-/* A Refresh already blocked on an unresponsive backend when callback returns must be interrupted: closing refreshDone alone cannot reach it, so RunExclusive would wait on the goroutine forever while holding the lock. Cancelling the renewal's context before Wait unblocks it, and the resulting error must read as the run's end, not as a lost lease. The ttl leaves the refresh, entered at half of it, a quarter of it before the demotion instant, wide enough for callback to return on a loaded runner. */
 func TestRunExclusive_DoesNotHangWhenARefreshIsInFlightAtReturn(t *testing.T) {
     entered := make(chan struct{})
     locker := &blockingRefreshLocker{entered: entered}
@@ -436,7 +425,6 @@ func TestRunExclusive_DoesNotHangWhenARefreshIsInFlightAtReturn(t *testing.T) {
     }
 }
 
-/* A SIGTERM does not reach the refresh loop: the refresh in flight stays blocked until callback returns and the join cancels it. That cancellation is the run's end, not a lost lease: reporting it would turn every graceful stop of a long-running exclusive command into an error a cron fleet reads as a failed run. The ttl leaves the refresh, entered at half of it, a quarter of it before the demotion instant, wide enough for callback to cancel the parent on a loaded runner. */
 func TestRunExclusive_ContextCancellationIsShutdownNotLostLease(t *testing.T) {
     parentContext, cancelParent := context.WithCancel(context.Background())
     defer cancelParent()
@@ -451,7 +439,6 @@ func TestRunExclusive_ContextCancellationIsShutdownNotLostLease(t *testing.T) {
         "shutdown",
         ExclusiveOptions{Ttl: bound.Of(1 * time.Second)},
         func(childRuntime containercontract.Runtime) error {
-            /* wait until a refresh is genuinely in flight, then shut the process down underneath it */
             if waitErr := waitForRefreshInFlight(childRuntime, entered); nil != waitErr {
                 return waitErr
             }
@@ -474,7 +461,6 @@ func TestRunExclusive_ContextCancellationIsShutdownNotLostLease(t *testing.T) {
     }
 }
 
-/* The holder has the same shape as the leader gate: a renewal that never answers returns no error, so nothing cancels the child runtime and the callback keeps working while the lease lapses and another instance acquires — two runs of the same exclusive work at once. The renewal deadline is what turns the silence into the cancellation the callback is written to obey. */
 func TestRunExclusive_ARenewalThatNeverAnswersStopsTheCallback(t *testing.T) {
     locker := &hangingRefreshLocker{inner: NewInMemoryLocker(InMemoryLockerConfig{})}
 
@@ -515,7 +501,6 @@ func TestRunExclusive_ARenewalThatNeverAnswersStopsTheCallback(t *testing.T) {
     }
 }
 
-/* slowSucceedingRefreshLock answers every renewal successfully, but only after a delay — the shape of a store that is under load rather than gone. */
 type slowSucceedingRefreshLocker struct {
     delay time.Duration
 }
@@ -545,7 +530,6 @@ func (instance *slowSucceedingRefreshLock) Refresh(runtimeInstance containercont
     }
 }
 
-/* a renewal that lands before the lease's demotion instant renewed it, however slowly; the delay sits between an eighth and a quarter of the ttl */
 func TestRunExclusive_ASlowButSuccessfulRenewalDoesNotLoseTheLease(t *testing.T) {
     ttl := 400 * time.Millisecond
     locker := &slowSucceedingRefreshLocker{delay: 60 * time.Millisecond}
@@ -578,7 +562,6 @@ func TestRunExclusive_ASlowButSuccessfulRenewalDoesNotLoseTheLease(t *testing.T)
     }
 }
 
-/* a renewal still unanswered at the lease's demotion instant, a quarter of the ttl before the lapse, is cut there and costs the lease, since whether it would land before a contender acquires cannot be known */
 func TestRunExclusive_ARenewalThatCannotLandBeforeTheDemotionInstantLosesTheLease(t *testing.T) {
     ttl := 400 * time.Millisecond
     locker := &slowSucceedingRefreshLocker{delay: 150 * time.Millisecond}
@@ -607,7 +590,6 @@ func TestRunExclusive_ARenewalThatCannotLandBeforeTheDemotionInstantLosesTheLeas
     }
 }
 
-/* the other half of the invariant: a renewal that keeps failing must still demote, and must do so before the lease it last wrote can be acquired by anyone else rather than after. */
 func TestRunExclusive_APersistentlyFailingRenewalStillLosesTheLease(t *testing.T) {
     ttl := 200 * time.Millisecond
     locker := &refreshFailingLocker{inner: NewInMemoryLocker(InMemoryLockerConfig{})}
@@ -644,7 +626,6 @@ func TestRunExclusive_APersistentlyFailingRenewalStillLosesTheLease(t *testing.T
     }
 }
 
-/* intermittentRefreshLock fails the first renewal and answers every one after it, which is what a store that dropped a connection and reconnected looks like from here. */
 type intermittentRefreshLocker struct{}
 
 func (instance *intermittentRefreshLocker) CreateLock(name string, options lockcontract.CreateLockOptions) (lockcontract.Lock, error) {
@@ -671,7 +652,6 @@ func (instance *intermittentRefreshLock) Refresh(runtimeInstance containercontra
     return nil
 }
 
-/* One failed renewal is not a lost lease. The renewal cadence is half the ttl precisely so that a lost attempt still leaves a whole second attempt before the lease lapses; a policy that demotes on the first failure throws that margin away and turns every dropped connection into cancelled work and, under a LeaderGate, a dropped term. What must demote is the lease clock — the attempt after the failure lands, rewrites the lease, and nothing was ever in danger. */
 func TestRunExclusive_ASingleFailedRenewalIsSurvivedByTheNextOne(t *testing.T) {
     ttl := 200 * time.Millisecond
     locker := &intermittentRefreshLocker{}
@@ -704,7 +684,6 @@ func TestRunExclusive_ASingleFailedRenewalIsSurvivedByTheNextOne(t *testing.T) {
     }
 }
 
-/* slowAcquireCountingLocker answers Acquire late — the shape of a degraded store whose reply crawls back — and fails every renewal, counting them. */
 type slowAcquireCountingLocker struct {
     acquireDelay time.Duration
     refreshCount atomic.Int64
@@ -733,7 +712,7 @@ func (instance *slowAcquireCountingLock) Refresh(runtimeInstance containercontra
 }
 
 func TestRunExclusive_LeaseIsDatedFromTheAcquireIssueInstant(t *testing.T) {
-    /* the acquire answers 600ms after it is issued, against a 400ms ttl: the lease the store wrote has already lapsed by the time callback starts. Dated from the ISSUE instant, its demotion instant has passed and the caller is demoted before any renewal; dated from the ANSWER, the believed lease would run a further 600ms past the real one, renewals would be attempted and a failure read as survivable, and the callback would keep running through a window in which a second instance can legally acquire. The refresh count at demotion is the observable that separates the two datings. */
+    /* 600ms against a 400ms ttl: the lease has lapsed before callback starts */
     locker := &slowAcquireCountingLocker{acquireDelay: 600 * time.Millisecond}
 
     ran, runErr := RunExclusive(
@@ -764,7 +743,6 @@ func TestRunExclusive_LeaseIsDatedFromTheAcquireIssueInstant(t *testing.T) {
     }
 }
 
-/* releaseFailingLocker acquires and refreshes cleanly and fails every release — the shape of a store hiccup exactly at release time. */
 type releaseFailingLocker struct{}
 
 func (instance *releaseFailingLocker) CreateLock(name string, options lockcontract.CreateLockOptions) (lockcontract.Lock, error) {
@@ -802,7 +780,6 @@ func TestRunExclusive_FailedReleaseIsLogged(t *testing.T) {
         t.Fatalf("expected a clean run, got ran=%v err=%v", ran, runErr)
     }
 
-    /* the run itself stays green — the work happened — but the stranded lock must name itself: without this record every peer's next tick skips with a log blaming a run that is not happening, and the operator cannot tell a failed release from a crash */
     if false == logger.hasMessageContaining("lock release failed") {
         t.Fatalf("expected the failed release to be logged")
     }
@@ -826,13 +803,11 @@ func TestRunExclusive_LostLeaseKeepsTheCallbackErrorInTheChain(t *testing.T) {
         t.Fatalf("expected the lost lease to surface as an error")
     }
 
-    /* flattened to a string — the defect — the callback's own failure lost its identity for errors.Is at the process boundary; joined, both the refresh failure and the callback error answer */
     if false == errors.Is(runErr, callbackErr) {
         t.Fatalf("expected the callback error to stay reachable through errors.Is, got %v", runErr)
     }
 }
 
-/* panickingRefreshLocker acquires cleanly and panics on every renewal — the shape of a backend defect surfacing on the refresh goroutine, which carries no recover of the caller's. */
 type panickingRefreshLocker struct{}
 
 func (instance *panickingRefreshLocker) CreateLock(name string, options lockcontract.CreateLockOptions) (lockcontract.Lock, error) {
@@ -887,7 +862,6 @@ func TestRunExclusive_PanickingRefreshDemotesInsteadOfKillingTheProcess(t *testi
     }
 }
 
-/* chainContextValue answers a context value of the first error of the chain, joined branches included, whose message holds the fragment */
 func chainContextValue(err error, fragment string, key string) string {
     if nil == err {
         return ""
@@ -928,7 +902,6 @@ func TestLeaseDemotionClockRenew_ASuccessAnsweredPastTheDemotionInstantDemotes(t
         clock := newLeaseDemotionClock(true, true, time.Now().Add(time.Hour), time.Second, time.Second)
 
         if true == testCase.instantPassed {
-            /* the instant moves without re-arming the timer, the window where the renewal answers before the timer fires */
             clock.leaseExpiry = time.Now().Add(-time.Hour)
         }
 
@@ -959,7 +932,6 @@ func TestLeaseDemotionClockRenew_ASuccessAnsweredPastTheDemotionInstantDemotes(t
     }
 }
 
-/* chainContainsMessage walks the whole cause chain, joined branches included, so an assertion on a buried cause does not depend on how the top error renders. */
 func chainContainsMessage(err error, fragment string) bool {
     if nil == err {
         return false
@@ -982,7 +954,6 @@ func chainContainsMessage(err error, fragment string) bool {
     return chainContainsMessage(errors.Unwrap(err), fragment)
 }
 
-/* slowThenFailingRefreshLocker answers the first renewal late but successfully — a degraded store whose reply crawls back — and fails every renewal after it. */
 type slowThenFailingRefreshLocker struct {
     firstDelay   time.Duration
     refreshCount atomic.Int64
@@ -1014,7 +985,7 @@ func (instance *slowThenFailingRefreshLock) Refresh(runtimeInstance containercon
 }
 
 func TestRunExclusive_RenewalLeaseIsDatedFromTheRenewalIssueInstant(t *testing.T) {
-    /* the first renewal is issued at 200ms and, ignoring its context, answers at 500ms; dated from the ISSUE, the lease it wrote lapses at 600ms and its demotion instant is 500ms, already come, so the caller is demoted as it lands and no second call is made. Dated from the answer, the believed lease would run to 900ms and further renewals would be attempted first. */
+    /* issued at 200ms and answering at 500ms: dated from the issue, its demotion instant is 500ms */
     locker := &slowThenFailingRefreshLocker{firstDelay: 300 * time.Millisecond}
 
     _, runErr := RunExclusive(
@@ -1057,7 +1028,6 @@ func (instance *typedNilScopeExclusiveRuntime) Kind() containercontract.Kind {
     return containercontract.KindRun
 }
 
-/* runtime.WithContext refuses a typed-nil scope, and the run re-wraps its runtime through it three times — once inside the deferred release, where the refusal was a second panic in the unwind of the first and the lock stayed held for its ttl; refused at the entry, nothing is held */
 func TestRunExclusive_RefusesATypedNilScopeBeforeAcquiring(t *testing.T) {
     locker := NewInMemoryLocker(InMemoryLockerConfig{})
 
@@ -1077,7 +1047,6 @@ func TestRunExclusive_RefusesATypedNilScopeBeforeAcquiring(t *testing.T) {
     }
 }
 
-/* refreshHoldingLock answers each Refresh slowly, as a store on the wire does, and records whether a Release arrived while one was still in flight */
 type refreshHoldingLock struct {
     inner lockcontract.Lock
 
@@ -1128,7 +1097,6 @@ func TestRunExclusive_ACallbackPanicJoinsTheRefreshBeforeReleasing(t *testing.T)
     func() {
         defer func() { recovered = recover() }()
 
-        /* the callback panics while a renewal is on the wire, so the order of the join and the release is observable every time rather than by timing; the ttl leaves the 50ms renewal a quarter of it, 250ms, between the renewal at half the ttl and the demotion instant, where a few milliseconds let a late-scheduled renewal goroutine be demoted before it ever went out */
         _, _ = RunExclusive(runtimeInstance, locker, "callback-panics", ExclusiveOptions{Ttl: bound.Of(time.Second)}, func(containercontract.Runtime) error {
             deadline := time.Now().Add(5 * time.Second)
             for 0 == locker.last.refreshInFlight.Load() {
@@ -1161,7 +1129,6 @@ func TestRunExclusive_ACallbackPanicJoinsTheRefreshBeforeReleasing(t *testing.T)
     }
 }
 
-/* hangingUntilCancelledRefreshLocker answers the acquire and never answers a renewal until the renewal's context ends, the shape of a store that accepted the call and went silent */
 type hangingUntilCancelledRefreshLocker struct{}
 
 func (instance *hangingUntilCancelledRefreshLocker) CreateLock(name string, options lockcontract.CreateLockOptions) (lockcontract.Lock, error) {
@@ -1184,7 +1151,6 @@ func (instance *hangingUntilCancelledRefreshLock) Refresh(runtimeInstance contai
     return runtimeInstance.Context().Err()
 }
 
-/* measures how long after the acquire the callback is told to stop */
 func cancellationDelayUnder(t *testing.T, locker lockcontract.Locker, ttl time.Duration) time.Duration {
     t.Helper()
 
@@ -1218,7 +1184,7 @@ func cancellationDelayUnder(t *testing.T, locker lockcontract.Locker, ttl time.D
     return cancelledAfter
 }
 
-/* the renewal issued at half the ttl never answers; bounded to the demotion instant, it is cut there, and the callback is told to stop a quarter of the ttl before a contender can acquire rather than at the lapse */
+/* cut at the demotion instant, the stop lands a quarter of the ttl before the lapse */
 func TestRunExclusive_AHungRenewalCancelsTheCallbackBeforeTheLeaseLapses(t *testing.T) {
     ttl := 400 * time.Millisecond
 
@@ -1227,7 +1193,6 @@ func TestRunExclusive_AHungRenewalCancelsTheCallbackBeforeTheLeaseLapses(t *test
     }
 }
 
-/* every renewal fails at once; the one retry comes halfway to the demotion instant and fails too, and the timer demotes there instead of the next tick demoting at the lapse */
 func TestRunExclusive_AFailingRenewalCancelsTheCallbackBeforeTheLeaseLapses(t *testing.T) {
     ttl := 400 * time.Millisecond
 
@@ -1236,7 +1201,6 @@ func TestRunExclusive_AFailingRenewalCancelsTheCallbackBeforeTheLeaseLapses(t *t
     }
 }
 
-/* contextIgnoringRefreshLocker answers every renewal late and successfully, whatever the context it is handed says: the shape of a store client that does not honour cancellation */
 type contextIgnoringRefreshLocker struct {
     inner lockcontract.Locker
     delay time.Duration
@@ -1265,7 +1229,6 @@ func (instance *contextIgnoringRefreshLock) Refresh(runtimeInstance containercon
     return instance.inner.Refresh(testRuntimeWithContext(context.Background()), options)
 }
 
-/* the renewal issued at half the ttl ignores its context and answers success only after the demotion instant: the callback is still told to stop at the instant, and the late success does not save the lease */
 func TestRunExclusive_ARenewalIgnoringItsContextCancelsTheCallbackAtTheDemotionInstant(t *testing.T) {
     ttl := 400 * time.Millisecond
     locker := &contextIgnoringRefreshLocker{inner: NewInMemoryLocker(InMemoryLockerConfig{}), delay: 180 * time.Millisecond}
@@ -1275,7 +1238,6 @@ func TestRunExclusive_ARenewalIgnoringItsContextCancelsTheCallbackAtTheDemotionI
     }
 }
 
-/* the callback returns before the demotion instant while a renewal ignoring its context is still on the wire and answers after it: the run ended with its lease, so it is reported clean rather than as a lost lease. The renewal goes out at 1s and answers at 1.9s, past the 1.5s instant; the callback returns at 1.25s, a quarter of a second from each, where a 50ms margin before the instant lost the race to a loaded runner */
 func TestRunExclusive_ACallbackThatReturnedBeforeTheInstantIsACleanRunWhateverTheRenewalAnswersLate(t *testing.T) {
     ttl := 2 * time.Second
     locker := &contextIgnoringRefreshLocker{inner: NewInMemoryLocker(InMemoryLockerConfig{}), delay: 900 * time.Millisecond}
@@ -1327,7 +1289,6 @@ func TestRunExclusive_AnUnlimitedTtlHandsTheLockerASessionLock(t *testing.T) {
     }
 }
 
-/* releaseDeadlineLocker hands out locks that acquire at once and record how long the release they are handed has left. */
 type releaseDeadlineLocker struct {
     remaining  chan time.Duration
     releaseErr chan error
@@ -1495,7 +1456,6 @@ func errorChainText(err error) string {
     return text
 }
 
-/* the join cancels the renewal's own context, which the stop does not reach, so a refresh blocked when callback returns is interrupted at once instead of waiting out its budget with the lock held */
 func TestRunExclusive_TheJoinInterruptsARefreshBlockedAtReturn(t *testing.T) {
     entered := make(chan struct{})
     locker := &blockingRefreshLocker{entered: entered}

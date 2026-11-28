@@ -8,8 +8,6 @@ import (
     "testing"
 )
 
-/* the expected schema is read out of the set's own statements: every column in the order written, no constraint
-   taken for a column, and no table for the statement that only adds the username key */
 func TestExpectedSchemaOf_ReadsTheColumnsTheSetCreates(t *testing.T) {
     catalogue := expectedSchemaOf(schemaUpStatementList)
     if 10 != len(catalogue) {
@@ -40,8 +38,6 @@ func TestExpectedSchemaOf_ReadsTheColumnsTheSetCreates(t *testing.T) {
     }
 }
 
-/* volumeAnswering answers the information schema as a volume in another shape would: the columns the set creates,
-   less the ones dropped, plus the ones added, for the one table named */
 func volumeAnswering(tableName string, dropped []string, added []string) func(query string) ([]string, [][]driver.Value, error) {
     return func(query string) ([]string, [][]driver.Value, error) {
         if false == strings.Contains(query, "information_schema.columns") || false == strings.Contains(query, "'"+tableName+"'") {
@@ -70,7 +66,6 @@ func volumeAnswering(tableName string, dropped []string, added []string) func(qu
     }
 }
 
-/* a volume provisioned before a column was added passes the set untouched, since the set is recorded as applied by name and its tables are created IF NOT EXISTS, and every request reaching the column would answer 500 on "Unknown column"; the first resolution refuses the volume, naming the table, the column and the door that brings it here, and the refusal is not remembered: the resolution after the reset goes on */
 func TestEnsureMigratedRefusesAVolumeThatLacksAColumnAndIsNotRememberedForIt(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = volumeAnswering("melody_example_v4_currency", []string{"provider_rate_as_of"}, nil)
@@ -93,7 +88,6 @@ func TestEnsureMigratedRefusesAVolumeThatLacksAColumnAndIsNotRememberedForIt(t *
     }
 }
 
-/* a column no statement declares is another shape too, a volume left by a schema this code does not write */
 func TestEnsureMigratedRefusesAVolumeThatCarriesAColumnTheSetDoesNotDeclare(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = volumeAnswering("melody_example_v4_user", nil, []string{"legacy_email"})
@@ -114,7 +108,6 @@ func TestEnsureArchiveMigratedRefusesAnArchiveInAnotherShape(t *testing.T) {
     }
 }
 
-/* a comma or a parenthesis inside a quoted literal, a COMMENT or a DEFAULT, belongs to its item: split there, it would invent a column the volume can never hold and refuse every volume */
 func TestExpectedSchemaOf_KeepsAQuotedCommaInsideItsItem(t *testing.T) {
     table, isCreate := expectedTableOf("CREATE TABLE IF NOT EXISTS `probe` (`a` INT COMMENT 'one, (two', `b` VARCHAR(8) DEFAULT \"x,y\", PRIMARY KEY (`a`))")
 
@@ -123,7 +116,7 @@ func TestExpectedSchemaOf_KeepsAQuotedCommaInsideItsItem(t *testing.T) {
     }
 }
 
-/* inside a string literal a backslash escapes the character after it, so `it\'s` does not close the literal; read as a close, the comma after it would split the item and the check would name a column `x',` and lose `b`. A backslash inside a backquoted identifier is itself; read as an escape, the identifier's closing quote would be skipped and the column after it swallowed. */
+/* a backslash escapes the next character inside a string literal, so `it\'s` does not close it */
 func TestExpectedSchemaOf_ReadsABackslashEscapedQuoteInsideItsLiteral(t *testing.T) {
     table, isCreate := expectedTableOf("CREATE TABLE IF NOT EXISTS `probe` (`a` INT COMMENT 'it\\'s, x', `b` VARCHAR(8) DEFAULT \"a\\\",b\", `c\\` INT, `d` INT, PRIMARY KEY (`a`))")
 

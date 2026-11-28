@@ -12,7 +12,6 @@ import (
     "github.com/precision-soft/melody/v4/httpclient"
 )
 
-/* the export client is the one the exporter posts a reading through, and a redirect followed there turns the POST into a GET without its body, so the 200 of whatever page the sink points at would read as a delivery. The client the composition root registers hands the 3xx back instead, so the exporter can refuse it by name. */
 func TestRegisterReportExportHttpClientService_TheClientDoesNotFollowARedirect(t *testing.T) {
     sinkPosts := 0
     pageGets := 0
@@ -51,10 +50,6 @@ func TestRegisterReportExportHttpClientService_TheClientDoesNotFollowARedirect(t
     }
 }
 
-/* the rates client is based on the provider's url, bounded by the outbound budget — three seconds, which only
-   ever narrows what the client would allow — asks for json and follows no one else's redirects policy but the
-   client's own; the export client carries no base, since the endpoint an operator writes names its own host,
-   the same budget and accept, and follows no redirect */
 func TestOutboundHttpClientConfigs_CarryTheirBaseTheBudgetAndTheAcceptHeader(t *testing.T) {
     rates := ratesHttpClientConfig("https://rates.example/v1/", "")
     ratesTimeout, ratesTimeoutSet := rates.Timeout.Value()
@@ -82,10 +77,6 @@ func TestOutboundHttpClientConfigs_CarryTheirBaseTheBudgetAndTheAcceptHeader(t *
     }
 }
 
-/* the rates client is registered when the parameter names a provider and reaches it: the relative target the
-   refresh names resolves under the base, the accept header travels. Without a provider nothing is registered, and an http
-   process that never refreshes opens no pool. Neither client is on the by-type index: both are one concrete
-   type, and "the http client" of an application that holds two has no answer. */
 func TestRegisterRatesHttpClientService_ReachesTheProviderUnderItsBaseAndStaysOffTheTypeIndex(t *testing.T) {
     requestedPath := ""
     acceptHeader := ""

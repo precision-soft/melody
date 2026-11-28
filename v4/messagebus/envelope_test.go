@@ -18,7 +18,6 @@ func TestNewEnvelope_CarriesTheMessageAndItsStamps(t *testing.T) {
     }
 }
 
-/* every door on the bus takes either a bare message or an already-stamped envelope: wrapping one that is already an envelope would bury the stamps a middleware upstream just added, one layer deep where nothing reads them again */
 func TestEnsureEnvelope_LeavesAnEnvelopeAlone(t *testing.T) {
     original := NewEnvelope("payload", []messagebuscontract.Stamp{SentStamp{TransportName: "amqp"}})
 
@@ -36,7 +35,6 @@ func TestEnsureEnvelope_LeavesAnEnvelopeAlone(t *testing.T) {
     }
 }
 
-/* WithStamp answers a new envelope, since the pipeline hands the same envelope to siblings that must each see what they were given */
 func TestEnvelope_WithStampDoesNotMutateTheEnvelopeItWasCalledOn(t *testing.T) {
     original := NewEnvelope("payload", []messagebuscontract.Stamp{SentStamp{TransportName: "amqp"}})
 
@@ -55,7 +53,6 @@ func TestEnvelope_WithStampDoesNotMutateTheEnvelopeItWasCalledOn(t *testing.T) {
     }
 }
 
-/* the order is append-only: a reader answering the LAST stamp of a type depends on it, so a stamp added later must sit after the ones already there */
 func TestEnvelope_WithStampKeepsTheStampsInTheOrderTheyWereAdded(t *testing.T) {
     stamped := NewEnvelope("payload", []messagebuscontract.Stamp{RedeliveryStamp{Count: 1}}).WithStamps([]messagebuscontract.Stamp{RedeliveryStamp{Count: 2}})
 

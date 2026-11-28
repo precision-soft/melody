@@ -398,7 +398,6 @@ func TestRestrictiveService_MiddlewarePreflightAdvertisesTheNarrowMethodList(t *
     }
 }
 
-/* a streaming handler commits its headers straight to the writer and returns a response the write path discards, so the cross-origin headers applied to that response never reach the connection. The middleware places them on the writer before the handler runs, where the handler's own commit carries them. */
 func TestMiddleware_AppliesHeadersToTheWriterBeforeTheHandlerRuns(t *testing.T) {
     middleware := Middleware(NewService(Config{AllowOrigins: []string{AllowOriginAll}}))
     recorder := httptest.NewRecorder()
@@ -414,7 +413,6 @@ func TestMiddleware_AppliesHeadersToTheWriterBeforeTheHandlerRuns(t *testing.T) 
         originOnWriterWhenHandlerRan = writer.Header().Get("Access-Control-Allow-Origin")
         varyOnWriterWhenHandlerRan = writer.Header().Get("Vary")
 
-        /* a streamed response returns nothing, having committed through the writer */
         return nil, nil
     }
 
@@ -440,7 +438,6 @@ func TestMiddleware_RefusesANilService(t *testing.T) {
     assertPanicsWithContext(t, func() { Middleware(nil) }, "the cors service is nil", "door", "cors.Middleware")
 }
 
-/* a handler answering a typed nil reaches the kernel as nil, which answers it with its empty 204; the middleware never dereferences it */
 func TestMiddleware_HandsATypedNilResponseOnAsNil(t *testing.T) {
     handler := Middleware(NewService(Config{AllowOrigins: []string{AllowOriginAll}}))(func(
         runtimeInstance containercontract.Runtime,

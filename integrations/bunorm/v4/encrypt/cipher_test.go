@@ -175,7 +175,6 @@ func TestCipher_EncryptPassesThroughCiphertextSealedUnderRetiredKey(t *testing.T
         t.Fatalf("seal: %v", sealErr)
     }
 
-    /* the retired key v1 stays in the set (still decryptable) until re-encryption completes; only then is it removed */
     rotatedProvider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "v2", Keys: map[string][]byte{"v2": newKey(2), "v1": newKey(1)}})
     rotatedCipher := NewCipher(rotatedProvider)
 
@@ -193,7 +192,6 @@ func TestCipher_EncryptSealsMarkerShapedPlaintextWithUnknownKeyId(t *testing.T) 
     provider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}})
     cipher := NewCipher(provider)
 
-    /* a client-supplied marker-shaped string naming a key id that is not in the set must not be stored verbatim, or every later Scan/Decrypt of the row fails with key-not-found */
     forged := "<ENC>\x00gcm1\x00rogue:" + base64.RawStdEncoding.EncodeToString([]byte("forged payload bytes"))
 
     if _, decryptErr := cipher.Decrypt(forged); nil == decryptErr {
@@ -323,7 +321,6 @@ func TestReencryptSkipAvoidsNonceRewrite(t *testing.T) {
     }
 }
 
-/* truncateSealed cuts a sealed value the way a column too narrow for it does under a non-strict sql_mode: the marker and the key id survive, and the base64 payload keeps only its first characters, chosen so the remainder does not decode to a whole sealed body. */
 func truncateSealed(t *testing.T, sealed string, retainedPayloadCharacters int) string {
     t.Helper()
 
@@ -346,7 +343,6 @@ func truncateSealed(t *testing.T, sealed string, retainedPayloadCharacters int) 
     return sealed[:len(markerPrefix)+separator+1] + payload[:retainedPayloadCharacters]
 }
 
-/* a value that carries the framework's marker was written by this cipher, so a payload that does not decode is damage, a column truncated under sql_mode='', and must be reported rather than returned verbatim with a nil error for the application to store on. */
 func TestCipher_DecryptReportsATruncatedCiphertextInsteadOfPassingItThrough(t *testing.T) {
     provider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}})
     cipher := NewCipher(provider)
@@ -371,7 +367,6 @@ func TestCipher_DecryptReportsATruncatedCiphertextInsteadOfPassingItThrough(t *t
     }
 }
 
-/* the marker with no key id separator behind it cannot name a key, so it is damage too. */
 func TestCipher_DecryptReportsAMarkerWithNoKeyId(t *testing.T) {
     provider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}})
     cipher := NewCipher(provider)
@@ -383,7 +378,6 @@ func TestCipher_DecryptReportsAMarkerWithNoKeyId(t *testing.T) {
     }
 }
 
-/* the pass-through for values carrying NO marker is what makes an incremental migration work: the rows not yet sealed keep reading while the column is converted one write at a time. */
 func TestCipher_DecryptStillPassesGenuinePlaintextThrough(t *testing.T) {
     provider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}})
     cipher := NewCipher(provider)
@@ -400,7 +394,6 @@ func TestCipher_DecryptStillPassesGenuinePlaintextThrough(t *testing.T) {
     }
 }
 
-/* a value of the marker family under a format this build does not read is a seal of another build, never text: served as plaintext it would be re-sealed as data on the next write and its content lost */
 func TestCipher_DecryptRefusesAnUnknownSealFormat(t *testing.T) {
     cipherInstance := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}}))
 
@@ -424,7 +417,6 @@ func TestCipher_DecryptRefusesAnUnknownSealFormat(t *testing.T) {
     }
 }
 
-/* the format is named only when it is a token a build could have written, so a value of the family whose token is absent, empty, unterminated, too long or of another case is refused without one */
 func TestCipher_DecryptRefusesAMarkerFamilyValueOfNoFormat(t *testing.T) {
     cipherInstance := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}}))
 
@@ -440,7 +432,6 @@ func TestCipher_DecryptRefusesAMarkerFamilyValueOfNoFormat(t *testing.T) {
     }
 }
 
-/* the write side stays lenient: an unknown-format value an application writes is data, sealed and read back byte for byte */
 func TestCipher_EncryptSealsAnUnknownFormatValueAsData(t *testing.T) {
     cipherInstance := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}}))
     installCipher(t, defaultCipherName, cipherInstance)
@@ -467,7 +458,6 @@ func TestCipher_EncryptSealsAnUnknownFormatValueAsData(t *testing.T) {
     }
 }
 
-/* keyIdOf classifies rows for the bulk migrator: an unknown format is an error, so encrypt does not seal it as data and reencrypt does not seal it under the target key */
 func TestKeyIdOf_ReportsAnUnknownSealFormatAsAnError(t *testing.T) {
     keyId, encrypted, keyIdErr := keyIdOf("<ENC>\x00gcm9\x00v1:zzz")
     if nil == keyIdErr || false == exception.ChainIs(keyIdErr, ErrSealFormatUnknown) || true == encrypted || "" != keyId {
@@ -475,7 +465,6 @@ func TestKeyIdOf_ReportsAnUnknownSealFormatAsAnError(t *testing.T) {
     }
 }
 
-/* a value of the marker family through a wrapped cipher is refused as a marker-shaped one is, whatever format it names */
 func TestEncryptedString_AMarkerFamilyValueThroughAWrappedCipherIsRefused(t *testing.T) {
     packageCipher := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(7)}}))
     installCipher(t, defaultCipherName, wrappedCipher{Cipher: packageCipher})
@@ -485,7 +474,6 @@ func TestEncryptedString_AMarkerFamilyValueThroughAWrappedCipherIsRefused(t *tes
     }
 }
 
-/* keyIdOf classifies rows for the bulk migrator, so it must not report a truncated ciphertext as plaintext: doing so seals the wreckage a second time and reports the row as migrated. */
 func TestKeyIdOf_ReportsATruncatedCiphertextAsAnError(t *testing.T) {
     provider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}})
     cipher := NewCipher(provider)
@@ -503,7 +491,6 @@ func TestKeyIdOf_ReportsATruncatedCiphertextAsAnError(t *testing.T) {
     }
 }
 
-/* an application still holding a marker-shaped string must not have it stored verbatim: the write side seals it, so it can never poison a later read. */
 func TestCipher_EncryptSealsAMarkerShapedPlaintextThatDoesNotDecode(t *testing.T) {
     provider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}})
     cipher := NewCipher(provider)
@@ -546,7 +533,6 @@ func (instance *invalidIdKeyProvider) Key(keyId string) ([]byte, error) {
     return newKey(1), nil
 }
 
-/* the key id is part of the wire format: StaticKeyProvider enforces its grammar at construction, but KeyProvider is public and a custom provider's id reaches seal unchecked — an empty id or one carrying a colon produced a stored value decodeEncrypted could never split back apart */
 func TestCipher_SealRefusesAKeyIdTheWireFormatCannotCarry(t *testing.T) {
     for _, keyId := range []string{"", "v1:extra", "id with spaces"} {
         cipher := NewCipher(&invalidIdKeyProvider{keyId: keyId})
@@ -562,7 +548,6 @@ func TestCipher_SealRefusesAKeyIdTheWireFormatCannotCarry(t *testing.T) {
     }
 }
 
-/* the lenient decoder mapped several base64 spellings onto the same bytes, so an altered last character still authenticated while CiphertextCandidates only emits the canonical spelling — a deterministic equality lookup missed a row it held. The tamper must change ONLY the discarded bits: a 28-byte payload ends in a two-character quantum whose canonical final character is one of A/Q/g/w, and its alphabet NEIGHBOUR (B/R/h/x) shares the two encoded bits while setting a discarded one — so the lenient decoder reads the same byte and still authenticates, and only strictness can refuse. An arbitrary substitute character changes the encoded bits too, fails authentication under both decoders, and turns this mutant into a coin flip on the nonce. */
 func TestCipher_DecryptRefusesANonCanonicalBase64Spelling(t *testing.T) {
     provider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}})
     cipher := NewCipher(provider)
@@ -585,7 +570,6 @@ func TestCipher_DecryptRefusesANonCanonicalBase64Spelling(t *testing.T) {
     }
 }
 
-/* a payload shorter than nonce plus tag cannot be a seal of even the empty string, so it is reported as structural damage, not as an authentication failure blamed on a key */
 func TestCipher_DecryptReportsAStructurallyShortPayloadAsDamage(t *testing.T) {
     provider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}})
     cipher := NewCipher(provider)
@@ -705,7 +689,6 @@ func TestCipher_EncryptPassesThroughADeterministicSeal(t *testing.T) {
         t.Fatalf("seal: %v", sealErr)
     }
 
-    /* the random door asks only whether the value authenticates: a deterministic seal is confidential whichever nonce it carries, so it is not re-sealed */
     stored, encryptErr := cipher.Encrypt(deterministic, EncryptOptions{})
     if nil != encryptErr {
         t.Fatalf("encrypt: %v", encryptErr)
@@ -716,9 +699,6 @@ func TestCipher_EncryptPassesThroughADeterministicSeal(t *testing.T) {
     }
 }
 
-/* rotatingKeyProvider answers different bytes under the SAME key id on demand — the shape a custom
-   KeyProvider of an application has, and the one StaticKeyProvider cannot take. It is the only value in
-   the corpus that can separate a key memo keyed on the id alone from one that re-reads the bytes. */
 type rotatingKeyProvider struct {
     mutex sync.Mutex
     key   []byte
@@ -809,9 +789,6 @@ func TestCipher_OpensUnderTheRotatedKeyWhenTheProviderChangesTheBytesUnderOneId(
     }
 }
 
-/* the key material is memoised on the cipher, which every column type of a process shares, so the memo
-   is read and written from the goroutines of concurrent requests. A guard against a race is proved under
-   -race, repeatedly, not by a mutant — and a sequential suite would leave it green by construction. */
 func TestCipher_ConcurrentSealsAndOpensShareTheKeyMaterial(t *testing.T) {
     cipherInstance := NewCipher(NewStaticKeyProvider(KeyRing{
         CurrentKeyId: "v2",
@@ -979,7 +956,6 @@ func BenchmarkDeterministicNonceFrom(b *testing.B) {
     }
 }
 
-/* a column type over a wrapped cipher cannot seal a marker-shaped value as data, since the wrapper's Encrypt is the package's own and passes a seal through; the column refuses it, so another row's seal is never stored bare and read back as that row's plaintext */
 func TestEncryptedString_ASealWrittenAsDataThroughAWrappedCipherIsRefused(t *testing.T) {
     packageCipher := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(7)}}))
     installCipher(t, defaultCipherName, wrappedCipher{Cipher: packageCipher})
@@ -999,7 +975,6 @@ func TestEncryptedString_ASealWrittenAsDataThroughAWrappedCipherIsRefused(t *tes
     }
 }
 
-/* the deterministic column refuses it as well, where the wrapper's EncryptDeterministic would re-seal the victim's plaintext */
 func TestEncryptedDeterministicString_ASealWrittenAsDataThroughAWrappedCipherIsRefused(t *testing.T) {
     packageCipher := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(7)}}))
     installCipher(t, defaultCipherName, wrappedCipher{Cipher: packageCipher})
@@ -1014,7 +989,6 @@ func TestEncryptedDeterministicString_ASealWrittenAsDataThroughAWrappedCipherIsR
     }
 }
 
-/* a column bound to a named compartment over a wrapped cipher refuses it the same way */
 func TestEncryptedStringFor_ASealWrittenAsDataThroughAWrappedNamedCipherIsRefused(t *testing.T) {
     packageCipher := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "crm-v1", Keys: map[string][]byte{"crm-v1": newKey(11)}}))
     installCipher(t, crmCipherReference{}.CipherName(), wrappedCipher{Cipher: packageCipher})
@@ -1033,7 +1007,6 @@ func TestEncryptedStringFor_ASealWrittenAsDataThroughAWrappedNamedCipherIsRefuse
     }
 }
 
-/* an ordinary value keeps the wrapper's own doors: it is sealed through them and reads back */
 func TestEncryptedString_APlaintextThroughAWrappedCipherIsSealed(t *testing.T) {
     installCipher(t, defaultCipherName, wrappedCipher{Cipher: NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(7)}}))})
 
@@ -1052,7 +1025,6 @@ func TestEncryptedString_APlaintextThroughAWrappedCipherIsSealed(t *testing.T) {
     }
 }
 
-/* countingKeyProvider answers one key and counts every lookup */
 type countingKeyProvider struct {
     KeyProvider
     calls int
@@ -1064,7 +1036,6 @@ func (instance *countingKeyProvider) Key(keyId string) ([]byte, error) {
     return instance.KeyProvider.Key(keyId)
 }
 
-/* the read side holds a stored key id to the grammar the write side seals under: an id no seal can carry is malformed, never handed to the KeyProvider and never carried whole into the error */
 func TestCipher_DecryptRefusesAKeyIdOutsideTheGrammarWithoutAskingTheProvider(t *testing.T) {
     provider := &countingKeyProvider{KeyProvider: NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}})}
     cipherInstance := NewCipher(provider)
@@ -1097,7 +1068,6 @@ func newBindingCipher(t *testing.T) *aes256Cipher {
     return NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}})).(*aes256Cipher)
 }
 
-/* the associated data is one spelling: the domain, the format, the key id and the label, NUL-separated, in that order */
 func TestSealAssociatedData_Layout(t *testing.T) {
     expected := "melody/encrypt/seal-binding\x00gcm2\x00v1\x00users.email"
     if associatedData := string(sealAssociatedData(formatGcmV2, "v1", "users.email")); expected != associatedData {
@@ -1131,7 +1101,6 @@ func TestCipher_UnboundSealKnownAnswer(t *testing.T) {
     }
 }
 
-/* the associated data adds no byte and the format token is as long, so the width rules of the column hold for both formats */
 func TestCipher_BoundSealIsAsLongAsTheUnboundOne(t *testing.T) {
     cipherInstance := newBindingCipher(t)
 
@@ -1148,7 +1117,6 @@ func TestCipher_BoundSealIsAsLongAsTheUnboundOne(t *testing.T) {
     }
 }
 
-/* a bound seal opens under its own label; another label fails authentication, and the unbound reader refuses it as bound */
 func TestCipher_BoundSealOpensUnderItsBindingAlone(t *testing.T) {
     cipherInstance := newBindingCipher(t)
 
@@ -1171,7 +1139,6 @@ func TestCipher_BoundSealOpensUnderItsBindingAlone(t *testing.T) {
     }
 }
 
-/* the key id in the header is authenticated by a bound seal: rewritten to another id holding the same bytes, it fails to open, where an unbound seal opens */
 func TestCipher_BoundSealAuthenticatesItsKeyId(t *testing.T) {
     cipherInstance := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1), "v1copy": newKey(1)}})).(*aes256Cipher)
 
@@ -1187,7 +1154,6 @@ func TestCipher_BoundSealAuthenticatesItsKeyId(t *testing.T) {
     }
 }
 
-/* the bound nonce takes the label: one key, one plaintext, two labels give two nonces and two bodies, not the same body under two tags */
 func TestCipher_BoundDeterministicSealDiffersPerBinding(t *testing.T) {
     cipherInstance := newBindingCipher(t)
 
@@ -1204,7 +1170,6 @@ func TestCipher_BoundDeterministicSealDiffersPerBinding(t *testing.T) {
     }
 }
 
-/* the bound nonce is domain-separated from the unbound one, is stable for equal input, and its mode reads back */
 func TestCipher_BoundDeterministicSealDiffersFromTheUnboundOneAndIsStable(t *testing.T) {
     cipherInstance := newBindingCipher(t)
     binding := sealBinding{label: "users.email"}
@@ -1230,7 +1195,6 @@ func TestCipher_BoundDeterministicSealDiffersFromTheUnboundOneAndIsStable(t *tes
     }
 }
 
-/* the unbound reader keeps its rows: a gcm1 seal and a value without the marker are read as before */
 func TestCipher_DecryptStillOpensAnUnboundSealBesideABoundOne(t *testing.T) {
     cipherInstance := newBindingCipher(t)
 
@@ -1251,7 +1215,6 @@ func decodedPayload(t *testing.T, sealed string) []byte {
     return payload
 }
 
-/* the unbound write doors treat a gcm2 value as data: it does not open without its label, so it is sealed again, never handed back bare */
 func TestCipher_TheUnboundDoorsSealABoundSealAsData(t *testing.T) {
     cipherInstance := newBindingCipher(t)
 
@@ -1272,7 +1235,6 @@ func TestCipher_TheUnboundDoorsSealABoundSealAsData(t *testing.T) {
     }
 }
 
-/* a bound reader reads the mode of an admitted gcm1 seal as the unbound reader does, and a failed bound open names the key id beside the binding */
 func TestCipher_OpenStoredReadsTheModeOfAGcm1SealAndNamesTheKeyOfAFailure(t *testing.T) {
     cipherInstance := newBindingCipher(t)
     binding := sealBinding{label: "users.email"}
@@ -1293,7 +1255,6 @@ func TestCipher_OpenStoredReadsTheModeOfAGcm1SealAndNamesTheKeyOfAFailure(t *tes
     }
 }
 
-/* bound seals and opens share the memoized key material across goroutines */
 func TestCipher_ConcurrentBoundSealsAndOpensShareTheKeyMaterial(t *testing.T) {
     cipherInstance := newBindingCipher(t)
     binding := sealBinding{label: "users.email"}
@@ -1322,7 +1283,6 @@ func TestCipher_ConcurrentBoundSealsAndOpensShareTheKeyMaterial(t *testing.T) {
     waitGroup.Wait()
 }
 
-/* movingCurrentKeyProvider holds two keys and moves its current id between them, the rotation a KeyProvider performs without a restart */
 type movingCurrentKeyProvider struct {
     *StaticKeyProvider
     currentKeyId string
@@ -1367,7 +1327,6 @@ func TestCipher_EncryptUnderANamedKeySealsUnderIt(t *testing.T) {
     }
 }
 
-/* an empty KeyId is the option left out: the seal takes the provider's current key at the call */
 func TestCipher_EncryptWithoutAKeyIdSealsUnderTheCurrentKey(t *testing.T) {
     provider := newMovingCurrentKeyProvider("v1")
     cipherInstance := NewCipher(provider)
@@ -1428,7 +1387,6 @@ func (instance fourMethodCipher) Decrypt(encoded string) (string, error) {
     return encoded, nil
 }
 
-/* a cipher written outside the module implements four methods: the key id is an option of the two seals, not a twin of each */
 func TestCipher_TheInterfaceHasNoKeyIdTwins(t *testing.T) {
     var cipherInstance Cipher = fourMethodCipher{}
 

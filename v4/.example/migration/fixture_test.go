@@ -1,7 +1,5 @@
 package migration
 
-/* Shared test material for the migration package: a fake database/sql driver wrapped in a real *bun.DB, with a recorder observing every statement. The connection honours context cancellation before recording, so a statement in the recorded list is one that really reached the database — the WithoutCancel guard on the unlock is only observable against a driver that refuses a cancelled context. */
-
 import (
     "context"
     "database/sql"
@@ -72,12 +70,10 @@ func (instance *queryRecorder) countMatching(matcher func(query string) bool) in
     return count
 }
 
-/* lockRowExists is the refusal the catalogue database answers a lock INSERT with while another process holds the lock: the primary key's duplicate entry, the one refusal the lock wait reads as held */
 func lockRowExists() error {
     return &mysqldriver.MySQLError{Number: 1062, Message: "Duplicate entry '1' for key 'PRIMARY'"}
 }
 
-/* postgresRefusal is a PostgreSQL protocol error in pgdriver's shape, answering its SQLSTATE through Field('C') */
 type postgresRefusal struct {
     sqlState string
 }
@@ -94,7 +90,6 @@ func (instance postgresRefusal) Field(field byte) string {
     return ""
 }
 
-/* shortenMigrationLockRetryInterval lets a test retry the lock INSERT without sleeping the production interval between attempts */
 func shortenMigrationLockRetryInterval(t *testing.T) {
     t.Helper()
 
@@ -105,7 +100,6 @@ func shortenMigrationLockRetryInterval(t *testing.T) {
     })
 }
 
-/* refuseLockInsertTimes answers the first times lock INSERTs with refusal and lets every later one through, and answers how many were attempted */
 func refuseLockInsertTimes(recorder *queryRecorder, refusal error, times int) func() int {
     var mutex sync.Mutex
     attempts := 0
@@ -161,7 +155,6 @@ func isCatalogueCountSelect(query string) bool {
     return strings.Contains(query, "information_schema")
 }
 
-/* appliedStatusRows answers the status select as if every registered migration had already been applied, which is how a process that lost the lock race observes a finished competitor. */
 func appliedStatusRows() ([]string, [][]driver.Value) {
     columns := []string{"id", "name", "group_id"}
 
@@ -173,7 +166,6 @@ func appliedStatusRows() ([]string, [][]driver.Value) {
     return columns, rows
 }
 
-/* pendingStatusRows answers the status select as if nothing were applied yet, which is what a process waiting on a held lock reads while the holder is still migrating. */
 func pendingStatusRows() ([]string, [][]driver.Value) {
     return []string{"id", "name", "group_id"}, make([][]driver.Value, 0)
 }
@@ -228,9 +220,6 @@ func (instance *fakeConnection) QueryContext(ctx context.Context, query string, 
         }
     }
 
-    /* the double holds the PRESENT schema: asked which columns a table carries, it answers the ones the set's
-       own statements create, which is what a volume the set has just brought here holds. A test of a volume in
-       another shape answers through the query hook */
     if columnNameList, isColumnSelect := presentColumnNameListAsked(query); true == isColumnSelect {
         rows := make([][]driver.Value, 0, len(columnNameList))
         for _, columnName := range columnNameList {
@@ -240,23 +229,15 @@ func (instance *fakeConnection) QueryContext(ctx context.Context, query string, 
         return &fakeRows{columns: []string{"column_name"}, rows: rows}, nil
     }
 
-    /* asked which of its tables a set finds before it runs, the double answers none: a set runs only on a volume
-       that does not record it, and the fresh volume is the one it builds. A volume that holds them answers
-       through the query hook */
     if true == strings.Contains(query, "information_schema.tables") {
         return &fakeRows{columns: []string{"table_name"}, rows: nil}, nil
     }
 
-    /* asked for the row a set recorded, the double answers the one this code seals: the present schema, built */
     if fingerprint, isFingerprintSelect := presentFingerprintAsked(query); true == isFingerprintSelect {
         return &fakeRows{columns: []string{"fingerprint", "state"}, rows: [][]driver.Value{{fingerprint, schemaSetBuilt}}}, nil
     }
 
-    /* a COUNT select always answers a row on a real server, so a double that answers none turns a step
-       that asks the catalogue a question into "sql: no rows in result set". The steps that ask one are
-       the tolerant ones — they check whether the object they are about to add is already there — and a
-       fixture that could not answer them would make every whole-set run fail on the double. Zero is the
-       answer that means "not there yet", which is what a fresh volume holds. */
+    /* a COUNT select always answers a row on a real server, so the double answers one */
     if true == isCatalogueCountSelect(query) {
         return &fakeRows{columns: []string{"count"}, rows: [][]driver.Value{{int64(0)}}}, nil
     }
@@ -264,8 +245,6 @@ func (instance *fakeConnection) QueryContext(ctx context.Context, query string, 
     return &fakeRows{columns: []string{}, rows: nil}, nil
 }
 
-/* presentColumnNameListAsked answers, for a read of the information schema, the columns the sets create for the
-   table the read names. */
 func presentColumnNameListAsked(query string) ([]string, bool) {
     if false == strings.Contains(query, "information_schema.columns") {
         return nil, false
@@ -280,7 +259,6 @@ func presentColumnNameListAsked(query string) ([]string, bool) {
     return nil, true
 }
 
-/* presentFingerprintAsked answers, for a read of the fingerprint a set recorded, the fingerprint this code records for the set the read names. */
 func presentFingerprintAsked(query string) (string, bool) {
     if true == strings.HasPrefix(query, "SELECT fingerprint, state FROM "+ArchiveSchemaFingerprintTableName+" ") {
         return archiveSchemaFingerprint, true
@@ -402,7 +380,6 @@ var (
     _ schema.Dialect        = (*fakeDialect)(nil)
 )
 
-/* assertQueryOrder pins the sequence a migration emits, not just its membership: the recorded list holds exactly as many statements as the expectation, each containing the fragment at the same position. A schema folded into one migration has no step boundaries to carry the order, so the order is what the test states; a count alone cannot see a set emitted backwards. */
 func assertQueryOrder(t *testing.T, recorded []string, expectedFragmentList []string) {
     t.Helper()
 
@@ -422,7 +399,6 @@ func assertQueryOrder(t *testing.T, recorded []string, expectedFragmentList []st
     }
 }
 
-/* indexOfQueryContaining answers the position of the recorded statement carrying the fragment, or -1. The order of the recorded statements is the property the reset tests assert, so they need positions rather than presence. */
 func indexOfQueryContaining(recorded []string, fragment string) int {
     for index, query := range recorded {
         if true == strings.Contains(query, fragment) {

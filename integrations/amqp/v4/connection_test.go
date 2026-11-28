@@ -252,7 +252,7 @@ func TestProviderNewTransport_ACapLoweredUnderTheProvidersInitialIsRefusedNaming
     })
 }
 
-/* net/url parses "guest:guest@host" as scheme "guest" with no userinfo, so the redaction must fail closed rather than echo the input into the connection-failure log */
+/* net/url parses "guest:guest@host" as scheme "guest" with no userinfo */
 func TestRedactDsn_FailsClosedOnDsnWithoutParsableUserinfo(t *testing.T) {
     for _, dsn := range []string{
         "guest:secret@rabbitmq:5672",
@@ -271,11 +271,9 @@ func TestRedactDsn_FailsClosedOnDsnWithoutParsableUserinfo(t *testing.T) {
     }
 }
 
-/* amqp091.DialConfig surfaces a malformed dsn as a *url.Error whose Error() quotes the entire raw dsn, password included. Provider.Open must scrub that before wrapping it as the exception cause, or exception.LogContext prints the secret on every connection and reconnect failure. */
 func TestProviderOpen_DoesNotLeakPasswordThroughDialErrorCause(t *testing.T) {
     const dsn = "amqp://user:sup3r%secret@rabbit:5672/"
 
-    /* Precondition: prove the leak vector is real — the raw dial error quotes the password verbatim. */
     if _, rawErr := amqp091.DialConfig(dsn, amqp091.Config{}); nil == rawErr || false == strings.Contains(rawErr.Error(), "secret") {
         t.Fatalf("precondition: expected the raw dial error to quote the password, got %v", rawErr)
     }
@@ -302,7 +300,6 @@ func TestProviderOpen_DoesNotLeakPasswordThroughDialErrorCause(t *testing.T) {
     }
 }
 
-/* net/url embeds dsn fragments inside the *url.Error cause, not just its URL field: a url.EscapeError carries the offending percent-escape triple — the two password characters that follow a literal '%' — and url.Error.Error() renders that value verbatim. Copying urlErr.Err through untouched leaks the password even after the URL field is redacted, so redactDialError must scrub the inner cause too. */
 func TestRedactDialError_ScrubsEscapeErrorPasswordFragment(t *testing.T) {
     dialErr := &neturl.Error{
         Op:  "parse",
@@ -310,7 +307,6 @@ func TestRedactDialError_ScrubsEscapeErrorPasswordFragment(t *testing.T) {
         Err: neturl.EscapeError("%ss"),
     }
 
-    /* Precondition: prove the leak vector is real — the raw url.Error quotes the escape fragment verbatim. */
     if false == strings.Contains(dialErr.Error(), "%ss") {
         t.Fatalf("precondition: expected the raw error to quote the escape fragment, got %q", dialErr.Error())
     }
@@ -328,7 +324,6 @@ func TestRedactDialError_ScrubsEscapeErrorPasswordFragment(t *testing.T) {
     }
 }
 
-/* A well-formed dsn keeps its shape so the log stays useful; only the password goes. */
 func TestRedactDsn_KeepsWellFormedDsnWithoutThePassword(t *testing.T) {
     redacted := redactDsn("amqp://guest:secret@rabbitmq:5672/vhost")
 
@@ -408,7 +403,6 @@ func TestProvider_OpenRecordsNeitherTheDsnNorItsHeadOnAMisparsedPassword(t *test
     }
 }
 
-/* the close is asserted on the deadline it arms on the socket, not on its return: the return is bounded by closeJoinTimeout, thirty seconds, while a plain close arms nothing and never returns over a wedged socket */
 func TestConnection_CloseArmsADeadlineOnAWedgedConnection(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
     connection, gated := dialGated(t, dsn)
@@ -472,7 +466,7 @@ func TestProvider_OpenInstallsTheGivenHeartbeat(t *testing.T) {
     }
 }
 
-/* the fake broker reads nothing after its handshake, so a close is never answered and returns at the bound: the provider's close timeout the owner carries, not the 30s default; the second close answers the first's error at once */
+/* the fake broker reads nothing after its handshake, so a close is never answered and returns at the bound */
 func TestConnection_CloseWithContextIsIdempotentAndCarriesTheProvidersTimeout(t *testing.T) {
     address := listenFakeBroker(t)
 
@@ -498,7 +492,6 @@ func TestConnection_CloseWithContextIsIdempotentAndCarriesTheProvidersTimeout(t 
     }
 }
 
-/* the broker side drops, so the client runs its own shutdown and marks the connection closed: the owner's close then reads the client's ErrClosed as closed, as the transport's close does */
 func TestConnection_ClosingAConnectionTheBrokerAlreadyClosedAnswersNil(t *testing.T) {
     fake := dialFakeBroker(t)
 

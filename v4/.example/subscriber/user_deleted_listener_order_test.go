@@ -25,7 +25,6 @@ import (
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
-/* deletionRuntime is a runtime over a container holding the cache the user listener drops entries from and a silent journal */
 func deletionRuntime(t *testing.T, cacheInstance melodycachecontract.Cache) melodycontainercontract.Runtime {
     t.Helper()
 
@@ -41,7 +40,6 @@ func deletionRuntime(t *testing.T, cacheInstance melodycachecontract.Cache) melo
     return melodyruntime.NewRun(context.Background(), containerInstance.NewScope())
 }
 
-/* the three listeners of the deletion, registered in the composition root's order: the cache's first, the token release, then the two-factor release over the given store source, the event declared as the composition root declares it */
 func deletionDispatcher(tokenStore melodysecuritycontract.EpochRevocableTokenStore, twoFactorStore twofactor.StoreSource) *melodyevent.EventDispatcher {
     dispatcher := undeclaredDeletionDispatcher(tokenStore, twoFactorStore)
     dispatcher.DeclareEvent(event.EventUserDeleted, event.UserDeletedEventConfig())
@@ -49,7 +47,6 @@ func deletionDispatcher(tokenStore melodysecuritycontract.EpochRevocableTokenSto
     return dispatcher
 }
 
-/* undeclaredDeletionDispatcher is the deletion's three listeners with no declaration, the control of the tag pins */
 func undeclaredDeletionDispatcher(tokenStore melodysecuritycontract.EpochRevocableTokenStore, twoFactorStore twofactor.StoreSource) *melodyevent.EventDispatcher {
     dispatcher := melodyevent.NewEventDispatcher(melodyevent.EventDispatcherConfig{Clock: melodyclock.NewSystemClock()})
     dispatcher.AddSubscriber(NewUserEventSubscriber())
@@ -61,7 +58,6 @@ func undeclaredDeletionDispatcher(tokenStore melodysecuritycontract.EpochRevocab
     return dispatcher
 }
 
-/* the token release outranks every other listener of the deletion, read off the real subscribers: the order the listeners run in when nothing fails, the tokens first */
 func TestUserDeleted_TheTokenReleaseOutranksTheOtherListeners(t *testing.T) {
     releasePriority := NewAccessTokenReleaseSubscriber(nil).SubscribedEvents()[event.EventUserDeleted][0].Config().Priority
     twoFactorPriority := NewTwoFactorEnrollmentSubscriber(nil).SubscribedEvents()[event.EventUserDeleted][0].Config().Priority
@@ -72,7 +68,6 @@ func TestUserDeleted_TheTokenReleaseOutranksTheOtherListeners(t *testing.T) {
     }
 }
 
-/* the two-factor release panicking on its store, as a redis-backed store answers an outage, fails the dispatch, and the cache behind it, tagged, runs and refuses its deletes: the deleted account's device token is still gone and its account revoked. The tag, not the order, is what protects the release: see the untagged failing listener ahead of it below. The control, the two releases over healthy stores, answers nil with the token and the enrollment released. */
 func TestUserDeleted_AFailingListenerDoesNotLeaveTheDeletedAccountsTokens(t *testing.T) {
     clockInstance := melodyclock.NewSystemClock()
     backend := melodycache.NewInMemoryBackend(melodycache.InMemoryBackendConfig{MaxItems: melodybound.Of(128), CleanupInterval: melodybound.Of(time.Minute), Clock: clockInstance})
@@ -119,7 +114,6 @@ func TestUserDeleted_AFailingListenerDoesNotLeaveTheDeletedAccountsTokens(t *tes
     }
 }
 
-/* recordingDeleteCache records the keys the cache listener drops */
 type recordingDeleteCache struct {
     melodycachecontract.Cache
     deletedKeys []string
@@ -149,7 +143,6 @@ func twoFactorReleaseCount(recorder *recordingDriver) int {
     return released
 }
 
-/* an outage of the token store fails the release at the head of the deletion; the event declares the release and cache tags, so the two-factor release and the cache drop behind it still run, and the answer carries the outage */
 func TestUserDeleted_ATokenStoreOutageStillReleasesTheSecondFactorAndDropsTheCache(t *testing.T) {
     outage := errors.New("the token store is unreachable")
     tokenStore := &revocationFailingTokenStore{InMemoryTokenStore: melodysecurity.NewInMemoryTokenStore(melodysecurity.InMemoryTokenStoreConfig{}), deleteErr: outage}
@@ -172,7 +165,6 @@ func TestUserDeleted_ATokenStoreOutageStillReleasesTheSecondFactorAndDropsTheCac
     }
 }
 
-/* the release is protected by its tag, not its rank: an untagged listener an application adds above it and that fails does not skip it */
 func TestUserDeleted_AFailingUntaggedListenerAheadOfTheReleaseDoesNotSkipIt(t *testing.T) {
     tokenStore := melodysecurity.NewInMemoryTokenStore(melodysecurity.InMemoryTokenStoreConfig{})
     tokenStore.Put(releaseTestRuntime(), "token-user-4", melodysecuritycontract.Claims{UserIdentifier: "user-4", DeviceIdentifier: "phone"}, melodybound.UnlimitedDuration())
@@ -200,7 +192,6 @@ func TestUserDeleted_AFailingUntaggedListenerAheadOfTheReleaseDoesNotSkipIt(t *t
     }
 }
 
-/* the control: without the declaration the dispatch ends at the failed token release, and neither the two-factor release nor the cache drop runs, so the declaration is what runs them */
 func TestUserDeleted_WithoutTheDeclarationTheReleasesBehindAFailureDoNotRun(t *testing.T) {
     tokenStore := &revocationFailingTokenStore{InMemoryTokenStore: melodysecurity.NewInMemoryTokenStore(melodysecurity.InMemoryTokenStoreConfig{}), deleteErr: errors.New("the token store is unreachable")}
     database, recorder := newRecordingDatabase()

@@ -21,7 +21,6 @@ import (
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
-/* the two decisions answer separately and each records that it was the one asked: a stub that returns one field for both cannot tell the listener's DecideAll apart from a DecideAny, and every rule in this file carrying a single attribute means the two agree on the input as well. The recorded attributes are the other half — the listener has to hand the rule's whole set to the decision, not the first of them. */
 type accessControlListenerTestAccessDecisionManager struct {
     decideAllErr     error
     decideAnyErr     error
@@ -282,7 +281,6 @@ func TestAccessControlListener_WhenNoSecurityContext_EmitsAuthorizationDeniedAnd
     }
 }
 
-/* the listener reads the spelling the router routes: "/public%2F" is the one-segment resource the protected catch-all serves, so the closed rule claims and refuses it */
 func TestAccessControlListener_ReadsThePathTheRouterRoutes(t *testing.T) {
     for path, denied := range map[string]bool{
         "/public":         false,
@@ -375,7 +373,6 @@ func TestAccessControlListener_ReadsAnEncodedSeparatorTheEscapedPathWouldRespell
     }
 }
 
-/* the security context is PUT on the runtime here, carrying a nil token. Without that the listener never reaches the token check at all — it answers from the missing-context branch above, which is a different refusal for a different reason, and the whole nil-token block could be deleted with this test still green. The reason is what tells the two apart, so it is what this asserts. */
 func TestAccessControlListener_WhenSecurityContextHasNilToken_EmitsAuthorizationDeniedAndSets401(t *testing.T) {
     kernel := newTestKernel()
     runtimeInstance := newTestRuntime()
@@ -753,7 +750,6 @@ func TestAccessControlListener_WhenTheEntryPointAnswersATypedNilResponse_FailsCl
     }
 }
 
-/* the handler is the application's, so a typed nil of a concrete response type is the shape a hand-written "no response" takes; through a bare nil check it reads as a live response, SetResponse normalizes it to nil, and the DENIED request is served as granted — the guard must read it through IsNilInterface and answer through the fail-closed denial path instead */
 func TestAccessControlListener_ADeniedHandlerAnsweringATypedNilIsRefusedNotServed(t *testing.T) {
     kernel := newTestKernel()
     runtimeInstance := newTestRuntime()
@@ -828,9 +824,6 @@ func TestAccessControlListener_AMissingDecisionManagerIsRefused(t *testing.T) {
     }
 }
 
-/* A nil pointer of a request type is a non-nil interface, so a bare comparison would carry it past
-the gate and into the path read below, which dereferences it — inside a kernel listener, where no
-recover covers it. The listener must leave such an event alone, not crash the request. */
 func TestAccessControlListener_ATypedNilRequestIsLeftAlone(t *testing.T) {
     kernel := newTestKernel()
     runtimeInstance := newTestRuntime()
@@ -859,7 +852,6 @@ func TestAccessControlListener_ATypedNilRequestIsLeftAlone(t *testing.T) {
     }
 }
 
-/* the listener asks for ALL of a rule's attributes, and a stub answering one field for both decisions, over rules carrying a single attribute, cannot tell that apart from ANY. Here the two decisions disagree — all refuses, any accepts — and the rule carries two attributes of which the token holds one, which is exactly the input on which the semantics differ. */
 func TestAccessControlListener_TheDecisionIsDecideAllOverTheWholeAttributeSet(t *testing.T) {
     kernel := newTestKernel()
     runtimeInstance := newTestRuntime()
@@ -1181,7 +1173,6 @@ func TestAccessControlListener_StandsAsideAfterAResolutionRefusal(t *testing.T) 
     }
 }
 
-/* a refusal is the request's decision and stops the dispatch, so neither security listener runs; access control, required, is reported skipped */
 func TestSecurityListeners_DoNotRunOnAnEarlierRefusal(t *testing.T) {
     kernel := newTestKernel()
     runtimeInstance := newTestRuntime()
@@ -1299,7 +1290,6 @@ type unavailableRouteFixture struct {
     observedErr     error
 }
 
-/* newUnavailableRouteFixture registers both security listeners over one firewall whose source answers token; /admin is protected, /public is PUBLIC_ACCESS and nothing else matches */
 func newUnavailableRouteFixture(token securitycontract.Token, retryAfter bound.Duration) *unavailableRouteFixture {
     return newUnavailableRouteFixtureOver(&resolutionListenerTestTokenSource{resolveToken: token}, retryAfter)
 }
@@ -1732,7 +1722,6 @@ func TestAccessControlListener_HandsItsRuntimeToTheDecisionManager(t *testing.T)
     }
 }
 
-/* the firewall's door answers and refusals and access control's own decision end the kernel.request dispatch; both may skip the required listeners behind them, and access control stays required */
 func TestSecurityListeners_MaySkipTheRequiredListeners(t *testing.T) {
     kernel := newTestKernel()
 

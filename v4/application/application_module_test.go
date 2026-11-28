@@ -35,7 +35,6 @@ func (instance fakeModule) Description() string {
     return instance.name
 }
 
-/* a module registered as a struct VALUE whose field is an interface, which may hold something unhashable */
 type payloadCarryingModule struct {
     fakeModule
     payload any
@@ -58,7 +57,6 @@ func (instance selfReferencingModuleProvider) Modules() []applicationcontract.Mo
     return []applicationcontract.Module{instance}
 }
 
-/* bareModuleProvider carries no module identity of its own, so it exercises the children-only path through RegisterModuleProvider */
 type bareModuleProvider struct {
     children []applicationcontract.Module
 }
@@ -67,7 +65,6 @@ func (instance bareModuleProvider) Modules() []applicationcontract.Module {
     return instance.children
 }
 
-/* mintingModuleProvider yields a freshly named child on every expansion, so the name can never break the cycle and only the depth guard is left to stop it */
 type mintingModuleProvider struct {
     fakeModule
 }
@@ -76,7 +73,6 @@ func (instance mintingModuleProvider) Modules() []applicationcontract.Module {
     return []applicationcontract.Module{mintingModuleProvider{fakeModule{name: instance.name + "+"}}}
 }
 
-/* uncomparableModule cannot be a map key, so it proves the identity never hashes the module itself */
 type uncomparableModule struct {
     fakeModule
     tags []string
@@ -96,7 +92,6 @@ func assertModuleNames(t *testing.T, modules []applicationcontract.Module, expec
     }
 }
 
-/* assertModuleCollisions reads the duplicates a registration recorded for the aggregated boot report, each with an origin in this file */
 func assertModuleCollisions(t *testing.T, instance *Application, expected []string) {
     t.Helper()
 
@@ -154,7 +149,6 @@ func TestRegisterModule_ExpandsNestedProviders(t *testing.T) {
     assertModuleNames(t, instance.modules, []string{"outer", "inner", "leaf"})
 }
 
-/* the provider hands over the same instance it is, so the name breaks the cycle before the depth guard is ever needed: the module boots once and the instance reached again is a duplicate in the report */
 func TestRegisterModule_ASelfReferencingProviderIsRecordedAsADuplicate(t *testing.T) {
     instance := &Application{}
 
@@ -164,7 +158,6 @@ func TestRegisterModule_ASelfReferencingProviderIsRecordedAsADuplicate(t *testin
     assertModuleCollisions(t, instance, []string{"cyclic"})
 }
 
-/* a cycle of ever-freshly named instances never repeats a name, and without the depth guard the expansion recurses until the stack dies */
 func TestRegisterModule_PanicsOnProviderCycleOfDistinctInstances(t *testing.T) {
     instance := &Application{}
 
@@ -198,7 +191,6 @@ func TestRegisterModuleProvider_AProviderThatIsAModuleBootsAsThatModule(t *testi
     assertModuleNames(t, instance.modules, []string{"provider", "child-a", "child-b"})
 }
 
-/* a module's identity is its name, so the same instance reached through two providers is a duplicate: the first boots, the second is recorded where it was registered */
 func TestRegisterModule_TheSameInstanceThroughTwoProvidersIsRecordedAsADuplicate(t *testing.T) {
     instance := &Application{}
 
@@ -221,7 +213,6 @@ func TestRegisterModule_TwoDistinctInstancesSharingANameAreRecordedAsADuplicate(
     assertModuleCollisions(t, instance, []string{"twin"})
 }
 
-/* an instance of an uncomparable type is judged by its name like any other, so registering it twice is a duplicate rather than a map insertion that panics */
 func TestRegisterModule_AnUncomparableModuleRegisteredTwiceIsRecordedAsADuplicate(t *testing.T) {
     instance := &Application{}
 
@@ -234,7 +225,6 @@ func TestRegisterModule_AnUncomparableModuleRegisteredTwiceIsRecordedAsADuplicat
     assertModuleCollisions(t, instance, []string{"uncomparable"})
 }
 
-/* a duplicate provider expands nothing: its children would otherwise boot under it, or land in the report as duplicates of the first provider's children and bury the one collision that names the cause */
 func TestRegisterModule_ADuplicateProviderDoesNotExpandItsChildren(t *testing.T) {
     instance := &Application{}
 
@@ -251,7 +241,6 @@ func TestRegisterModule_ADuplicateProviderDoesNotExpandItsChildren(t *testing.T)
     assertModuleCollisions(t, instance, []string{"provider"})
 }
 
-/* the duplicate runs none of its hooks, so the report names the module once instead of every service it would have registered a second time */
 func TestRegisterModule_ADuplicateRunsNoHook(t *testing.T) {
     instance := newCollisionTestApplication(t)
 
@@ -275,7 +264,6 @@ func TestRegisterModule_ADuplicateRunsNoHook(t *testing.T) {
     assertModuleCollisions(t, instance, []string{"twin"})
 }
 
-/* the name is the identity, so an empty one could not tell two modules apart; it is refused where it is registered */
 func TestRegisterModule_RefusesAnEmptyName(t *testing.T) {
     testhelper.AssertPanicsWithError(t, func() {
         (&Application{}).RegisterModule(fakeModule{name: ""})
@@ -286,7 +274,6 @@ func TestRegisterModule_RefusesAnEmptyName(t *testing.T) {
     }, "module name may not be empty")
 }
 
-/* the framework and the application own declared environment keys under these names, so a module named like either would be read as that owner */
 func TestRegisterModule_RefusesAReservedOwnerName(t *testing.T) {
     for _, reservedName := range []string{"the framework", "the application", "The Application"} {
         testhelper.AssertPanicsWithError(t, func() {
@@ -299,7 +286,6 @@ func TestRegisterModule_RefusesAReservedOwnerName(t *testing.T) {
     }
 }
 
-/* a padded name would be a second identity for the same module in every place that prints or keys on it, so it is refused where it is registered, like the empty one */
 func TestRegisterModule_RefusesANamePaddedWithWhitespace(t *testing.T) {
     for _, paddedName := range []string{" twin", "twin ", "twin\t", "   "} {
         testhelper.AssertPanicsWithError(t, func() {
@@ -312,7 +298,6 @@ func TestRegisterModule_RefusesANamePaddedWithWhitespace(t *testing.T) {
     }
 }
 
-/* two names differing only by case are one identity: the second is a collision naming both spellings, runs no hook and expands no child, and the first keeps its own spelling */
 func TestRegisterModule_TwoNamesDifferingOnlyByCaseAreOneCollisionNamingBoth(t *testing.T) {
     instance := newCollisionTestApplication(t)
 
@@ -356,7 +341,6 @@ func TestRegisterModule_TwoNamesDifferingOnlyByCaseAreOneCollisionNamingBoth(t *
     }
 }
 
-/* both module doors close for the boot window: the phase loops iterate a snapshot of the module list, so a module registered from inside a boot hook would boot by whatever fraction of the lifecycle had not run yet and report success */
 func TestModuleDoors_RefuseRegistrationDuringTheBootWindow(t *testing.T) {
     testhelper.AssertPanicsWithError(t, func() {
         (&Application{booting: true}).RegisterModule(fakeModule{name: "late"})
@@ -367,14 +351,12 @@ func TestModuleDoors_RefuseRegistrationDuringTheBootWindow(t *testing.T) {
     }, "may not register a module from inside a module boot hook")
 }
 
-/* Boot closes for its own window too: a module hook calling it re-entered the phase loops, without end when it called it unconditionally, and once otherwise, after which the outer boot died on a refusal that named the wrong cause */
 func TestBoot_RefusesACallFromInsideTheBootWindow(t *testing.T) {
     testhelper.AssertPanicsWithError(t, func() {
         (&Application{booting: true}).Boot()
     }, "may not call Boot from inside a module boot hook")
 }
 
-/* the module doors close at boot and refuse a nil, because a module registered after the boot phases have run is registered into nothing: its hooks are never called, and the application starts missing whatever the module was supposed to wire */
 func TestRegisterModule_RefusesAfterBootAndRefusesANilModule(t *testing.T) {
     bootedApplication := &Application{booted: true}
 
@@ -399,7 +381,6 @@ func TestRegisterModuleProvider_RefusesAfterBootAndRefusesANilProvider(t *testin
     }, "module provider may not be nil")
 }
 
-/* hookRecordingModule implements every module hook the boot phases call, so one registration proves which phase reached which hook */
 type hookRecordingModule struct {
     fakeModule
     configurationsRegistered  bool
@@ -453,7 +434,6 @@ func (instance *hookRecordingModule) RegisterSecurity(builder *securityconfig.Bu
     instance.securityRegistered = true
 }
 
-/* the configuration and parameter hooks run BEFORE the configuration resolves, which is the whole reason they are a separate phase: a parameter registered after the resolve would never have its template expanded, and a logging configuration registered after it would never reach the logger the container builds. */
 func TestBootModulesPreConfigurationResolve_RunsTheConfigurationAndParameterHooks(t *testing.T) {
     applicationInstance := newCollisionTestApplication(t)
 
@@ -474,13 +454,11 @@ func TestBootModulesPreConfigurationResolve_RunsTheConfigurationAndParameterHook
         t.Fatalf("expected the parameter the module registered to reach the configuration")
     }
 
-    /* nothing the post-resolve phase owns has run yet */
     if true == moduleInstance.servicesRegistered || true == moduleInstance.httpRoutesRegistered {
         t.Fatalf("expected the post-resolve hooks to stay untouched by the pre-resolve phase")
     }
 }
 
-/* everything a module wires against resolved configuration runs in the second phase, and each hook is optional: a module implementing all of them must see all of them called, or one silently-missing hook means an unwired subsystem with a green boot. */
 func TestBootModulesPostConfigurationResolve_RunsEveryLaterHook(t *testing.T) {
     applicationInstance := newCollisionTestApplication(t)
     applicationInstance.httpMiddlewares = NewHttpMiddleware(static.Config{})
@@ -514,7 +492,6 @@ func TestBootModulesPostConfigurationResolve_RunsEveryLaterHook(t *testing.T) {
     }
 }
 
-/* orderRecordingModule writes each hook call into a shared log, so a test can read the grouping the contracts document */
 type orderRecordingModule struct {
     fakeModule
     log *[]string
@@ -541,7 +518,6 @@ func (instance orderRecordingModule) RegisterCliCommands(kernelInstance kernelco
     return nil
 }
 
-/* the second phase runs one loop per hook, and the contracts document exactly that granularity: every module's instance of one hook runs before any module's next hook, in registration order inside each group — a module may rely on every sibling's listeners existing before any middleware registers */
 func TestBootModulesPostConfigurationResolve_RunsEachHookAcrossEveryModuleBeforeTheNextHook(t *testing.T) {
     applicationInstance := newCollisionTestApplication(t)
 
@@ -648,7 +624,6 @@ func TestApplication_RegisterScopedServicesHookRunsForScopedServiceModules(t *te
     }
 }
 
-/* a module registered as a struct value whose field holds a map is registered by its name, never hashed */
 func TestRegisterModule_AValueModuleCarryingAnUnhashableFieldIsRegisteredInsteadOfPanicking(t *testing.T) {
     instance := &Application{}
 
@@ -739,7 +714,6 @@ func TestCollectModuleHttpHandlerDecorators_ANilDecoratorIsRefusedNamingTheModul
     applicationInstance.collectModuleHttpHandlerDecorators()
 }
 
-/* the duplicate is raised at the start of Boot, before any phase can fail over what it would have wired, and its line in the report names the kind, the name and the caller */
 func TestRefuseDuplicateModules_RaisesTheReportNamingTheModuleAndItsCaller(t *testing.T) {
     instance := newCollisionTestApplication(t)
 
@@ -771,7 +745,6 @@ func TestRefuseDuplicateModules_RaisesTheReportNamingTheModuleAndItsCaller(t *te
     }
 }
 
-/* the raised report, not only the recorded collision, names both spellings of a case-different duplicate */
 func TestRefuseDuplicateModules_RaisesTheReportNamingBothSpellings(t *testing.T) {
     instance := newCollisionTestApplication(t)
 
@@ -799,7 +772,6 @@ func TestRefuseDuplicateModules_RaisesTheReportNamingBothSpellings(t *testing.T)
     }
 }
 
-/* a collision of another kind recorded before Boot waits for the aggregated report at the end of the boot, as before */
 func TestRefuseDuplicateModules_LeavesOtherCollisionsToTheAggregatedReport(t *testing.T) {
     instance := newCollisionTestApplication(t)
 
@@ -811,7 +783,6 @@ func TestRefuseDuplicateModules_LeavesOtherCollisionsToTheAggregatedReport(t *te
 
 const duplicateModuleBootChildVariable = "MELODY_TEST_DUPLICATE_MODULE_BOOT_CHILD"
 
-/* panickingParameterModule fails the first boot phase, the way a module fails over a service the dropped duplicate would have registered */
 type panickingParameterModule struct {
     fakeModule
 }
@@ -820,7 +791,7 @@ func (instance *panickingParameterModule) RegisterParameters(registrar applicati
     exception.Panic(exception.NewError("the first boot phase failed over a missing wiring", nil, nil))
 }
 
-/* Boot reports a refusal and exits the process, so the boot runs in a child of the test binary; the duplicate is the record it leaves, not the phase that failed after it */
+/* Boot reports a refusal and exits the process, so the boot runs in a child of the test binary */
 func TestBoot_RefusesADuplicateModuleBeforeAnyPhaseRuns(t *testing.T) {
     if "1" == os.Getenv(duplicateModuleBootChildVariable) {
         application := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})

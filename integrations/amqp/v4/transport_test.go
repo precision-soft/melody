@@ -4028,14 +4028,12 @@ func TestConsumeLoop_AChannelLostAfterLivingTheInitialBackoffReopensAtOnce(t *te
     }
 }
 
-/* openTopologyFor declares the transport's topology through a send and answers the send's error */
 func openTopologyFor(t *testing.T, connection *amqp091.Connection, queueName string, deadLetterDisabled bool) error {
     t.Helper()
 
     return openTopologyWith(t, connection, queueName, TransportConfig{DeadLetterDisabled: deadLetterDisabled})
 }
 
-/* openTopologyWith declares the topology of a transport under config through a send and answers the send's error */
 func openTopologyWith(t *testing.T, connection *amqp091.Connection, queueName string, config TransportConfig) error {
     t.Helper()
 
@@ -4149,7 +4147,6 @@ func TestTransport_AQueueDeclaredWithoutTheDeadLetterArgumentNamesTheDoor(t *tes
         t.Fatalf("expected the redeclare refused naming the door, got %v", sendErr)
     }
 
-    /* the door already thrown is not named: a queue declared with the dead-letter argument refuses a declare without it */
     otherQueueName := queueName + ".reverse"
     defer deleteTopologyOf(connection, otherQueueName)
 
@@ -4165,7 +4162,6 @@ func TestTransport_AQueueDeclaredWithoutTheDeadLetterArgumentNamesTheDoor(t *tes
     }
 }
 
-/* redeclareQueue declares a durable queue with arguments on a channel of its own, which a refused declare closes */
 func redeclareQueue(t *testing.T, connection *amqp091.Connection, queueName string, arguments amqp091.Table) error {
     t.Helper()
 
@@ -4180,7 +4176,6 @@ func redeclareQueue(t *testing.T, connection *amqp091.Connection, queueName stri
     return declareErr
 }
 
-/* the caps land on the .dlq queue alone as x-max-length and x-message-ttl; left out, the .dlq queue is declared without arguments, as before; a changed cap is refused by the broker and the refusal names the two fields */
 func TestTransport_TheDeadLetterCapsAreTheDeadLetterQueueArguments(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
 
@@ -4280,7 +4275,6 @@ func TestNewTransport_DeadLetterIsOnUnlessItsDoorIsSet(t *testing.T) {
     }
 }
 
-/* a dialer that only returns when its context ends: the close cancels it, so neither the dial nor the drain waits on the dialer's own bound */
 func cancellableDialer(started chan<- struct{}, observed chan<- error) Dialer {
     return func(dialContext context.Context) (*Connection, error) {
         started <- struct{}{}
@@ -4344,7 +4338,6 @@ func TestTransport_ADialerAnsweringNoConnectionAndNoErrorIsRefused(t *testing.T)
     }
 }
 
-/* a transport handed a connection has no dialer: once that connection is gone, nothing redials */
 func TestTransport_AStaticConnectionLostIsTerminal(t *testing.T) {
     fake := dialFakeBroker(t)
 
@@ -4362,7 +4355,6 @@ func TestTransport_AStaticConnectionLostIsTerminal(t *testing.T) {
     }
 }
 
-/* a transport handed a dialer holds no connection until its first use, and dials again after a failure */
 func TestTransport_ADialerRedials(t *testing.T) {
     var dials atomic.Int64
 
@@ -4385,7 +4377,6 @@ func TestTransport_ADialerRedials(t *testing.T) {
     }
 }
 
-/* a dialer answering a connection beside its error still handed the connection over, so the transport closes it rather than leak it */
 func TestTransport_AConnectionADialerAnsweredBesideItsErrorIsClosed(t *testing.T) {
     fake := dialFakeBroker(t)
 
@@ -4427,7 +4418,6 @@ func openHeadersTestConnection(t *testing.T) *amqp091.Connection {
     return connectionOwner.Raw()
 }
 
-/* deleteHeadersTestQueues drops what an earlier run left on the broker, so the first delivery is this run's */
 func deleteHeadersTestQueues(t *testing.T, connection *amqp091.Connection, queueName string) {
     t.Helper()
 
@@ -4939,7 +4929,7 @@ func TestTransport_AHeaderFailingTheWriteRuleIsSkippedWithAWarningNamingIt(t *te
     }
 }
 
-/* a name rides behind ApplicationHeaderPrefix in a key of at most 255 bytes: a length the messagebus rule admits beyond what the key holds is refused at construction, not at the publish */
+/* a name rides behind ApplicationHeaderPrefix in a key of at most 255 bytes */
 func TestNewTransport_RefusesAHeaderNameLengthBeyondTheKeyBehindThePrefix(t *testing.T) {
     if 239 != HeaderNameMaximumLength {
         t.Fatalf("expected the ceiling 255 less the prefix, 239, got %d", HeaderNameMaximumLength)

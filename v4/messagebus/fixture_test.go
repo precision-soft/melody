@@ -24,7 +24,6 @@ func newTestRuntime() containercontract.Runtime {
     return runtime.NewRun(context.Background(), serviceContainer.NewScope())
 }
 
-/* messageRecordingLogger captures every record with its message, so a test can assert both that a record was written and what it said. */
 type messageRecordingLogger struct {
     mutex    sync.Mutex
     messages []string
@@ -82,7 +81,6 @@ func (instance *messageRecordingLogger) hasMessageContaining(fragment string) bo
     return false
 }
 
-/* newTestRuntimeWithRecordingLogger mirrors newTestRuntime with the recording logger installed under the logger service, the way a framework-assembled scope carries one. */
 func newTestRuntimeWithRecordingLogger() (containercontract.Runtime, *messageRecordingLogger) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := serviceContainer.NewScope()
@@ -93,12 +91,10 @@ func newTestRuntimeWithRecordingLogger() (containercontract.Runtime, *messageRec
     return runtime.NewRun(context.Background(), scope), logger
 }
 
-/* consumeSessionSource is a command a test opens a session of: the command itself resolves its collaborators from the run's scope, a consumeCommandOverBus hands the bus the test holds */
 type consumeSessionSource interface {
     newConsumeSession(runtimeInstance containercontract.Runtime) (*consumeSession, error)
 }
 
-/* consumeCommandOverBus is a consume command whose sessions dispatch to a bus the test holds, so the test needs no container */
 type consumeCommandOverBus struct {
     *ConsumeCommand
     bus        messagebuscontract.Bus
@@ -109,7 +105,6 @@ func newConsumeCommandOver(bus messagebuscontract.Bus, config ConsumeCommandConf
     return &consumeCommandOverBus{ConsumeCommand: NewConsumeCommand(config), bus: bus}
 }
 
-/* newConsumeCommandOverTransports is a command whose sessions also read the transports the test holds, the failure transport the policy names among them */
 func newConsumeCommandOverTransports(bus messagebuscontract.Bus, config ConsumeCommandConfig, transports map[string]messagebuscontract.Transport) *consumeCommandOverBus {
     return &consumeCommandOverBus{ConsumeCommand: NewConsumeCommand(config), bus: bus, transports: transports}
 }
@@ -139,7 +134,6 @@ func recoveredPanicContext(callback func()) (context exceptioncontract.Context) 
     return nil
 }
 
-/* queueSubscription answers a test transport's queue as its subscription, and the reason the test gave for its end */
 type queueSubscription struct {
     queue chan messagebuscontract.Envelope
     err   error

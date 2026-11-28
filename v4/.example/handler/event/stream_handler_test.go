@@ -23,10 +23,6 @@ import (
     melodysecurity "github.com/precision-soft/melody/v4/security"
 )
 
-/* recordingResponseWriter answers the two questions the kernel asks a writer before it decides whether a
-   handler's response is still writable: were the headers committed, and with which status. The kernel's own
-   recording writer is unexported, so the test carries the same shape rather than a bare httptest recorder,
-   whose Code field reads 200 whether the handler committed that status or wrote nothing at all. */
 type recordingResponseWriter struct {
     header      nethttp.Header
     wroteHeader bool
@@ -74,10 +70,6 @@ func (instance *recordingResponseWriter) CommittedStatusCode() int {
     return instance.status
 }
 
-/* the hub is registered on the container the request carries, because the handler RESOLVES it: a fixture
-   that skipped the registration would drive the handler down its unavailable branch and every assertion
-   below it would be about that branch instead of about the stream. streamRequestWithoutHub is the sister
-   that drives it deliberately. */
 func broadcastRuntime() melodycontainercontract.Runtime {
     return melodyruntime.NewRun(context.Background(), melodycontainer.NewContainer(melodycontainer.ContainerConfig{}).NewScope())
 }
@@ -134,8 +126,6 @@ func streamRequestOnContainer(t *testing.T, target string, cancelled bool, withH
     return request, runtimeInstance
 }
 
-/* streamRequestAs is streamRequest for a caller the firewall authenticated with the roles given — the only caller
-   production lets reach this handler, the stream route being ROLE_USER */
 func streamRequestAs(t *testing.T, target string, roles []string) (*melodyhttp.Request, melodycontainercontract.Runtime) {
     t.Helper()
 
@@ -146,7 +136,6 @@ func streamRequestAs(t *testing.T, target string, roles []string) (*melodyhttp.R
     return request, runtimeInstance
 }
 
-/* authenticateOnRuntime publishes the security context the firewall would, for the account and roles given */
 func authenticateOnRuntime(runtimeInstance melodycontainercontract.Runtime, userId string, roles []string) {
     firewall := melodysecurity.NewCompiledFirewall(melodysecurity.CompiledFirewallConfig{
         Name:               "main",
@@ -160,9 +149,6 @@ func authenticateOnRuntime(runtimeInstance melodycontainercontract.Runtime, user
     )
 }
 
-/* the caller production brings here holds ROLE_USER: the catalogue topic carries the writes made behind ROLE_EDITOR,
-   and a reader holding the route's role and not the topic's is refused while the response is still writable. The
-   request is already cancelled, so a gate that let it through would answer an opened stream, not hang */
 func TestStreamHandler_RefusesTheCatalogueTopicToAReaderWithoutTheEditorRole(t *testing.T) {
     request, runtimeInstance := streamRequestAs(t, "/events/stream/", []string{entity.RoleUser})
     writer := &recordingResponseWriter{}
@@ -177,7 +163,6 @@ func TestStreamHandler_RefusesTheCatalogueTopicToAReaderWithoutTheEditorRole(t *
     }
 }
 
-/* the sister: the editor reads the topic its own writes are broadcast onto */
 func TestStreamHandler_OpensTheCatalogueTopicForAnEditor(t *testing.T) {
     request, runtimeInstance := streamRequestAs(t, "/events/stream/", []string{entity.RoleUser, entity.RoleEditor})
     writer := &recordingResponseWriter{}
@@ -192,7 +177,6 @@ func TestStreamHandler_OpensTheCatalogueTopicForAnEditor(t *testing.T) {
     }
 }
 
-/* the user directory topic is the administrator's: an editor holding the route's role and the catalogue's is refused while the response is still writable */
 func TestStreamHandler_RefusesTheUserDirectoryTopicToAnEditor(t *testing.T) {
     request, runtimeInstance := streamRequestAs(t, "/events/stream/?topic=user-directory", []string{entity.RoleUser, entity.RoleEditor})
     writer := &recordingResponseWriter{}
@@ -207,7 +191,6 @@ func TestStreamHandler_RefusesTheUserDirectoryTopicToAnEditor(t *testing.T) {
     }
 }
 
-/* the sister: the administrator opens the user directory topic */
 func TestStreamHandler_OpensTheUserDirectoryTopicForAnAdministrator(t *testing.T) {
     request, runtimeInstance := streamRequestAs(t, "/events/stream/?topic=user-directory", []string{entity.RoleUser, entity.RoleEditor, entity.RoleAdmin})
     writer := &recordingResponseWriter{}
@@ -222,7 +205,6 @@ func TestStreamHandler_OpensTheUserDirectoryTopicForAnAdministrator(t *testing.T
     }
 }
 
-/* the refusal has to be decided while the response is still writable. NewServerSentEventWriter commits it (event-stream headers, 200, flush) and the kernel discards whatever a handler returns once the headers are committed, so a gate placed after it answers a successful empty stream that a browser reconnects to forever. The assertion is therefore on the writer being untouched, not on the 403 alone, which a gate placed after the writer also returns. */
 func TestStreamHandler_RefusesAPrivilegedTopicWithoutCommittingTheResponse(t *testing.T) {
     request, runtimeInstance := streamRequest(t, "/events/stream/", false)
     writer := &recordingResponseWriter{}
@@ -253,9 +235,6 @@ func TestStreamHandler_RefusesAPrivilegedTopicWithoutCommittingTheResponse(t *te
     }
 }
 
-/* the sister case, which is what keeps the assertion above from passing over a handler that refuses
-   everything: a topic this application does not publish onto itself is readable by any authenticated
-   caller, and there the stream IS opened — headers committed, 200, flushed. */
 func TestStreamHandler_OpensTheStreamForATopicThatNeedsNoRole(t *testing.T) {
     request, runtimeInstance := streamRequestAs(t, "/events/stream/?topic=visitor", []string{entity.RoleUser})
     writer := &recordingResponseWriter{}
@@ -282,7 +261,6 @@ func TestStreamHandler_OpensTheStreamForATopicThatNeedsNoRole(t *testing.T) {
     }
 }
 
-/* the hub is resolved per request, and the refusal that comes with resolving is decided while the response is still writable, for the same reason the topic gate is: past NewServerSentEventWriter the kernel discards whatever the handler returns. */
 func TestStreamHandler_RefusesWithoutCommittingWhenTheHubIsNotRegistered(t *testing.T) {
     request, runtimeInstance := streamRequestWithoutHub(t, "/events/stream/?topic=visitor")
     writer := &recordingResponseWriter{}
@@ -308,7 +286,6 @@ func TestStreamHandler_RefusesWithoutCommittingWhenTheHubIsNotRegistered(t *test
     }
 }
 
-/* warningRecordingLogger keeps the warnings and the errors a door wrote through the runtime's logger */
 type warningRecordingLogger struct {
     melodyloggingcontract.Logger
     mutex         sync.Mutex
@@ -344,9 +321,6 @@ func (instance *warningRecordingLogger) recorded() []string {
     return append([]string{}, instance.warnings...)
 }
 
-/* streamServer mounts the real handler on a real net/http server with the write timeout given, the way
-   the application's server carries it: net/http arms that deadline once, from the request line, and the
-   handler is what has to keep the stream alive past it */
 func streamServer(t *testing.T, writeTimeout time.Duration) (*httptest.Server, *melodyhttp.ServerSentEventHub, *warningRecordingLogger) {
     t.Helper()
 
@@ -386,7 +360,7 @@ func streamServer(t *testing.T, writeTimeout time.Duration) (*httptest.Server, *
     return server, hub, logger
 }
 
-/* the server's write deadline is armed once, from the request line; the writer re-arms it per frame and the keepalive fills the idle stretch, so an event published past the server's timeout is delivered on a connection that is still open. */
+/* past the server's write timeout on purpose: the writer re-arms the deadline per frame */
 func TestStreamHandler_DeliversAnEventPublishedPastTheServersWriteTimeout(t *testing.T) {
     server, hub, _ := streamServer(t, time.Second)
 
@@ -396,8 +370,7 @@ func TestStreamHandler_DeliversAnEventPublishedPastTheServersWriteTimeout(t *tes
     }
     defer response.Body.Close()
 
-    /* the subscription exists once the hub counts it, which is the only thing that makes the broadcast below
-       a delivery rather than a publish to nobody */
+    /* only a counted subscription makes the broadcast below a delivery rather than a publish to nobody */
     deadline := time.Now().Add(2 * time.Second)
     for 0 == hub.Broadcast(broadcastRuntime(), "visitor", melodyhttp.ServerSentEvent{Data: "warm-up"}) && time.Now().Before(deadline) {
         time.Sleep(10 * time.Millisecond)
@@ -434,9 +407,6 @@ func TestStreamHandler_DeliversAnEventPublishedPastTheServersWriteTimeout(t *tes
     }
 }
 
-/* a failed write is a frame lost only when the SERVER cut the stream, and the server's cut is a deadline: it
-   reports itself as a net.Error whose Timeout is true. The request context cannot tell the two apart —
-   net/http cancels it on the first write error of any kind — so the guard reads the error alone */
 func TestJournalServerSideCut_WarnsOnTheDeadlineAloneWhoeverHoldsTheContext(t *testing.T) {
     _, _, logger := streamServer(t, time.Second)
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
@@ -464,7 +434,6 @@ func TestJournalServerSideCut_WarnsOnTheDeadlineAloneWhoeverHoldsTheContext(t *t
     }
 }
 
-/* a runtime without a logger answers nil through LoggerFromRuntime, so the warning of a server cut goes to the fallback journal */
 func TestJournalServerSideCut_ARuntimeWithoutALoggerDoesNotPanic(t *testing.T) {
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     runtimeInstance := melodyruntime.NewRequest(context.Background(), containerInstance.NewScope())
@@ -487,7 +456,6 @@ func (instance *timeoutError) Temporary() bool {
     return false
 }
 
-/* the real cut: a client that stops reading, frames the socket cannot buffer, the re-armed deadline expires with a frame in flight, one warning. A guard on the request context could never fire here, since net/http cancels it on that very write error; a client that closes is the ordinary end and files nothing */
 func TestStreamHandler_JournalsARealServerCutAndNotAClientThatLeft(t *testing.T) {
     server, hub, logger := streamServer(t, 500*time.Millisecond)
 
@@ -506,7 +474,6 @@ func TestStreamHandler_JournalsARealServerCutAndNotAClientThatLeft(t *testing.T)
         time.Sleep(10 * time.Millisecond)
     }
 
-    /* the client reads nothing: the kernel buffers fill under the large frames and the next write meets the deadline */
     frame := strings.Repeat("x", 256*1024)
     cutBy := time.Now().Add(10 * time.Second)
     for time.Now().Before(cutBy) && 0 == len(logger.recorded()) {
@@ -551,10 +518,6 @@ func TestKeepaliveIntervalFor_IsHalfTheBudgetOrTheDefault(t *testing.T) {
     }
 }
 
-/* the keepalive is what finds a client that left without closing, and its cadence is half the server's
-   write budget rather than the default: on a one-second budget an idle stream carries a comment frame every
-   half second, where the fifteen-second default — the form a live delivery test could not tell apart, since
-   the frame's own re-armed deadline delivers the event either way — would carry none within a second */
 func TestStreamHandler_KeepsAnIdleStreamAliveAtHalfTheServersWriteBudget(t *testing.T) {
     server, hub, _ := streamServer(t, time.Second)
 
@@ -591,18 +554,15 @@ func TestStreamHandler_KeepsAnIdleStreamAliveAtHalfTheServersWriteBudget(t *test
     select {
     case body = <-collected:
     case <-time.After(3 * time.Second):
-        /* the reader is parked on a stream that sends nothing: the keepalive cadence is not half the budget */
         t.Fatal("an idle stream under a one-second budget carried no keepalive frame in three seconds")
     }
 
-    /* the connected comment comes first; the keepalives are the comment frames after it */
     keepalives := strings.Count(body, "\n:")
     if 2 > keepalives {
         t.Fatalf("an idle stream under a one-second budget carried %d keepalive frames in 1.3 s, wanted at least two; the stream read %q", keepalives, body)
     }
 }
 
-/* a hub that shut down still takes a subscription and ends it at once: the stream is refused with 503 before the writer commits a 200 the client would reconnect into until the process is gone */
 func TestStreamHandler_RefusesWithoutCommittingWhenTheHubHasShutDown(t *testing.T) {
     request, runtimeInstance := streamRequest(t, "/events/stream/?topic=visitor", true)
 
@@ -624,7 +584,6 @@ func TestStreamHandler_RefusesWithoutCommittingWhenTheHubHasShutDown(t *testing.
     }
 }
 
-/* past the account's cap the next stream is refused 429 while the response is still writable, and another account still opens one */
 func TestStreamHandler_RefusesTheStreamPastTheAccountsCapWithoutCommitting(t *testing.T) {
     slots := NewStreamSlots(StreamCapPerUser, StreamCapPerProcess)
     for range StreamCapPerUser {
@@ -654,7 +613,6 @@ func TestStreamHandler_RefusesTheStreamPastTheAccountsCapWithoutCommitting(t *te
     }
 }
 
-/* a stream that ends gives its slot back, so the account opens the next one */
 func TestStreamHandler_AnEndedStreamGivesItsSlotBack(t *testing.T) {
     slots := NewStreamSlots(1, StreamCapPerProcess)
 
@@ -668,7 +626,6 @@ func TestStreamHandler_AnEndedStreamGivesItsSlotBack(t *testing.T) {
     }
 }
 
-/* a stream refused after its slot was taken gives the slot back too: the writer refused the response */
 func TestStreamHandler_ARefusedWriterGivesItsSlotBack(t *testing.T) {
     slots := NewStreamSlots(1, StreamCapPerProcess)
 
@@ -684,7 +641,6 @@ func TestStreamHandler_ARefusedWriterGivesItsSlotBack(t *testing.T) {
     }
 }
 
-/* nonFlushingResponseWriter cannot stream, so NewServerSentEventWriter refuses it */
 type nonFlushingResponseWriter struct {
     header nethttp.Header
 }

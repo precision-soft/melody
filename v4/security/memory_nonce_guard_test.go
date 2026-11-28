@@ -159,7 +159,6 @@ func TestNewMemoryNonceGuard_RefusesAFieldBelowItsMinimum(t *testing.T) {
     })
 }
 
-/* the expired-entry sweep is amortized: a second Remember within the purge interval must not run another O(n) sweep, so a high volume of distinct nonces does not pay an O(n) sweep on every call. */
 func TestMemoryNonceGuard_PurgeIsAmortizedWithinInterval(t *testing.T) {
     guard := NewMemoryNonceGuard(MemoryNonceGuardConfig{})
 
@@ -198,7 +197,7 @@ func TestMemoryNonceGuard_SweepsAtTheConfiguredInterval(t *testing.T) {
     }
 }
 
-/* the frozen instant sits decades from the real clock: expiry driven by Advance alone proves the guard reads the injected clock, not the system one. */
+/* decades from the real clock, so expiry by Advance alone proves the injected clock is read */
 func TestMemoryNonceGuard_ExpiryRunsOnTheInjectedClock(t *testing.T) {
     frozen := clock.NewFrozenClock(time.Unix(1000, 0))
     guard := NewMemoryNonceGuard(MemoryNonceGuardConfig{Clock: frozen})
@@ -229,7 +228,6 @@ func TestNewMemoryNonceGuard_ANilClockIsTheSystemClock(t *testing.T) {
     }
 }
 
-/* every goroutine waits on one release channel, so the check and the record of the same nonce are attempted together: one Remember accepts it and every other one reads the replay. */
 func TestMemoryNonceGuard_AcceptsANonceOnceUnderConcurrentPresentation(t *testing.T) {
     const presenterCount = 32
 

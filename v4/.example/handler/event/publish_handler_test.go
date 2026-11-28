@@ -10,7 +10,6 @@ import (
     melodymessagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
 )
 
-/* recordingBus keeps what was dispatched onto it */
 type recordingBus struct {
     dispatched []any
 }
@@ -21,7 +20,6 @@ func (instance *recordingBus) Dispatch(runtimeInstance melodycontainercontract.R
     return nil, nil
 }
 
-/* the publish route takes the editor's role, so without the gate an editor could write notices onto the topic the administrators read */
 func TestPublishHandler_RefusesAnEditorOnTheUserDirectoryTopic(t *testing.T) {
     request, runtimeInstance := streamRequestAs(t, "/events/publish/?topic=user-directory&text=forged", []string{entity.RoleUser, entity.RoleEditor})
     bus := &recordingBus{}
@@ -36,7 +34,6 @@ func TestPublishHandler_RefusesAnEditorOnTheUserDirectoryTopic(t *testing.T) {
     }
 }
 
-/* the sisters: the administrator publishes onto the user directory topic, the editor onto the catalogue's */
 func TestPublishHandler_PublishesOntoATopicTheCallerMayRead(t *testing.T) {
     for _, publication := range []struct {
         target string

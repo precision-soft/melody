@@ -97,7 +97,6 @@ type boundRecordedOpen struct {
     probe any
 }
 
-/* boundRecordingProvider records, per open, the door, the definition it opens and the probe value the runtime's context carries, and answers a fresh stub database */
 type boundRecordingProvider struct {
     name    string
     mutex   *sync.Mutex

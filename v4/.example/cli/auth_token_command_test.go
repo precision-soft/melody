@@ -120,7 +120,7 @@ func TestAuthenticationTokenCommandKeepsTheDefaultRoleAndNoScopeWithoutEitherFla
     }
 }
 
-/* the `--ttl` flag parses in base ten, as the standard integer flags do: with the engine's inferred base --ttl=010 would read as eight and --ttl=08 would be refused */
+/* with the engine's inferred base --ttl=010 would read as eight and --ttl=08 would be refused */
 func TestAuthenticationTokenCommand_IntegerFlagsParseInBaseTen(t *testing.T) {
     for _, flagName := range []string{"ttl"} {
         for spelling, expected := range map[string]int{"010": 10, "08": 8} {

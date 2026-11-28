@@ -13,7 +13,6 @@ import (
     melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
 )
 
-/* the write is read as the dialect renders it: what has to be pinned is the clause that decides what a second enrollment does, and that lives entirely in the statement. The primary key is the user identifier, so a plain insert would bind an account whose authenticator is lost to its first secret for good. Replacing is safe because the handler takes the identifier from the authenticated token, so the row this overwrites is always the caller's own. */
 func renderedEnrollmentUpsert(t *testing.T) string {
     t.Helper()
 
@@ -27,7 +26,6 @@ func renderedEnrollmentUpsert(t *testing.T) string {
     }).String()
 }
 
-/* a pending enrollment is written through the same replacement: a second enroll before the confirmation, the response of the first lost, replaces the pending secret */
 func TestPendingEnrollmentUpsertReplacesThePendingOne(t *testing.T) {
     rendered := enrollmentUpsert(newRenderingDatabase(), &PendingEnrollment{UserIdentifier: "user-2", CreatedAt: time.Unix(1, 0)}).String()
 
@@ -52,7 +50,6 @@ func TestEnrollmentUpsertReplacesAnEnrollmentThatIsAlreadyThere(t *testing.T) {
     }
 }
 
-/* the secret alone is not the enrollment. The recovery codes are minted beside it and open the account on their own, so a set left from the previous enrollment would keep letting whoever holds the lost device in after the factor it belongs to is replaced. */
 func TestEnrollmentUpsertReplacesTheRecoveryCodesWithTheSecret(t *testing.T) {
     rendered := renderedEnrollmentUpsert(t)
 
@@ -63,7 +60,6 @@ func TestEnrollmentUpsertReplacesTheRecoveryCodesWithTheSecret(t *testing.T) {
     }
 }
 
-/* the deletion is keyed on the account identifier and on nothing wider: a statement without the predicate would release every account's factor when one account is deleted. */
 func TestEnrollmentDeleteIsKeyedOnTheAccountIdentifierAlone(t *testing.T) {
     rendered := enrollmentDelete(newRenderingDatabase(), "user-4").String()
 
@@ -72,8 +68,6 @@ func TestEnrollmentDeleteIsKeyedOnTheAccountIdentifierAlone(t *testing.T) {
     }
 }
 
-/* the door resolves the store the container publishes under its one name, and answers a store that is not
-   registered — an environment without a database — as a refusal rather than as a nil the doors would reach */
 func TestStoreFromRuntime_ResolvesTheRegisteredStoreAndRefusesAnAbsentOne(t *testing.T) {
     published := NewStore(nil)
 
@@ -118,7 +112,6 @@ func TestRecoveryCodeMatches_FoldsCaseAndDropsTheSeparators(t *testing.T) {
     }
 }
 
-/* the two columns seal bound to their own labels and refuse anything else: the secret's seal copied into the recovery codes column does not read, and neither does an unbound seal */
 func TestEnrollment_SecretAndRecoveryCodesAreBoundToTheirColumns(t *testing.T) {
     cipher := melodyencrypt.NewCipher(melodyencrypt.NewStaticKeyProvider(melodyencrypt.KeyRing{
         CurrentKeyId: "two-factor-store-test",

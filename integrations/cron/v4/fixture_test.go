@@ -182,7 +182,6 @@ func runWithInjectedConfiguration(
     return generateCommand.runWithConfiguration(commandContext, configuration)
 }
 
-/* stubApplicationName is the cli name the stub configuration answers, the identity the ownership line of every generated destination carries: every configuration the framework builds carries a non-empty one, so the double does too, and a test about the nameless case builds its stub without one. */
 const stubApplicationName = "melody-cron-test"
 
 type stubCliConfiguration struct {
@@ -206,7 +205,6 @@ func newStubConfiguration(values map[string]string) *stubConfiguration {
     return newStubConfigurationNamed(values, stubApplicationName)
 }
 
-/* newStubConfigurationNamed answers the stub under the given application name; an empty name leaves the cli configuration absent, the shape of a double that never declared one */
 func newStubConfigurationNamed(values map[string]string, applicationName string) *stubConfiguration {
     configuration := &stubConfiguration{parameters: registeredParameters(values)}
     if "" != applicationName {
@@ -216,7 +214,6 @@ func newStubConfigurationNamed(values map[string]string, applicationName string)
     return configuration
 }
 
-/* registeredParameters answers each value as the parameter a real configuration registers under its name */
 func registeredParameters(values map[string]string) map[string]configcontract.Parameter {
     environment, environmentErr := melodyconfig.NewEnvironment(context.Background(), &stubEnvironmentSource{values: map[string]string{}})
     if nil != environmentErr {
@@ -277,7 +274,6 @@ func (instance *stubConfiguration) Names() []string {
 type stubKernelConfiguration struct {
     projectDirectory    string
     bootWarningsIgnored []string
-    /* empty reads as the default namespace */
     namespace string
 }
 
@@ -369,7 +365,6 @@ func newStubConfigurationWithProjectDirectory(values map[string]string, projectD
     }
 }
 
-/* the generate command is driven through the framework's own dispatch door, so the arguments are parsed against the flags the command declares and the command context it reads is the one production hands it. The injected configuration travels through a delegating command rather than through a hand-built parser, because the configuration seam sits inside runWithConfiguration and only the dispatch above it changed. */
 type configuredGenerateCommand struct {
     *GenerateCommand
     configuration configcontract.Configuration
@@ -411,7 +406,6 @@ func dispatchGenerateCommand(
     return stdout.String(), runErr
 }
 
-/* runnerDispatch drives the runner command through the framework's dispatch door while keeping the Run(ctx, argv) shape the tests around it were written against: the arguments are parsed against the flags the command declares, and the context it reads is the one production hands it. */
 type runnerDispatch struct {
     runner          *RunnerCommand
     runtimeInstance containercontract.Runtime
@@ -439,7 +433,6 @@ func (instance *runnerDispatch) Run(ctx context.Context, arguments []string) err
     return melodycli.DispatchCommand(ctx, instance.runner, runtimeInstance, arguments, instance.writer, melodycli.DispatchOptions{})
 }
 
-/* parsedContextValues are the values a command line would carry, parsed by the engine into the command context a command's Run receives: every flag named here is declared and given, every other name reads as the zero value, and the arguments follow the flags as positionals. A nil writer discards. */
 type parsedContextValues struct {
     StringValues      map[string]string
     BoolValues        map[string]bool
@@ -512,7 +505,7 @@ func sortedKeys[V any](values map[string]V) []string {
     return keys
 }
 
-/* the suite runs as root in the dev container and as a plain user elsewhere; the logs directory's judgment and its hand-over read the effective user, so every test reads a plain user unless it sets the door itself */
+/* the suite runs as root in the dev container and as a plain user elsewhere, so tests read a plain user unless they set one */
 func TestMain(main *testing.M) {
     logDirectoryEffectiveUserId = func() int { return 1000 }
 
@@ -529,14 +522,12 @@ func newGenerateCommandForTest(configuration *Configuration) *GenerateCommand {
     return newGenerateCommand(configuration, nil, defaultResolvedGenerator())
 }
 
-/* staticConfiguration answers a ModuleConfig.Configuration factory over a configuration built beforehand */
 func staticConfiguration(configuration *Configuration) func(kernelInstance kernelcontract.Kernel) *Configuration {
     return func(kernelInstance kernelcontract.Kernel) *Configuration {
         return configuration
     }
 }
 
-/* recordingTickLocker wraps a locker and records every lock name and ttl it is asked for and every release */
 type recordingTickLocker struct {
     inner lockcontract.Locker
     /* holds every acquire open, so two acquires of one minute overlap */
@@ -603,7 +594,6 @@ const (
     failingTickLockerRefusesCreateLock = "create"
 )
 
-/* failingTickLocker fails every acquire the way its mode names: an error, a block until the acquire's context ends, a panic, or a refusal at CreateLock */
 type failingTickLocker struct {
     mode string
     err  error
@@ -642,7 +632,6 @@ func (instance *failingTickLock) Refresh(runtimeInstance containercontract.Runti
     return nil
 }
 
-/* sessionTickLocker ignores the ttl and holds a lock until it is released, the pinned-connection stand-in of the mysql and pgsql lockers */
 type sessionTickLocker struct {
     mutex sync.Mutex
     held  map[string]bool
@@ -694,13 +683,11 @@ func (instance *sessionTickLock) Refresh(runtimeInstance containercontract.Runti
     return nil
 }
 
-/* sharedLeaseTickLocker is a recordingTickLocker that answers the shared lease mark as told, counting the asks */
 type sharedLeaseTickLocker struct {
     recordingTickLocker
     shared bool
     err    error
     panics bool
-    /* failedAsks is how many first asks answer an error before the locker answers shared as told */
     failedAsks int64
     asks       atomic.Int64
 }
@@ -717,7 +704,6 @@ func (instance *sharedLeaseTickLocker) LeasesAcrossReplicas(runtimeInstance cont
     return instance.shared, instance.err
 }
 
-/* newTickDedupWarningRuntime answers a run runtime holding the logger, the configuration listing the ignored codes and, when not nil, the registered locker */
 func newTickDedupWarningRuntime(logger loggingcontract.Logger, registeredLocker lockcontract.Locker, bootWarningsIgnored []string) containercontract.Runtime {
     configuration := &stubConfigurationWithKernel{
         stubConfiguration: newStubConfiguration(nil),

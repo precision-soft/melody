@@ -1039,7 +1039,6 @@ func TestBuiltinTemplatesAnswerAndRenderTheApplicationsOwnershipLine(t *testing.
     }
 }
 
-/* the public render path writes the name into the ownership line too, so a line break in it would start an active crontab line even under an empty entry list; it is refused before anything is rendered */
 func TestRenderRefusesAnApplicationNameCarryingALineBreak(t *testing.T) {
     options := RenderOptions{ApplicationName: "app\n* * * * * root /usr/bin/touch /tmp/unexpected"}
 

@@ -29,7 +29,6 @@ func (instance *rateLimitKernelEnvironmentSource) Load(ctx context.Context) (map
     return map[string]string{config.EnvironmentNameKey: config.EnvironmentProduction}, nil
 }
 
-/* the real kernel over a minimal container, so a pin reads the header the renderer writes on the wire */
 func servedRateLimitKernel(t *testing.T, configure func(router *http.Router, dispatcher eventcontract.EventDispatcher)) nethttp.Handler {
     t.Helper()
 

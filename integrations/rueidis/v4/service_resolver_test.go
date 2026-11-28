@@ -73,7 +73,6 @@ func (instance *closeSpyClient) Close() {
     instance.closed = true
 }
 
-/* containerRegistrar adapts the raw container to this package's registrar interface, so the teardown proof runs against the real ordered close rather than a spy */
 type containerRegistrar struct {
     target containercontract.Container
 }
@@ -90,7 +89,6 @@ func (instance *containerRegistrar) MustRegister(serviceName string, provider an
     instance.target.MustRegister(serviceName, provider, options)
 }
 
-/* through the owning Connection and the dependency edge, whichever run resolves a client-backed service closes the connection after it */
 func TestRegisterConnectionService_TeardownClosesTheClientOnceTheClientWasResolved(t *testing.T) {
     client := &closeSpyClient{}
     serviceContainer := container.NewContainer(container.ContainerConfig{})
@@ -112,7 +110,6 @@ func TestRegisterConnectionService_TeardownClosesTheClientOnceTheClientWasResolv
     }
 }
 
-/* the guarantee's declared boundary: the container closes only what was resolved at least once */
 func TestRegisterConnectionService_TeardownLeavesAnUnresolvedConnectionOpen(t *testing.T) {
     client := &closeSpyClient{}
     serviceContainer := container.NewContainer(container.ContainerConfig{})
@@ -146,7 +143,6 @@ func TestRegisterLockerService_HandsTheConfigToTheLocker(t *testing.T) {
     }
 }
 
-/* PIN of the door's contract, not a guard: an empty config builds the locker at its defaults, the bounded one */
 func TestRegisterLockerService_KeepsTheDefaultCallTimeout(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     registrar := &containerRegistrar{target: serviceContainer}

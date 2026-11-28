@@ -39,7 +39,6 @@ func (instance *fakeStorage) Save(ctx context.Context, table string, entries []E
     return nil
 }
 
-/* the mutex is the double's own: the recorder hands one logger to every request goroutine, so a capture without it races in exactly the concurrent tests that exist to prove the recorder does not */
 type fakeLogger struct {
     mutex         sync.Mutex
     errorMessages []string
@@ -104,7 +103,6 @@ func TestRecorder_RoutesPerEntityTableAndHonorsIgnoredFields(t *testing.T) {
     }
 }
 
-/* the changes column must never carry the JSON literal null: an idempotent update and an insert of a non-struct model both record nothing, and the delete path already writes [] for that, so a trail consumer running jsonb_array_length(changes::jsonb) must read 0 rather than error out. */
 func TestRecorder_EmptyChangeSetIsStoredAsAnEmptyArray(t *testing.T) {
     storage := &fakeStorage{}
     recorder := NewRecorder(storage, RecorderConfig{Registry: NewRegistry(RegistryConfig{DefaultTable: "melody_audit"})})
@@ -145,14 +143,12 @@ func TestRecorder_DeadLettersOnStorageFailure(t *testing.T) {
     }
 }
 
-/* an entry the async storage refused, its queue full, is dead-lettered by the storage itself, with the change-set, before the refusal is returned, so the recorder does not dead-letter it a second time on the same logger: one record per dropped entry, and the refusal still reaches the caller */
 func TestRecorder_DoesNotDeadLetterAgainAnEntryTheAsyncStorageAlreadyDeadLettered(t *testing.T) {
     delegate := &recordingStorage{entered: make(chan struct{}), release: make(chan struct{})}
     logger := &fakeLogger{}
     storage := NewAsyncStorage(delegate, AsyncStorageConfig{BufferSize: bound.Of(1), Logger: logger})
     recorder := NewRecorder(storage, RecorderConfig{Logger: logger})
 
-    /* the first save parks the worker inside the delegate, the second fills the buffer of one, the third is refused */
     if saveErr := recorder.RecordInsert(context.Background(), "parityAccount", "1", parityAccount{Id: 1}); nil != saveErr {
         t.Fatalf("unexpected save error: %v", saveErr)
     }
@@ -179,7 +175,6 @@ func TestRecorder_DoesNotDeadLetterAgainAnEntryTheAsyncStorageAlreadyDeadLettere
     }
 }
 
-/* skipped on the sentinel alone, the recorder's record was lost whenever the storage journaled through the emergency default and the recorder through the application's logger — the wiring the readme describes — so the queue-full storm the dead-letter exists for left the application's journal empty; the record is skipped only when the storage journaled through this recorder's own logger */
 func TestRecorder_DeadLettersAnEntryTheAsyncStorageJournaledElsewhere(t *testing.T) {
     emergency := installDefaultAsyncStorageLogger(t)
     delegate := &recordingStorage{entered: make(chan struct{}), release: make(chan struct{})}
@@ -217,7 +212,6 @@ func TestRecorder_DeadLettersAnEntryTheAsyncStorageJournaledElsewhere(t *testing
     }
 }
 
-/* the sentinels are exported: a storage of the application's own that reports its refusal through one of them has journaled nothing this recorder knows of, so the entry is dead-lettered here, once */
 func TestRecorder_DeadLettersAnEntryAForeignStorageRefusedWithTheSentinel(t *testing.T) {
     storage := &sentinelReturningStorage{sentinel: ErrAsyncStorageClosed}
     application := &fakeLogger{}
@@ -233,7 +227,6 @@ func TestRecorder_DeadLettersAnEntryAForeignStorageRefusedWithTheSentinel(t *tes
     }
 }
 
-/* the closed half of the skip: an entry a closed async storage refused is journaled by the storage through the logger it shares with the recorder, and by the recorder not again */
 func TestRecorder_DoesNotDeadLetterAgainAnEntryTheClosedAsyncStorageAlreadyDeadLettered(t *testing.T) {
     logger := &fakeLogger{}
     storage := NewAsyncStorage(&recordingStorage{entered: make(chan struct{}, 1), release: make(chan struct{})}, AsyncStorageConfig{BufferSize: bound.Of(1), Logger: logger})
@@ -253,7 +246,6 @@ func TestRecorder_DoesNotDeadLetterAgainAnEntryTheClosedAsyncStorageAlreadyDeadL
     }
 }
 
-/* sentinelReturningStorage is a storage of the application's own that reports every save through one of the exported sentinels, wrapped, and journals nothing */
 type sentinelReturningStorage struct {
     sentinel error
 }
@@ -398,7 +390,6 @@ func TestBunormAudit_RecordsFieldLevelChangeSet(t *testing.T) {
     }
 }
 
-/* the nil guards of this package read a value through isNilInterface alone: it answers true for the nil interface itself, so no `nil ==` needs to stand beside it, and true for a typed nil, which `nil ==` cannot see */
 func TestIsNilInterface_AnswersTheNilInterfaceAndTheTypedNil(t *testing.T) {
     if false == isNilInterface(nil) {
         t.Fatalf("expected the nil interface to be read as nil")
@@ -443,7 +434,6 @@ func TestNewRecorder_AnOwnedStorageCarryingCloseAloneIsRefusedAndABorrowedOneAdm
     }
 }
 
-/* one row per constructor of the sweep: an absent logger is the one emergency default, a typed nil is refused with one text naming the field */
 func TestOptionalDependencies_NilIsTheDefaultAndATypedNilIsRefused(t *testing.T) {
     var typedNil *fakeLogger
 

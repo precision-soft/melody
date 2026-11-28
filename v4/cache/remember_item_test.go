@@ -19,7 +19,6 @@ type rememberItemTestSet struct {
     ttl bound.Duration
 }
 
-/* a manager whose every Set is noted with its ttl, so a pin reads what Remember told the store */
 type rememberItemRecordingCache struct {
     *Manager
     mutex       sync.Mutex
@@ -62,7 +61,6 @@ func newRememberItemRecordingCache(t *testing.T) *rememberItemRecordingCache {
     return &rememberItemRecordingCache{Manager: manager}
 }
 
-/* the two engines a choice must reach: the flight's leader and the caller's own computation */
 func rememberItemTestPaths() map[string]RememberOptions {
     return map[string]RememberOptions{
         "under the flight":        {Ttl: bound.Of(time.Minute)},
@@ -435,7 +433,6 @@ func TestRemember_AnItemToldSomethingAfterTheCallbackReturnedChangesNoStore(t *t
         t.Run("told before the store "+name, func(t *testing.T) {
             cacheInstance := newRememberItemRecordingCache(t)
 
-            /* the round trip runs after the item is read and before the Set, so what it tells the kept item lands between the two */
             var keptItem *RememberItem
             cacheInstance.onRoundTrip = func() {
                 keptItem.SkipStore()
@@ -493,7 +490,6 @@ func TestRemember_AnItemToldSomethingAfterTheCallbackReturnedChangesNoStore(t *t
         t.Fatalf("expected the store told before the return, got %+v", sets)
     }
 
-    /* the item is read once: a goroutine telling it something while the callback returns races nothing */
     raceItem := make(chan *RememberItem, 1)
     var raced sync.WaitGroup
     raced.Add(1)

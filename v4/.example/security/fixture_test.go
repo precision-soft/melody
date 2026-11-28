@@ -180,7 +180,6 @@ func mustSession(sessionInstance melodysessioncontract.Session, sessionErr error
     return sessionInstance
 }
 
-/* withItsRuntime hands a door the request together with the runtime the request carries */
 func withItsRuntime(request melodyhttpcontract.Request) (melodycontainercontract.Runtime, melodyhttpcontract.Request) {
     if nil == request {
         return nil, nil
@@ -189,7 +188,6 @@ func withItsRuntime(request melodyhttpcontract.Request) (melodycontainercontract
     return request.RuntimeInstance(), request
 }
 
-/* resolveToken answers the resolver's token; the example's resolver answers its outages through the unavailable token, so an error is a defect of the test */
 func resolveToken(resolver melodysecuritycontract.TokenResolver, request melodyhttpcontract.Request) melodysecuritycontract.Token {
     token, resolveErr := resolver(withItsRuntime(request))
     if nil != resolveErr {

@@ -67,7 +67,6 @@ func TestLoggingConfigurationFromModules_WithConfiguration_ReturnsIt(t *testing.
     }
 }
 
-/* assertPanicsWithReportedType pins which of the two refusals fired. Both carry the same message, so a message-only assertion cannot tell them apart — and they shadow each other: with the nil guard gone, a nil raw value fails the type assertion and the second guard panics with the identical message, which would leave a deleted guard indistinguishable from a working one. The reported type is the observable that separates them. */
 func assertPanicsWithReportedType(t *testing.T, callback func(), expectedActualType string) {
     t.Helper()
 
@@ -124,7 +123,6 @@ func TestLoggingConfigurationFromModules_WrongType_Panics(t *testing.T) {
     )
 }
 
-/* nilLevelLabelsConfiguration carries its method on the pointer, so a nil pointer of this type satisfies the configuration interface while every call through it dereferences the nil receiver — the shape a module registers when it declares its configuration and never assigns it. */
 type nilLevelLabelsConfiguration struct{}
 
 func (instance *nilLevelLabelsConfiguration) LevelLabels() loggingcontract.LevelLabels {

@@ -49,7 +49,6 @@ func (instance *exitCodedProbeApplicationCommand) Run(
     return exception.NewExitError(7, exception.NewError("command asked for an exit code", nil, nil))
 }
 
-/* the tree's own guard for the inert exit handler lives beside the constructor that installs it, in cli/root_test.go, and it builds its own tree — so it would still pass if runCli stopped using that constructor. This one drives the real runCli. */
 func TestRunCli_InstallsTheExitErrHandlerOnTheRootCommand(t *testing.T) {
     exitedWith := -1
     originalExiter := urfavecli.OsExiter
@@ -82,7 +81,6 @@ func TestRunCli_InstallsTheExitErrHandlerOnTheRootCommand(t *testing.T) {
     }
 }
 
-/* three normalization points must agree on a command's name — the boot registration, the cli library's trimmed registration, and the suggestion gate's trimmed input. A padded name judged raw at boot registered under a spelling no argv can produce: the suggestion table blocked every invocation of a command that exists. */
 func TestRegisterCliCommand_JudgesTheNameTrimmed(t *testing.T) {
     applicationInstance := newCollisionTestApplication(t)
 
@@ -93,7 +91,6 @@ func TestRegisterCliCommand_JudgesTheNameTrimmed(t *testing.T) {
         t.Fatalf("expected the padded duplicate to be recorded as a collision, got %d", len(applicationInstance.bootCollisions))
     }
 
-    /* the reversed order exercises the other side of the comparison: the already-registered name is the padded one */
     reversedApplication := newCollisionTestApplication(t)
 
     reversedApplication.RegisterCliCommand(&namedTestCommand{name: "app:reversed "})
@@ -108,7 +105,6 @@ func TestRegisterCliCommand_JudgesTheNameTrimmed(t *testing.T) {
     }, "cli command name may not be empty")
 }
 
-/* the whole path: a command whose Name carries padding must still be reachable from argv — the suggestion gate compares the trimmed input against the trimmed name and the cli library dispatches the trimmed registration. */
 func TestRunCli_DispatchesACommandWhoseNameCarriesPadding(t *testing.T) {
     applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
@@ -132,7 +128,6 @@ func TestRunCli_DispatchesACommandWhoseNameCarriesPadding(t *testing.T) {
     }
 }
 
-/* paddedNameProbeCommand wraps a command and pads its name, the shape the trimming exists for */
 type paddedNameProbeCommand struct {
     inner clicontract.Command
 }
@@ -157,7 +152,6 @@ func (instance *paddedNameProbeCommand) Run(
 }
 
 func TestSuggestCliCommand_ReturnsTheRefusalUnmarked(t *testing.T) {
-    /* the input is a substring of the available name, so this refusal travels through the matches-found branch, not the zero-match one */
     suggestErr := suggestCliCommand(
         []string{"app", "product"},
         []commandSuggestion{
@@ -181,7 +175,6 @@ func TestSuggestCliCommand_ReturnsTheRefusalUnmarked(t *testing.T) {
     }
 }
 
-/* the zero-match refusal is the same contract: unmarked, exit-coded, the full command list rendered on stderr */
 func TestSuggestCliCommand_ReturnsTheZeroMatchRefusalUnmarked(t *testing.T) {
     suggestErr := suggestCliCommand(
         []string{"app", "nosuchthing"},
@@ -203,7 +196,6 @@ func TestSuggestCliCommand_ReturnsTheZeroMatchRefusalUnmarked(t *testing.T) {
     }
 }
 
-/* the command name comes from argv, so a carriage return or an escape sequence embedded there could repaint the header as another verdict in a captured log — the header escapes it the way the run banners and the suggestion table already do */
 func TestPrintCliCommandNotFoundHeader_EscapesTheArgvDerivedName(t *testing.T) {
     buffer := &bytes.Buffer{}
 
@@ -221,7 +213,6 @@ func TestPrintCliCommandNotFoundHeader_EscapesTheArgvDerivedName(t *testing.T) {
     }
 }
 
-/* typedNilProbeCommand is handed over as a typed nil, which a plain comparison accepts and the command.Name() call after the guard dereferences */
 type typedNilProbeCommand struct{}
 
 func (instance *typedNilProbeCommand) Name() string {
@@ -284,7 +275,6 @@ func (instance *processContextProbeCliCommand) Run(runtimeInstance containercont
     return nil
 }
 
-/* the console counterpart of the request context the http kernel installs: the run's identity is resolvable from the run scope, instead of being computed for the logger and thrown away */
 func TestRunCli_InstallsTheProcessContextIntoTheRunScope(t *testing.T) {
     applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
@@ -391,7 +381,6 @@ func (instance *providedKeyProbeCliCommand) Run(runtimeInstance containercontrac
     return nil
 }
 
-/* the console decorator is the trusted-caller one: the generated id keeps the correlation whole on every record, and what the command wrote under the key survives verbatim beside it, under the neutral suffix rather than the request path's accusation */
 func TestRunCli_TheRunLoggerPreservesACallerProcessIdUnderProvided(t *testing.T) {
     baseLogger := &contextCapturingCliLogger{}
 
@@ -525,7 +514,6 @@ func bootCliCommandNamesUnder(t *testing.T, environmentName string, applicationC
     return names
 }
 
-/* the debug family reads the container's services and the resolved parameters, secrets among them, so outside development only debug:router is registered: a production binary answers every other debug command as not found */
 func TestBootCli_RegistersTheDebugFamilyOnlyInDevelopment(t *testing.T) {
     developmentNames := bootCliCommandNames(t, config.EnvironmentDevelopment)
     productionNames := bootCliCommandNames(t, config.EnvironmentProduction)
@@ -557,7 +545,6 @@ func TestBootCli_DebugCommandsEnabledRegistersTheDebugFamilyInEveryEnvironment(t
     }
 }
 
-/* the application builds debug:container over its own container: run as registered, it lists that container's services */
 func TestBootCli_TheRegisteredContainerCommandDescribesTheApplicationsContainer(t *testing.T) {
     applicationInstance := newEnvironmentRefusalApplication(t, config.ModeCli, map[string]string{config.EnvironmentNameKey: config.EnvironmentDevelopment})
 

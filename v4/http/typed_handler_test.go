@@ -25,7 +25,6 @@ type jsonHandlerTestRequest struct {
     Name string `json:"name" validate:"notBlank"`
 }
 
-/* the shared http container carries the configuration the body-reading door resolves the request limit from: JsonHandler binds through the same door Request.BindJson does, so it needs the same services the rest of the request cycle needs rather than a container of its own with fewer */
 func newJsonHandlerRuntime() containercontract.Runtime {
     serviceContainer := newHttpTestContainer()
 
@@ -59,7 +58,6 @@ func newJsonHandlerRuntimeWithBodyLimit(maxRequestBodyBytes int) containercontra
     return runtime.NewRequest(context.Background(), serviceContainer.NewScope())
 }
 
-/* the panicking-responder mirror needs the journal itself and not a nop: the record is filed at the recovery site, so the only reader that can see it is a logger installed on the runtime the handler is called with */
 func newJsonHandlerRuntimeWithLogger(logger loggingcontract.Logger) containercontract.Runtime {
     serviceContainer := newHttpTestContainer()
     serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, logger, containercontract.OverrideOptions{})
@@ -297,7 +295,6 @@ func TestJsonHandler_ServesValidationDetailUnderTheValidationErrorsKey(t *testin
         t.Fatalf("expected an http exception, got %T: %v", handleErr, handleErr)
     }
 
-    /* the per-field detail reaches the client under the one key that names it, and the listener's rule-wiring classification reads exactly this key, for a route bound through this door as for any other */
     if _, exists := httpException.Context()["validationErrors"]; false == exists {
         t.Fatalf("expected the validation detail under validationErrors, got context %v", httpException.Context())
     }
@@ -318,7 +315,6 @@ func TestJsonHandler_RefusesANullBodyBoundToASlice(t *testing.T) {
 
     _, handleErr := handler(runtimeInstance, httptest.NewRecorder(), request)
 
-    /* the guard asked only about pointers, so a bulk endpoint typed on a slice took the same null past it, the validator reported the nil collection valid, and the handler was entered with it */
     if nil == handleErr {
         t.Fatalf("expected a null body to be refused")
     }

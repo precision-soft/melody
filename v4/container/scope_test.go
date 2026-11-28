@@ -98,7 +98,6 @@ func TestScope_OverrideInstance_IsolatedFromResolver(t *testing.T) {
     }
 }
 
-/* an override of one name on a scope must not answer another service's type-keyed resolution: the scope exposes the override under the value's own canonical type only when that type is FREE, and here the container registered it for a service of its own — so the scope's GetByType keeps answering the registered service, not the override */
 func TestScopeOverride_OfOneNameDoesNotAnswerAnotherServicesGetByType(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -140,7 +139,6 @@ func TestScopeOverride_OfOneNameDoesNotAnswerAnotherServicesGetByType(t *testing
     }
 }
 
-/* an override answers before anything else, and that holds for a name the container has ALREADY built: the container's own resolution reads its instance map without taking the exclusive lock when there is nothing to write, and a resolution layered over a scope must never be answered from there — the scope is the whole reason the caller asked through it. The container instance is built first here on purpose, because a name the container has not built yet cannot tell the two paths apart. */
 func TestScope_AnOverrideWinsOverAnInstanceTheContainerHasAlreadyBuilt(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -197,7 +195,7 @@ func TestScope_CloseReturnsErrorOnGet(t *testing.T) {
 func TestScope_CloseKeepsMustGetPanicking(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
-    /* the name is registered so a LIVE scope answers instead of panicking: on an empty container MustGet panics whatever the scope's state, and the recover below cannot tell the closed branch from a missing registration */
+    /* registered so a live scope answers: on an empty container MustGet panics whatever the scope's state */
     registerErr := serviceContainer.Register(
         "service.test",
         func(resolver containercontract.Resolver) (*scopeTestService, error) {
@@ -218,7 +216,6 @@ func TestScope_CloseKeepsMustGetPanicking(t *testing.T) {
             t.Fatalf("expected panic from MustGet on a closed scope")
         }
 
-        /* the panic message is the same whatever the refusal was, so the cause is the only thing that names the guard under test */
         recoveredErr, isError := recovered.(error)
         if false == isError || false == errors.Is(recoveredErr, ErrScopeClosed) {
             t.Fatalf("expected the panic to carry the closed-scope refusal, got %#v", recovered)
@@ -244,7 +241,6 @@ func TestScope_HasReturnsFalseWhenClosed(t *testing.T) {
 
     scopeInstance := serviceContainer.NewScope()
 
-    /* the positive control: on an empty container the closed branch and the full lookup both answer false, so without a registered name the assertion below holds just as well with the closed branch deleted */
     if false == scopeInstance.Has("a") {
         t.Fatalf("expected the live scope to answer for the registered name")
     }
@@ -274,7 +270,6 @@ func TestScope_CloseIsIdempotent(t *testing.T) {
 
     scopeInstance := serviceContainer.NewScope()
 
-    /* the scope has to have BUILT something: on a cold scope both passes walk empty maps, so idempotence reads exactly like a Close that tears down nothing at all */
     if _, getErr := scopeInstance.Get(t.Context(), "app.idempotent"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
@@ -324,7 +319,7 @@ func TestScope_OverrideAfterCloseKeepsMustPanicking(t *testing.T) {
             t.Fatalf("expected panic from MustOverrideProtectedInstance on a closed scope")
         }
 
-        /* an unqualified recover accepts any panic at all; the message is the same whatever the refusal was, so the cause is what names the guard under test */
+        /* an unqualified recover accepts any panic, so the cause names the guard under test */
         recoveredErr, isError := recovered.(error)
         if false == isError || false == errors.Is(recoveredErr, ErrScopeClosed) {
             t.Fatalf("expected the panic to carry the closed-scope refusal, got %#v", recovered)
@@ -373,14 +368,13 @@ func TestScope_GetByTypeAfterCloseKeepsMustPanicking(t *testing.T) {
             t.Fatalf("expected panic from MustGetByType on a closed scope")
         }
 
-        /* the panic message is the same whatever the refusal was, so the cause is the only thing that names the guard under test */
         recoveredErr, isError := recovered.(error)
         if false == isError || false == errors.Is(recoveredErr, ErrScopeClosed) {
             t.Fatalf("expected the panic to carry the closed-scope refusal, got %#v", recovered)
         }
     }()
 
-    /* the type is registered so a LIVE scope answers instead of panicking: on an empty container MustGetByType panics whatever the scope's state */
+    /* registered so a live scope answers: on an empty container the by-type read panics whatever the scope's state */
     _ = scopeInstance.MustGetByType(t.Context(), reflect.TypeOf((*scopeTestService)(nil)))
 }
 
@@ -400,7 +394,6 @@ func TestScope_HasTypeReturnsFalseWhenClosed(t *testing.T) {
 
     scopeInstance := serviceContainer.NewScope()
 
-    /* the positive control: with no type registered the closed branch and the full lookup both answer false, so without this the assertion below holds with the closed branch deleted */
     if false == scopeInstance.HasType(reflect.TypeOf((*scopeTestService)(nil))) {
         t.Fatalf("expected the live scope to answer for the registered type")
     }
@@ -474,7 +467,6 @@ func TestScope_ConcurrentGetAndClose(t *testing.T) {
 
     waitGroup.Wait()
 
-    /* the recover above swallows every panic the readers take, so without this the whole point of the fixture — that a scope closing under concurrent readers refuses rather than crashing — is unasserted and all 32 goroutines may panic with the test green */
     if 0 != panics.Load() {
         t.Fatalf("expected no reader to panic while the scope closed under them, got %d", panics.Load())
     }
@@ -571,7 +563,6 @@ func TestScope_MustGetByTypeNilTypePanicsDescriptively(t *testing.T) {
         if nil == recoveredValue {
             t.Fatalf("expected MustGetByType(nil) to panic")
         }
-        /* the panic must carry the descriptive wrapped GetByType error, not an obscure nil-pointer dereference from calling String() on a nil reflect.Type */
         if _, isRuntimeError := recoveredValue.(runtime.Error); true == isRuntimeError {
             t.Fatalf("expected a descriptive panic carrying the GetByType cause, got a runtime error: %v", recoveredValue)
         }
@@ -580,7 +571,6 @@ func TestScope_MustGetByTypeNilTypePanicsDescriptively(t *testing.T) {
     _ = scope.MustGetByType(t.Context(), nil)
 }
 
-/* A service that reads nothing out of the scope has to stay a process singleton. Melody instantiates lazily, so the first resolution of nearly every service happens inside a request; scoping all of them would rebuild the whole graph — connection pools included — once per request. */
 func TestScope_ServiceThatReadsNothingFromTheScopeStaysASingleton(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -631,7 +621,6 @@ func TestScope_ServiceThatReadsNothingFromTheScopeStaysASingleton(t *testing.T) 
     }
 }
 
-/* The container's graph must stay consistent with itself: after a scope-bound service was built, resolving the same name from the container may not answer with the instance that belongs to a closed request. */
 func TestScope_RootContainerDoesNotSeeTheScopeBoundInstance(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -687,7 +676,6 @@ func (instance *closeCountingScopeService) CloseWithContext(closeContext context
     return instance.closeErr
 }
 
-/* An override was installed from outside and outlives the scope, and a singleton belongs to the root container which closes it at the end of the process; closing either here would tear down, once per request, something the next request still needs. */
 func TestScope_CloseLeavesOverridesAndRootSingletonsAlone(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -746,7 +734,6 @@ func TestScope_CloseLeavesOverridesAndRootSingletonsAlone(t *testing.T) {
     }
 }
 
-/* scopeLifetimeProbe counts how many times it was built and closed, which is the whole question a request scope poses about a container service. */
 type scopeLifetimeProbe struct {
     closed *atomic.Int64
 }
@@ -757,9 +744,6 @@ func (instance *scopeLifetimeProbe) CloseWithContext(closeContext context.Contex
     return nil
 }
 
-/* The container is request-agnostic: a service it owns is one instance for the whole process. Resolving that service THROUGH a request scope must not change what it is — the scope layers over the container for the code running inside a request, it does not reach underneath into the container's own wiring.
-
-   This is the shape that broke: a provider that asks for the logger. The kernel installs a request logger into every scope under the same name the container registers, so a provider doing nothing request-specific at all was assembled from a scope entry, kept per request, and closed when the request ended. Live in the repository: the bunorm providers read the logger while opening, so the *bun.DB pool was closed at the end of the request that first resolved it. The provider must see the container's own logger, be built once, and never be closed by a request ending. */
 func TestScope_AContainerServiceStaysASingletonWhenResolvedThroughAScope(t *testing.T) {
     var buildCount atomic.Int64
     var closeCount atomic.Int64
@@ -826,7 +810,6 @@ func TestScope_AContainerServiceStaysASingletonWhenResolvedThroughAScope(t *test
     }
 }
 
-/* the other half of the same rule, and the reason it is safe: a container provider that genuinely needs something only a request carries is told the service does not exist, at the point the mistake is made, instead of quietly becoming a per-request object that a request ending destroys. */
 func TestScope_AContainerProviderCannotReachAScopeOnlyEntry(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -853,19 +836,16 @@ func TestScope_AContainerProviderCannotReachAScopeOnlyEntry(t *testing.T) {
         t.Fatalf("unexpected override error: %v", overrideErr)
     }
 
-    /* the scope carries it, so asking the scope directly answers */
     if value, getErr := requestScope.Get(t.Context(), "request.context"); nil != getErr || "the-request" != value {
         t.Fatalf("expected the scope to answer for its own entry, got %v / %v", value, getErr)
     }
 
-    /* the container provider may not, and must be told so */
     _, getErr := requestScope.Get(t.Context(), "app.reporter")
     if nil == getErr {
         t.Fatal("a container provider reached a scope-only entry: it would hold one request for the life of the process")
     }
 }
 
-/* a scoped service resolved BY TYPE is filed under its name AND its type, and the dependency edge targets the name node while the resolution stack carried the type node. Without the alias collapse the type node carried no edges, sorted ahead of every "scope:service:" key, and closed the shared instance in the first heap wave — the transaction underneath a repository still holding it. */
 func TestScopeClose_TypeAliasClosesAfterDependent(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -973,7 +953,6 @@ func TestScopeClose_DualFiledUncomparableValue_ClosedOnce(t *testing.T) {
     }
 }
 
-/* a ClosedWithScope override replacing a created instance evicts it from the maps the teardown reads, but the evicted value is still the scope's to close — it waits in the graveyard and closes with the scope, exactly once. Before the graveyard it simply leaked, with both calls reporting success. */
 func TestScopeClose_EvictedCreatedInstanceClosedAtTeardown(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -1039,7 +1018,6 @@ func (instance *secondEvictedFailingService) CloseWithContext(closeContext conte
     return instance.failure
 }
 
-/* two evicted created instances whose closes both fail are both recorded: the graveyard entries carry no node key of their own, so a shared constant key let the second failure overwrite the first's record, naming one failure where two happened */
 func TestScopeClose_TwoFailingEvictedInstancesAreBothRecorded(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -1117,7 +1095,6 @@ func TestScopeClose_TwoFailingEvictedInstancesAreBothRecorded(t *testing.T) {
     }
 }
 
-/* Two of the three panicking override doors on a scope are not on the Scope interface at all — they are reached through the optional options companion, which is exactly the shape a caller gets wrong — and all three have to carry their own message: a request-scoped substitution that fails has to say whether the protected door or the plain one refused it. */
 func TestScope_MustOverrideInstance_InstallsAndNamesItsOwnFailure(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -1154,7 +1131,6 @@ func TestScope_MustOverrideInstance_InstallsAndNamesItsOwnFailure(t *testing.T) 
     scopeInstance.MustOverrideInstance("service.protected", &scopeTestService{value: "installed"}, OverrideOptions{})
 }
 
-/* the protected door admits the "service." namespace the plain one refuses, and its panicking form has to say so — a failure reported with the plain door's message would send a reader looking for a protection that was never in the way. Its refusal here is the closed scope, the only thing the protected door still turns away. */
 func TestScope_MustOverrideProtectedInstance_InstallsAndNamesItsOwnFailure(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -1195,7 +1171,6 @@ func TestScope_MustOverrideProtectedInstance_InstallsAndNamesItsOwnFailure(t *te
     scopeInstance.MustOverrideProtectedInstance("service.protected", &scopeTestService{value: "late"}, OverrideOptions{})
 }
 
-/* a scope-level substitution of a protected name is the framework's own service replaced inside a live request, which is the one thing the namespace exists to prevent; the scope door refuses it exactly as the container door does. */
 func TestScope_OverrideInstance_ProtectedNameRefused(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -1211,7 +1186,6 @@ func TestScope_OverrideInstance_ProtectedNameRefused(t *testing.T) {
     }
 }
 
-/* an empty name on a scope is refused before the options are even read, for the reason the container refuses it: nothing filed under it can ever be asked for again, and a request-scoped substitution silently lost is worse than one that failed loudly. */
 func TestScope_OverrideProtectedInstance_EmptyNameRefused(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -1227,7 +1201,6 @@ func TestScope_OverrideProtectedInstance_EmptyNameRefused(t *testing.T) {
     }
 }
 
-/* a nil substituted into a scope is dereferenced by the first handler that reads it, inside the request, and a typed nil boxed into an interface is not equal to nil — so the plain comparison and the interface one are two guards, and each has to be entered by something. */
 func TestScope_OverrideProtectedInstance_NilValueRefusedInBothSpellings(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -1254,7 +1227,6 @@ func TestScope_OverrideProtectedInstance_NilValueRefusedInBothSpellings(t *testi
     }
 }
 
-/* Get on a scope answers the empty-name refusal rather than reaching the resolver with it, so a caller whose configuration resolved a name away is told what it did rather than shown a missing-service report about a service nobody named. */
 func TestScope_Get_EmptyNameRefused(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -1270,7 +1242,6 @@ func TestScope_Get_EmptyNameRefused(t *testing.T) {
     }
 }
 
-/* Has and HasType on a scope answer false for the empty name and the nil type. Both refusals are SHADOWED — nothing can be filed under the empty name, and canonicalServiceType answers nil for a nil type so the guard below returns the same false — so this pins the verdict a caller relies on, not the position of the guard. */
 func TestScope_HasAndHasType_AnswerFalseForTheEmptyNameAndTheNilType(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -1312,7 +1283,6 @@ func (instance *scopeCloseFailingService) CloseWithContext(closeContext context.
     return instance.failure
 }
 
-/* a scoped service whose Close fails is the request's own teardown reporting a leak, and the report has to reach the caller of Close rather than being swallowed into the silence a nil return means — a connection returned to nobody looks exactly like a clean scope from the outside. */
 func TestScope_Close_ReportsAFailingServiceClose(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -1367,7 +1337,6 @@ func TestScope_Close_ReportsAFailingServiceClose(t *testing.T) {
     }
 }
 
-/* newScope falls back to an empty plan when it is handed none, which no public path can produce — NewScope always passes the container's published plan, and the rebuild never yields nil. The fallback is what keeps a scope built from a nil plan usable instead of dereferencing it on the first Has, so it is pinned white-box, with the state constructed by hand because the API cannot construct it. */
 func TestNewScope_ANilPlanBecomesAnEmptyPlanRatherThanANilDereference(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{}).(*container)
 
@@ -1412,7 +1381,6 @@ func (instance *overrideScopeGreeter) Greet() string {
 
 type scopeOverrideOutsider struct{}
 
-/* the scope override propagates to every type its name is registered under, exactly as the container-level sibling propagates: without it, a type-keyed resolution through the scope answered the container's memoized instance while the name answered the override — a divergence that appeared exactly once the container had built the name, the ordinary warm state of a running process */
 func TestScope_OverridePropagatesToEveryRegisteredTypeOfTheName(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -1448,7 +1416,6 @@ func TestScope_OverridePropagatesToEveryRegisteredTypeOfTheName(t *testing.T) {
     }
 }
 
-/* the condition the propagation stands under: the maps written are the scope's own, so the container and every other scope keep answering the container's instance, and the override dies with its scope */
 func TestScope_OverridePropagationDoesNotPolluteTheContainer(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -1497,7 +1464,6 @@ func TestScope_OverridePropagationDoesNotPolluteTheContainer(t *testing.T) {
     }
 }
 
-/* the propagation carries the container sibling's guard with it: a value a registered type cannot hold is refused before anything is written, so the name and type maps never learn two different answers */
 func TestScope_OverrideRefusesAValueARegisteredTypeCannotHold(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -1531,7 +1497,6 @@ func TestScope_OverrideRefusesAValueARegisteredTypeCannotHold(t *testing.T) {
     }
 }
 
-/* a closed-with-scope override filed under the name and every registered type is still one value: the alias links written at filing time collapse the nodes, and the teardown closes it once */
 func TestScope_AClosedWithScopeOverrideUnderARegisteredTypeClosesOnce(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -1587,7 +1552,6 @@ func TestScope_ClosedAnswersTheLifecycle(t *testing.T) {
     }
 }
 
-/* the propagation reads the scoped plan too: a scoped service resolved by type files what it built under the registered type, and an override arriving after that build must outrank it — filed under the value's concrete type alone, the created instance kept answering the type while the name answered the override */
 func TestScope_OverridePropagationCoversTheScopedPlanLayer(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -1622,7 +1586,6 @@ func TestScope_OverridePropagationCoversTheScopedPlanLayer(t *testing.T) {
     }
 }
 
-/* the same rule for a registration made on the live scope itself, the third place a name can be registered under a type */
 func TestScope_OverridePropagationCoversTheScopeOwnRegistrations(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -1657,7 +1620,6 @@ func TestScope_OverridePropagationCoversTheScopeOwnRegistrations(t *testing.T) {
     }
 }
 
-/* a closed scope enumerates nothing, mirroring Has: the request is over and its collaborators are gone, so a late collection gets an empty set instead of reaching into a container the scope has let go of */
 func TestScope_TypesImplementingReturnsEmptyWhenClosed(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -1704,7 +1666,6 @@ func (instance *aliasKeptResolverHolder) CloseWithContext(closeContext context.C
     return nil
 }
 
-/* the collapse is what the CREATION-ORDER tie-break cannot stand in for, and only a fixture where the two disagree can tell them apart. A dependency built DURING its dependent's construction is always stamped first, so latest-first reaches the dependent before either of its filings and the order comes out right with or without the collapse — which is why the sibling above passes either way. Here the holder is created first and reaches for the service through the resolver it kept, so the dual filing is stamped AFTER it: the type alias carries no edge of its own and is the newest node in the scope, so latest-first pops it before the holder and closes the shared instance out from under it. Collapsed onto the name node the alias inherits the holder's edge, and the one close the pair produces happens after the holder's. */
 func TestScopeClose_TypeAliasStampedAfterItsDependentClosesAfterIt(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -1742,7 +1703,6 @@ func TestScopeClose_TypeAliasStampedAfterItsDependentClosesAfterIt(t *testing.T)
         t.Fatalf("expected the holder, got %#v", holderValue)
     }
 
-    /* BY TYPE, which is the resolution that files the instance under its name AND its type; the edge goes to the name node, so the type alias is left carrying nothing */
     if _, heldErr := holder.resolver.GetByType(t.Context(), reflect.TypeOf((*aliasNameHeldService)(nil))); nil != heldErr {
         t.Fatalf("unexpected late resolution error: %v", heldErr)
     }
@@ -1761,7 +1721,6 @@ func TestScopeClose_TypeAliasStampedAfterItsDependentClosesAfterIt(t *testing.T)
     }
 }
 
-/* the same disagreement on the OVERRIDE path: an override declared ClosedWithScope propagates to every type the name is registered under, the type stamped after the name, and it is installed here after the holder that later reaches for it — so without the alias link the type node is the newest node with no edge on it and closes the installed value before its holder. */
 func TestScopeClose_TypeAliasOfAnOverrideClosesAfterItsDependent(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -1846,7 +1805,6 @@ func (instance *aliasGroupMiddleService) CloseWithContext(closeContext context.C
     return nil
 }
 
-/* an alias group is as old as its OLDEST member, and only a group that SPANS a third node can tell that from taking the newest — the two siblings above cannot, because a type filed alongside its name in one keep is stamped right after it and nothing can fall between two consecutive stamps. Here the name is filed by a plain resolution, an unrelated service is built next, and the override propagates to the registered type LAST: the name keeps its first stamp, the type takes a third, and the middle service sits inside the group. Read as old as its name the pair closes after the middle; read as new as its late type filing it closes before, tearing the installed value down ahead of a service built later than it. */
 func TestScopeClose_AnAliasGroupIsAsOldAsItsOldestMember(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -1874,7 +1832,6 @@ func TestScopeClose_AnAliasGroupIsAsOldAsItsOldestMember(t *testing.T) {
 
     scopeInstance := serviceContainer.NewScope()
 
-    /* BY NAME, which files the name node alone */
     if _, getErr := scopeInstance.Get(t.Context(), "app.aaa.shared"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
@@ -1883,7 +1840,6 @@ func TestScopeClose_AnAliasGroupIsAsOldAsItsOldestMember(t *testing.T) {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
-    /* the override propagates to the type the name is registered under, so the type node is stamped here — after the middle service, and far from the name it belongs to */
     if overrideErr := scopeInstance.OverrideInstance(
         "app.aaa.shared",
         &aliasGroupSpanningService{label: "installed", recorder: recorder},
@@ -1905,14 +1861,11 @@ func TestScopeClose_AnAliasGroupIsAsOldAsItsOldestMember(t *testing.T) {
         t.Fatalf("expected the alias group to close as old as its oldest member, got %v", recorded)
     }
 
-    /* the evicted value closes after the ordered walk, which is where the teardown puts everything it replaced */
     if "original" != recorded[2] {
         t.Fatalf("expected the evicted value to close last, got %v", recorded)
     }
 }
 
-/* the override guards twice — once before the container's registered types are read and once after the scope lock is taken — and only the second one covers a scope that closes while the first read is in flight. The container's write lock is held here so the goroutine parks inside registeredTypesForServiceName, which is what puts it demonstrably between the two checks. */
-/* waitUntilParkedOnALock waits until a goroutine whose stack holds the frame is parked acquiring a lock, the state a hand-off test builds before it releases the lock it holds, where a sleep only makes that state likely */
 func waitUntilParkedOnALock(t *testing.T, frame string) {
     t.Helper()
 
@@ -1983,7 +1936,6 @@ func TestScope_OverrideClosedDuringTheLockHandOffIsStillRefused(t *testing.T) {
     }
 }
 
-/* Get guards at entry and the scope's own instance lookup guards again, and only the second one covers a scope that closes while the resolution is already in flight. A scoped resolution takes no container lock before the lookup — the memo fast path is skipped whenever a scope is visible — so the scope's own write lock is what the goroutine parks on, inside the scoped-provider read that precedes the lookup. */
 func TestScope_GetClosedAfterTheEntryCheckIsRefusedByTheLookup(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -2017,7 +1969,6 @@ func TestScope_GetClosedAfterTheEntryCheckIsRefusedByTheLookup(t *testing.T) {
     }
 }
 
-/* the by-type twin of the lookup above: GetByType's entry check and lookupInstanceByType's are two guards, and this reaches the second. */
 func TestScope_GetByTypeClosedAfterTheEntryCheckIsRefusedByTheLookup(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -2194,7 +2145,6 @@ func TestScope_Close_ContainsAPanickingContextDoor(t *testing.T) {
     }
 }
 
-/* the scope's failure map has the same one-line shape as the container's, and the same details map beside it */
 func TestScope_Close_CarriesTheFailureDetailsOfAPanickingCloseBesideItsLine(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -2228,7 +2178,6 @@ func TestScope_Close_CarriesTheFailureDetailsOfAPanickingCloseBesideItsLine(t *t
     assertCloseFailureDetails(t, typedError.Context(), "scope:service:app.scoped.panics")
 }
 
-/* scopedContextDoorOnlyService is the scoped twin of the container test's fixture: the context-taking close door alone, no Close. */
 type scopedContextDoorOnlyService struct {
     closes      int
     hadDeadline bool
@@ -2273,7 +2222,6 @@ func TestScope_Close_ClosesAServiceThatCarriesOnlyCloseWithContextAndHandsItTheD
     }
 }
 
-/* the sister of the container's site: the scope reads the close error's context through the same contained door, so an error whose Unwrap panics is recorded rather than ending the scope's teardown — and a request scope closes on the request path, where a panic reaches the kernel's recovery as a five hundred. The cut and its reason are written into the chain by LogContext itself. */
 func TestScope_Close_ACloseErrorWhoseUnwrapPanicsDoesNotEndTheTeardown(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -2357,7 +2305,6 @@ func TestScope_CloseWithContext_HandsAContextWithinTheCallersToTheEvictedAndTheR
     }
 }
 
-/* a ring of scoped services closed through a Lazy handle is refused at the resolution that closes it, as in the container, and the scope closes the holder alone */
 func TestScope_ARingClosedThroughALazyHandleIsRefusedAtTheResolutionThatClosesIt(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -2410,7 +2357,6 @@ func TestScope_ARingClosedThroughALazyHandleIsRefusedAtTheResolutionThatClosesIt
     }
 }
 
-/* a scoped ring closed onto a scoped service another goroutine is still building is refused at the resolution that closes it, by name and by type: the edge the building resolution holds while it waits is visible to the check */
 func TestScope_ARingClosedOntoAScopedCreationInFlightIsRefused(t *testing.T) {
     for _, resolution := range []struct {
         name    string
@@ -2496,7 +2442,6 @@ func TestScope_ARingClosedOntoAScopedCreationInFlightIsRefused(t *testing.T) {
     }
 }
 
-/* a scoped lookup that failed and was handled leaves no edge behind, by name and by type, so the scoped service it failed to reach may later depend on the one that tried */
 func TestScope_AFailedScopedLookupLeavesNoDependency(t *testing.T) {
     for _, lookup := range []struct {
         name    string
@@ -2553,7 +2498,6 @@ func TestScope_AFailedScopedLookupLeavesNoDependency(t *testing.T) {
     }
 }
 
-/* a scoped Lazy handle resolving by type is the one name's node, so the ring its target's provider closes by name is refused, not left to the scope's Close */
 func TestScope_ARingClosedThroughALazyByTypeHandleIsRefused(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -2593,7 +2537,6 @@ func TestScope_ARingClosedThroughALazyByTypeHandleIsRefused(t *testing.T) {
     }
 }
 
-/* a scoped ring closed by type onto a built scoped instance through a Lazy handle is refused, as by name */
 func TestScope_ARingClosedByTypeOntoABuiltInstanceIsRefused(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -2629,7 +2572,6 @@ func TestScope_ARingClosedByTypeOntoABuiltInstanceIsRefused(t *testing.T) {
     }
 }
 
-/* the entry refusal of an override on a closed scope names the service beside the stage, as the refusal behind the lock does. */
 func TestScope_OverrideOnAClosedScopeNamesTheServiceAtEntry(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
     scopeInstance := serviceContainer.NewScope().(*scope)

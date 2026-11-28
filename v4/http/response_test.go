@@ -321,7 +321,6 @@ func TestJsonErrorResponse_ContainsErrorField(t *testing.T) {
     }
 }
 
-/* JsonErrorResponse is the constructor the security entry points and every fallback answer through, so its body is the envelope the renderer writes: the status, the moment and an error object carrying the message, nothing else */
 func TestJsonErrorResponse_WritesTheEnvelope(t *testing.T) {
     response := JsonErrorResponse(429, "too many requests")
 
@@ -364,7 +363,6 @@ func TestContentTypeByExtension_ResolvesIcoAndIsCaseInsensitive(t *testing.T) {
     }
 }
 
-/* the refusal is what makes the unsafe composition fail at the first probe: a location built from client input is how an open redirect is minted, and each of the three shapes below is a way a browser leaves the origin — a scheme, a scheme-relative slash pair, and the backslash several browsers fold to a slash while net/url does not */
 func TestRedirectResponse_RefusesTheLocationsThatLeaveTheApplication(t *testing.T) {
     for _, location := range []string{
         "https://evil.example.com/",
@@ -388,7 +386,6 @@ func TestRedirectResponse_RefusesTheLocationsThatLeaveTheApplication(t *testing.
     }
 }
 
-/* the guard runs before net/http writes the field, and the writer folds away leading spaces and tabs — so a padded spelling reaches the browser as the bare scheme-relative target while an untrimmed reading sees a relative path. Each case below is asserted twice: the constructor refuses it, and net/http is shown emitting the external location that makes the refusal necessary. */
 func TestRedirectResponse_RefusesALocationThePaddingWouldHideFromTheGuard(t *testing.T) {
     for _, testCase := range []struct {
         location string
@@ -440,7 +437,6 @@ func TestRedirectResponse_AnswersTheRelativeLocations(t *testing.T) {
     }
 }
 
-/* the external door is the caller's assertion, so it must answer exactly what the guarded one refuses */
 func TestRedirectExternalResponse_AnswersAnAbsoluteLocation(t *testing.T) {
     response := RedirectExternalResponse("https://partner.example.com/checkout", 0)
 
@@ -485,7 +481,6 @@ func TestConfinedFileResponse_ServesANameUnderTheRootAndNothingOutsideIt(t *test
         }
     }
 
-    /* every name above is caught by a guard that runs before the mode is ever asked — containment, or the empty name — so the last refusal in the chain has no input of its own. A name that resolves INSIDE the root and is not a regular file is the only one that reaches it, and a directory is the shape a deployment produces by accident. */
     if mkdirErr := os.Mkdir(rootDirectory+"/archive", 0o755); nil != mkdirErr {
         t.Fatalf("mkdir error: %v", mkdirErr)
     }
@@ -500,7 +495,6 @@ func TestConfinedFileResponse_ServesANameUnderTheRootAndNothingOutsideIt(t *test
     }
 }
 
-/* "." resolves every name to a relative path that carries no "./" prefix, and "/" joins with the separator into "//", so a containment read as a textual prefix of the root refuses every name under both */
 func TestConfinedFileResponse_ServesANameUnderTheCurrentDirectoryAndUnderTheFilesystemRoot(t *testing.T) {
     directory := t.TempDir()
 
@@ -566,7 +560,6 @@ func TestConfinedFileResponse_ServesANameUnderTheCurrentDirectoryAndUnderTheFile
     }
 }
 
-/* the symlink is the escape the textual checks cannot see: the name is clean, the join is under the root, and the target is not */
 func TestConfinedFileResponse_ASymlinkPointingOutsideTheRootIsRefused(t *testing.T) {
     rootDirectory := t.TempDir()
     outsideDirectory := t.TempDir()
@@ -653,7 +646,6 @@ func TestConfinedFileResponse_ServesASymlinkWithAnAbsoluteTargetInsideARelativeR
     }
 }
 
-/* every refusal the client's name causes is the same 404, so the answer says nothing about what lies outside the root and carries no server path; a blank root is the application's fault and stays an error */
 func TestConfinedFileResponse_EveryRefusalTheNameCausesIsANotFound(t *testing.T) {
     rootDirectory := t.TempDir()
     outsideDirectory := t.TempDir()
@@ -731,7 +723,6 @@ func TestConfinedFileResponse_AServedRefusalAnswers404WithNoServerPathInTheBody(
     }
 }
 
-/* the renderer and the plain-text printer spell the error body's keys through the constants, which must stay the tags ErrorResponsePayload releases */
 func TestErrorResponseKeys_AreThePayloadsTags(t *testing.T) {
     payloadType := reflect.TypeOf(ErrorResponsePayload{})
     detailType := reflect.TypeOf(ErrorResponsePayloadDetail{})

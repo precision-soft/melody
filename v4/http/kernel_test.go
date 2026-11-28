@@ -802,7 +802,6 @@ func TestKernel_KernelRequestStoppingListenerThatAnswersStillFailsClosedBeforeAR
     }
 }
 
-/* the refusal decides the status only when no required listener was skipped, so the 500 here proves the opt-out is not read for a listener that failed */
 func TestKernel_KernelRequestFailingMaySkipListenerThatRefusesStillFailsClosedBeforeARequiredListener(t *testing.T) {
     router := NewRouter()
     router.Handle(
@@ -3760,7 +3759,6 @@ func TestNewKernel_AppliesEveryConfigField(t *testing.T) {
     }
 }
 
-/* a setter beside KernelConfig would be a second door for one value */
 func TestKernel_ExportsNoMutator(t *testing.T) {
     fileSet := token.NewFileSet()
     parsedFile, parseErr := parser.ParseFile(fileSet, "kernel.go", nil, 0)
@@ -4934,7 +4932,6 @@ func TestKernel_APanickingListenerLeavesTheOriginalStatus(t *testing.T) {
     serviceContainer := newHttpTestContainer()
     serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, capture, container.OverrideOptions{})
 
-    /* the floor's neighbour: had the dispatch gone on past the panicking listener, it would have run before the floor */
     aboveFloorRan := false
     event.EventDispatcherMustFromResolver(t.Context(), serviceContainer).AddListener(
         kernelcontract.EventKernelException,
@@ -5282,7 +5279,6 @@ func TestKernel_ARefusalBesideASkippedRequiredListenerFailsClosed(t *testing.T) 
     }
 }
 
-/* a refusal made above a failing listener stands beside a skipped required listener, so the dispatch's refusal of the skip decides: 500, not the refusal's 403 */
 func TestKernel_ARefusalAboveAFailureAheadOfARequiredListenerFailsClosed(t *testing.T) {
     serviceContainer := newHttpTestContainer()
 

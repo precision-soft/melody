@@ -48,7 +48,6 @@ type twinRouteRegistry struct{ httpcontract.RouteRegistry }
 type twinUrlGenerator struct{ httpcontract.UrlGenerator }
 type twinRouter struct{ httpcontract.Router }
 
-/* softForm names how a twin answers a failure: by panic, by nil, or by an error */
 type softForm string
 
 const (
@@ -68,7 +67,6 @@ type accessorTwinCase struct {
     form        softForm
 }
 
-/* registerAs files the value under the name, its provider recording the context value its runtime carries */
 func registerAs[T any](serviceName string) func(registrar containercontract.Registrar, value any, seen *any) {
     return func(registrar containercontract.Registrar, value any, seen *any) {
         typed := value.(T)
@@ -137,7 +135,6 @@ func accessorTwinCases() []accessorTwinCase {
     }
 }
 
-/* callTwin answers the twin's value, its error, and the panic it raised */
 func callTwin(testCase accessorTwinCase, runtimeInstance containercontract.Runtime) (value any, err error, recovered any) {
     defer func() {
         recovered = recover()
@@ -230,7 +227,6 @@ func TestAccessorTwin_RefusesAnUnregisteredServiceNamingIt(t *testing.T) {
     }
 }
 
-/* recoveredText spells a refusal with the context of every link of its chain, where the service name travels */
 func recoveredText(value any) string {
     builder := strings.Builder{}
 
@@ -260,7 +256,6 @@ type runtimeContextProbe struct {
     kind  containercontract.Kind
 }
 
-/* the twins are one-liners over the generic door, so the door is where the runtime's context and kind reach a provider */
 func TestFromRuntime_AScopedProviderReadsTheRuntimesContextAndKind(t *testing.T) {
     for expectedKind, constructor := range map[containercontract.Kind]func(context.Context, containercontract.Scope) containercontract.Runtime{
         containercontract.KindRequest: runtime.NewRequest,

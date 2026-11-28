@@ -54,7 +54,6 @@ func TestResolveRetry_RefusesAFieldOutsideItsRuleNamingIt(t *testing.T) {
     }
 }
 
-/* a cold-start dial failure (connection refused / no such host / timeout) is transient and retried; an unrelated error is not, so a real misconfiguration still fails fast. */
 func TestIsTransientError(t *testing.T) {
     provider := NewProvider("melody", ProviderConfig{})
 
@@ -84,7 +83,6 @@ func TestIsTransientError(t *testing.T) {
     }
 }
 
-/* the backoff grows geometrically from the initial delay and is capped at the max delay. */
 func TestComputeBackoffDelay(t *testing.T) {
     provider := NewProvider("melody", ProviderConfig{
         Retry: RetryConfig{MaxAttempts: bound.Of(10), Backoff: bound.Backoff{Initial: bound.Of(time.Second), Max: bound.Of(5 * time.Second)}},

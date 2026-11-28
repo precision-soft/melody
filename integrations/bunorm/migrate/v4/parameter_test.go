@@ -43,7 +43,6 @@ func (instance emptyEnvironmentSource) Load(ctx context.Context) (map[string]str
     return map[string]string{}, nil
 }
 
-/* newParameterConfiguration answers each value as the parameter a real configuration registers under its name */
 func newParameterConfiguration(values map[string]string) *parameterConfiguration {
     environment, environmentErr := melodyconfig.NewEnvironment(context.Background(), emptyEnvironmentSource{})
     if nil != environmentErr {
@@ -97,7 +96,6 @@ func newRuntimeWithDatabaseAndParameters(t *testing.T, database *bun.DB, values 
 
     runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
 
-    /* the pool is opened first, as newRuntimeWithDatabase opens it, so a run's release leaves the shared pool open for the assertions that follow */
     if nil != database {
         if _, managerErr := registry.Manager(runtimeInstance, "primary"); nil != managerErr {
             t.Fatalf("failed to open the manager: %s", managerErr.Error())

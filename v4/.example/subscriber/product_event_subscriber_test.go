@@ -74,7 +74,6 @@ func TestProductEventSubscriber_DropsTheEntriesUnderARequestContextAlreadyDone(t
     }
 }
 
-/* a product write is announced on the catalogue topic and never on the user directory topic */
 func TestProductEventSubscriber_BroadcastsOnTheCatalogueTopic(t *testing.T) {
     fixture := notificationUnderTest(t)
 

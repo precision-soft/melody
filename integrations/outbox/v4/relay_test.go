@@ -125,13 +125,11 @@ type fakeRepository struct {
     claimDelay    time.Duration
     markDeadErr   error
     rescheduleErr error
-    /* releasedTokens and releases record ReleaseClaims apart from calls, so the exact resolution-call assertions stay meaningful */
     releasedTokens []string
     releases       []releaseCall
     releaseErr     error
 }
 
-/* releaseCall is one ReleaseClaims: the ids it named and the runtime it ran under, read at the call */
 type releaseCall struct {
     ids             []int64
     runtimeInstance containercontract.Runtime
@@ -151,7 +149,6 @@ func (instance *fakeRepository) ClaimDueMessages(_ containercontract.Runtime, li
     return instance.due, nil
 }
 
-/* models the store: charges a delivery attempt to a single row (advancing its stored count) only when that row is actually reached, and reports the row missing (claimed=false) when it is not among the due rows. It does not append to calls so the exact resolution-call assertions elsewhere stay meaningful. */
 func (instance *fakeRepository) RecordDeliveryAttempt(_ containercontract.Runtime, id int64, _ string) (int, bool, error) {
     for index := range instance.due {
         if id == instance.due[index].Id {
@@ -222,7 +219,6 @@ type fakeTransport struct {
     envelopes   []messagebuscontract.Envelope
     fail        bool
     unavailable bool
-    /* unavailableFor marks the failure of these messages alone, a broker that refuses one message on its channel while it answers the others */
     unavailableFor map[any]bool
     panicMarked    bool
 }
@@ -358,7 +354,6 @@ func TestRelay_PublishesDueMessageAndMarksSent(t *testing.T) {
     }
 }
 
-/* the published envelope carries the outbox row id as a stable message id so a consumer can deduplicate an at-least-once redelivery. */
 func TestRelay_StampsOutboxRowIdAsMessageId(t *testing.T) {
     repository := &fakeRepository{due: []Pending{{Id: 42, TypeName: "string", Payload: []byte("hello"), Attempts: 0}}}
     transport := &fakeTransport{}
@@ -412,7 +407,6 @@ func TestRelay_DeadLettersAtMaxAttempts(t *testing.T) {
     }
 }
 
-/* negative control: a row that cannot be decoded is poison and goes straight to dead. */
 func TestRelay_UndecodableMessageIsDeadLettered(t *testing.T) {
     repository := &fakeRepository{due: []Pending{{Id: 3, TypeName: "string", Payload: []byte("x"), Attempts: 0}}}
     transport := &fakeTransport{}
@@ -430,7 +424,6 @@ func TestRelay_UndecodableMessageIsDeadLettered(t *testing.T) {
     }
 }
 
-/* a row delivered more times than the delivery cap without ever resolving (it keeps crashing or hanging the relay between the recorded attempt and resolve, so its send-failure Attempts never advances to MaxAttempts) is dead-lettered as poison instead of re-surfacing forever. With MaxAttempts=2 the cap is 4; a stored count of 4 records the 5th attempt, which trips it. */
 func TestRelay_DeadLettersPoisonExceedingMaxDeliveryAttempts(t *testing.T) {
     repository := &fakeRepository{due: []Pending{{Id: 5, TypeName: "string", Payload: []byte("x"), Attempts: 0, DeliveryAttempts: 4}}}
     transport := &fakeTransport{}
@@ -448,7 +441,6 @@ func TestRelay_DeadLettersPoisonExceedingMaxDeliveryAttempts(t *testing.T) {
     }
 }
 
-/* positive control: a row whose recorded attempt lands exactly on the delivery cap (not over it) is still delivered normally, so the cap dead-letters only genuinely stuck rows. With MaxAttempts=2 the cap is 4; a stored count of 3 records the 4th attempt, which is at the cap, not over it. */
 func TestRelay_DeliversRowAtDeliveryCapBoundary(t *testing.T) {
     repository := &fakeRepository{due: []Pending{{Id: 6, TypeName: "string", Payload: []byte("ok"), Attempts: 0, DeliveryAttempts: 3}}}
     transport := &fakeTransport{}
@@ -474,7 +466,6 @@ func (instance *markSentFailingRepository) MarkSent(_ containercontract.Runtime,
     return errors.New("mark sent failed")
 }
 
-/* delivery_attempts is charged per row at delivery time, not for the whole batch at claim time. So a row the relay never reaches — here the second row, because the first row's delivery aborts the run — is not charged a delivery attempt it never received, and therefore never climbs toward the poison cap while merely waiting behind a crashing batch-mate. */
 func TestRelay_UnreachedBatchMateIsNotChargedDeliveryAttempt(t *testing.T) {
     repository := &markSentFailingRepository{fakeRepository{due: []Pending{
         {Id: 1, TypeName: "string", Payload: []byte("a"), Attempts: 0, DeliveryAttempts: 0},
@@ -498,7 +489,6 @@ func TestRelay_UnreachedBatchMateIsNotChargedDeliveryAttempt(t *testing.T) {
     }
 }
 
-/* the count follows the broker: a message whose send succeeded but whose MarkSent failed was still published, so the run reports it even as it surfaces the bookkeeping error */
 func TestRelay_CountsMessagePublishedWhenMarkSentFails(t *testing.T) {
     repository := &markSentFailingRepository{fakeRepository{due: []Pending{
         {Id: 1, TypeName: "string", Payload: []byte("a"), Attempts: 0, DeliveryAttempts: 0},
@@ -566,7 +556,6 @@ func TestRelay_ALockerThatRefusesTheLockIsTheRunsError(t *testing.T) {
     }
 }
 
-/* negative control: a pathologically large Backoff.Max and factor must not overflow the int64 duration into a negative value (which would defeat the cap and cause an immediate-retry storm). */
 func TestRelay_NextBackoffDoesNotOverflowWithLargeMax(t *testing.T) {
     relay := NewRelay(&fakeRepository{}, &fakeTransport{}, &stringCodec{}, RelayConfig{
         Backoff:        bound.Backoff{Initial: bound.Of(time.Hour), Max: bound.Of(time.Duration(math.MaxInt64)), Factor: 1000},
@@ -583,7 +572,6 @@ func TestRelay_NextBackoffDoesNotOverflowWithLargeMax(t *testing.T) {
     }
 }
 
-/* a batch that outlives the lock ttl refreshes the lease as it works; when the refresh fails (lease lost), the claimed rows are still this run's — fenced by their claim token, invisible to the new holder — so the batch is drained to its end, the refresh is not tried again, and the failure is reported after the batch. */
 func TestRelay_ALostLeaseDrainsTheClaimedBatchThenReportsTheFailure(t *testing.T) {
     refreshFailure := errors.New("lease lost")
 
@@ -621,7 +609,6 @@ func TestRelay_ALostLeaseDrainsTheClaimedBatchThenReportsTheFailure(t *testing.T
     }
 }
 
-/* a repository failure that ends the batch after the lease was already lost is the failure reported — the store is what failed and the command's loop classifies it — with the refresh failure carried in its context rather than dropped. */
 func TestRelay_ARepositoryFailureAfterALostLeaseCarriesTheRefreshFailure(t *testing.T) {
     refreshFailure := errors.New("lease lost")
 
@@ -653,7 +640,6 @@ func TestRelay_ARepositoryFailureAfterALostLeaseCarriesTheRefreshFailure(t *test
     }
 }
 
-/* positive control: when the lease refreshes cleanly, the whole batch drains. */
 func TestRelay_RefreshesLeaseAndDrainsWholeBatch(t *testing.T) {
     lock := &fakeLock{acquire: true}
     repository := &fakeRepository{due: []Pending{
@@ -716,7 +702,6 @@ func (instance *cancellingRepository) ClaimDueMessages(runtimeInstance container
     return instance.fakeRepository.ClaimDueMessages(runtimeInstance, limit, visibility, options)
 }
 
-/* a signal cancels the run context mid-drain, so a release riding it would never reach the backend and the lease would survive its whole ttl, stalling every other replica. */
 func TestRelay_ReleasesLeaseOnAContextThatOutlivesCancellation(t *testing.T) {
     runContext, cancel := context.WithCancel(context.Background())
     defer cancel()
@@ -755,7 +740,6 @@ func TestRelay_ReleasesLeaseOnAContextThatOutlivesCancellation(t *testing.T) {
     }
 }
 
-/* a lease that could not be released stalls every other replica for the whole ttl, so the failure must be reported rather than discarded. */
 func TestRelay_ReportsAFailedLeaseRelease(t *testing.T) {
     logger := &recordingLogger{}
 
@@ -806,7 +790,6 @@ func TestRelay_NextBackoffCapsAtMax(t *testing.T) {
     }
 }
 
-/* failingCauseTransport fails every send with a wrapped error whose CAUSE carries the broker verdict. */
 type failingCauseTransport struct {
     fakeTransport
     cause error
@@ -838,7 +821,6 @@ func TestRelay_DeadLetterRecordsTheCauseChainNotTheMessageAlone(t *testing.T) {
     }
 }
 
-/* the cap's cut lands on a rune boundary: a byte cut through a multi-byte rune leaves an invalid string, which a strict utf8mb4 column refuses — failing the very resolution write the cap exists to protect, so the row re-surfaced every visibility timeout with nothing recorded */
 func TestStoredLastError_TruncatesOnARuneBoundary(t *testing.T) {
     prefix := strings.Repeat("a", maximumStoredErrorLength-1)
 
@@ -913,13 +895,12 @@ func TestRelay_LeaseRefreshCadenceIsAnchoredAtAcquisitionNotAfterTheClaim(t *tes
         t.Fatalf("run: %v", runErr)
     }
 
-    /* the claim consumed 70ms of a 100ms lease whose refresh interval is 50ms: anchored at acquisition the first row must refresh; anchored after the claim the whole run would end with zero refreshes and the lease 20ms from lapsing */
+    /* 70ms of a 100ms lease refreshed every 50ms: anchored after the claim, the run would never refresh */
     if 0 == lock.refreshCalls {
         t.Fatal("expected the slow claim to count against the refresh cadence, so the first row refreshes the lease")
     }
 }
 
-/* panickingCodec raises the given value from Decode on the one payload it is told to, the way an application codec does on a payload shape it never expected, and decodes every other payload as a string. */
 type panickingCodec struct {
     payload string
     value   any
@@ -937,7 +918,6 @@ func (instance *panickingCodec) Decode(_ string, payload []byte) (any, error) {
     return string(payload), nil
 }
 
-/* panickingTransport raises the given value from Send. */
 type panickingTransport struct {
     fakeTransport
     value any
@@ -961,7 +941,6 @@ func relayTestRuntimeWithLogger(logger loggingcontract.Logger) containercontract
     return runtime.NewRun(context.Background(), serviceContainer.NewScope())
 }
 
-/* runOnceContained runs RunOnce under the test's own recover, so a panic that escapes the relay fails the assertion instead of the test binary. */
 func runOnceContained(t *testing.T, relay *Relay, runtimeInstance containercontract.Runtime) (published int, runErr error) {
     t.Helper()
 
@@ -974,7 +953,6 @@ func runOnceContained(t *testing.T, relay *Relay, runtimeInstance containercontr
     return relay.RunOnce(runtimeInstance)
 }
 
-/* a codec that panics on one row is charged to that row as a decode failure, dead-lettered with the panic in last_error, and the batch goes on instead of the relay dying at that row on every claim. */
 func TestRelay_APanickingDecodeIsDeadLetteredAndTheBatchContinues(t *testing.T) {
     logger := &recordingLogger{}
     repository := &fakeRepository{due: []Pending{
@@ -1009,7 +987,6 @@ func TestRelay_APanickingDecodeIsDeadLetteredAndTheBatchContinues(t *testing.T) 
     }
 }
 
-/* a transport that panics on send is charged as one send failure: the row takes the retry path with the panic in last_error, and is not dead-lettered on the spot, since the relay cannot tell a transient transport fault from poison; like any failed send it ends the batch, and its batch-mate is held uncharged. */
 func TestRelay_APanickingSendIsChargedAsADeliveryFailure(t *testing.T) {
     logger := &recordingLogger{}
     repository := &fakeRepository{due: []Pending{
@@ -1040,7 +1017,6 @@ func TestRelay_APanickingSendIsChargedAsADeliveryFailure(t *testing.T) {
     }
 }
 
-/* a panic value that is not an error still reaches last_error, as a value. */
 func TestRelay_ANonErrorPanicValueIsRecordedInLastError(t *testing.T) {
     repository := &fakeRepository{due: []Pending{{Id: 1, TypeName: "string", Payload: []byte("a")}}}
 
@@ -1083,7 +1059,6 @@ func TestRelay_AContainedPanicRecordCarriesTheStack(t *testing.T) {
     }
 }
 
-/* contextRecordingRepository records whether the context a resolution write runs on is done when it runs */
 type contextRecordingRepository struct {
     fakeRepository
     markSentContextErr error
@@ -1095,7 +1070,6 @@ func (instance *contextRecordingRepository) MarkSent(runtimeInstance containerco
     return instance.fakeRepository.MarkSent(runtimeInstance, id, claimToken)
 }
 
-/* cancellingTransport cancels the run context as it sends, a SIGTERM landing between the send and its mark */
 type cancellingTransport struct {
     fakeTransport
     cancel context.CancelFunc
@@ -1155,7 +1129,6 @@ func TestRelay_ADeadLetterIsJournaledOnceWithItsStoredError(t *testing.T) {
     }
 }
 
-/* panickingErrorLogger panics on every error record, as an application's logger can */
 type panickingErrorLogger struct {
     recordingLogger
 }
@@ -1181,7 +1154,6 @@ func TestRelay_AContainedPanicWhoseLoggerPanicsIsStillDeadLetteredAndTheBatchCon
     }
 }
 
-/* a transport that takes the first okSends messages and refuses every one after them */
 type refusingAfterTransport struct {
     fakeTransport
     okSends  int
@@ -1197,7 +1169,6 @@ func (instance *refusingAfterTransport) Send(runtimeInstance containercontract.R
     return instance.fakeTransport.Send(runtimeInstance, envelope)
 }
 
-/* a failed send ends the batch: the rows sent before it stay sent, the failed row alone is charged an attempt, and the rows after it are handed back with their attempts unchanged, never reached by the transport nor charged a delivery attempt, held until the failed row is tried again, with last_error naming the row that held them */
 func TestRelay_AFailedSendEndsTheBatchAndHoldsTheUnreachedRowsUncharged(t *testing.T) {
     repository := &fakeRepository{due: []Pending{
         {Id: 1, TypeName: "string", Payload: []byte("a")},
@@ -1251,7 +1222,6 @@ func TestRelay_AFailedSendEndsTheBatchAndHoldsTheUnreachedRowsUncharged(t *testi
     }
 }
 
-/* a failed send that dead-letters its row at MaxAttempts ends the batch like any other failed send */
 func TestRelay_AFailedSendThatDeadLettersItsRowStillEndsTheBatch(t *testing.T) {
     repository := &fakeRepository{due: []Pending{
         {Id: 1, TypeName: "string", Payload: []byte("a"), Attempts: 1},
@@ -1275,7 +1245,6 @@ func TestRelay_AFailedSendThatDeadLettersItsRowStillEndsTheBatch(t *testing.T) {
     }
 }
 
-/* a failed send writes one ERROR record naming the row, its type and the attempt it was charged, with the cause, since RunOnce answers no error for a row it rescheduled and last_error would otherwise be the failure's only trace; the batch ends there, so a pass writes one such record however many rows it claimed */
 func TestRelay_AFailedSendIsReportedOncePerPass(t *testing.T) {
     repository := &fakeRepository{due: []Pending{
         {Id: 7, TypeName: "string", Payload: []byte("a"), Attempts: 2},
@@ -1309,7 +1278,6 @@ func TestRelay_AFailedSendIsReportedOncePerPass(t *testing.T) {
     }
 }
 
-/* a repository that refuses to record the delivery attempt of one row */
 type recordRefusingRepository struct {
     fakeRepository
     refusedId int64
@@ -1323,7 +1291,6 @@ func (instance *recordRefusingRepository) RecordDeliveryAttempt(runtimeInstance 
     return instance.fakeRepository.RecordDeliveryAttempt(runtimeInstance, id, claimToken)
 }
 
-/* a repository whose hold write of one row cancels the run, the shape of a SIGTERM landing mid-hold */
 type cancellingRescheduleRepository struct {
     fakeRepository
     cancelAtId int64
@@ -1338,7 +1305,6 @@ func (instance *cancellingRescheduleRepository) Reschedule(runtimeInstance conta
     return instance.fakeRepository.Reschedule(runtimeInstance, id, attempts, availableAt, lastError, claimToken)
 }
 
-/* a repository that refuses the reschedule of one row */
 type rescheduleRefusingRepository struct {
     fakeRepository
     refusedId int64
@@ -1354,7 +1320,6 @@ func (instance *rescheduleRefusingRepository) Reschedule(runtimeInstance contain
     return instance.fakeRepository.Reschedule(runtimeInstance, id, attempts, availableAt, lastError, claimToken)
 }
 
-/* a hold write that fails ends the hold and the run with the repository's failure, and the rows after it are handed back through ReleaseClaims */
 func TestRelay_AFailedHoldWriteEndsTheRun(t *testing.T) {
     repository := &rescheduleRefusingRepository{
         fakeRepository: fakeRepository{due: []Pending{
@@ -1382,7 +1347,6 @@ func TestRelay_AFailedHoldWriteEndsTheRun(t *testing.T) {
     }
 }
 
-/* the send-failure record follows the row's resolution: a reschedule or a dead-letter write that fails leaves the row claimed, so no record names a state the row never reached, and the run reports the write's failure instead */
 func TestRelay_AFailedSendWhoseResolutionFailsWritesNoSendFailureRecord(t *testing.T) {
     for _, scenario := range []struct {
         name        string
@@ -1411,7 +1375,6 @@ func TestRelay_AFailedSendWhoseResolutionFailsWritesNoSendFailureRecord(t *testi
     }
 }
 
-/* a lease lost earlier in a batch that a failed send ends is still reported after the batch, as when the batch drains to its end */
 func TestRelay_ALostLeaseIsReportedAfterABatchAFailedSendEnded(t *testing.T) {
     refreshFailure := errors.New("lease lost")
 
@@ -1437,7 +1400,6 @@ func TestRelay_ALostLeaseIsReportedAfterABatchAFailedSendEnded(t *testing.T) {
     }
 }
 
-/* a hold write that fails after the lease was lost reports the repository's failure with the refresh failure in its context, as any repository failure that ends a batch does */
 func TestRelay_AFailedHoldWriteAfterALostLeaseCarriesTheRefreshFailure(t *testing.T) {
     lock := &fakeLock{acquire: true, refreshErr: errors.New("lease lost")}
     repository := &rescheduleRefusingRepository{
@@ -1464,7 +1426,6 @@ func TestRelay_AFailedHoldWriteAfterALostLeaseCarriesTheRefreshFailure(t *testin
     }
 }
 
-/* a repository that records, for every reschedule, the deadline of the context the write ran on */
 type deadlineRecordingRepository struct {
     fakeRepository
     deadlines []time.Duration
@@ -1509,7 +1470,6 @@ func TestRelay_AGivenResolutionTimeoutBoundsEveryResolutionWrite(t *testing.T) {
     }
 }
 
-/* every hold write runs on a context of its own, bounded like a resolution write, not on the run's context */
 func TestRelay_AHoldWriteRunsOnABoundedContextOfItsOwn(t *testing.T) {
     repository := &deadlineRecordingRepository{fakeRepository: fakeRepository{due: []Pending{
         {Id: 1, TypeName: "string", Payload: []byte("a")},
@@ -1534,12 +1494,10 @@ func TestRelay_AHoldWriteRunsOnABoundedContextOfItsOwn(t *testing.T) {
     }
 }
 
-/* a transport that cancels the run while it refuses a send, as a signal landing mid-send does */
 type cancellingRefusingTransport struct {
     fakeTransport
     cancel context.CancelFunc
     marked bool
-    /* afterSends lets that many sends fail marked before the next one cancels the run */
     afterSends int
 }
 
@@ -1559,7 +1517,6 @@ func (instance *cancellingRefusingTransport) Send(_ containercontract.Runtime, _
     return errors.New("broker unreachable")
 }
 
-/* a send cut by the run's cancellation hands its row back due at once, attempts unchanged, and no other row, so a signal does not wait out one write per remaining row; the cancellation is reported for the command to exit clean, and the unreached rows stay claimed for the visibility timeout */
 func TestRelay_ACancelledRunStopsHandingRowsBack(t *testing.T) {
     repository := &fakeRepository{due: []Pending{
         {Id: 1, TypeName: "string", Payload: []byte("a")},
@@ -1678,7 +1635,6 @@ func TestRelay_APanickingSendUnderACancelledRunIsCharged(t *testing.T) {
     }
 }
 
-/* a failed send that dead-letters its row still holds the rows behind it until that row would have been tried again */
 func TestRelay_ARowHeldBehindADeadLetteredSendWaitsTheBackoffItWouldHaveHad(t *testing.T) {
     repository := &fakeRepository{due: []Pending{
         {Id: 1, TypeName: "string", Payload: []byte("a"), Attempts: 1},
@@ -1701,7 +1657,6 @@ func TestRelay_ARowHeldBehindADeadLetteredSendWaitsTheBackoffItWouldHaveHad(t *t
     }
 }
 
-/* the hold keeps the lease as the batch does: a refresh falls due before every row handed back, since a long hold can outlive the lease */
 func TestRelay_TheHoldKeepsTheLease(t *testing.T) {
     lock := &fakeLock{acquire: true}
     repository := &fakeRepository{due: []Pending{
@@ -1937,7 +1892,6 @@ func TestRelay_AnOutageAfterARecoveryWritesARecordOfItsOwn(t *testing.T) {
     }
 }
 
-/* a locker answering neither a lock nor an error is the run's error, never a nil lock acquired */
 type noLockLocker struct{}
 
 func (instance *noLockLocker) CreateLock(_ string, options lockcontract.CreateLockOptions) (lockcontract.Lock, error) {
@@ -1981,7 +1935,6 @@ func TestRelay_ABatchEndedByAFailureReleasesItsClaimOnceWithTheBatchsToken(t *te
     }
 }
 
-/* a send that succeeded and whose MarkSent failed leaves its row claimed until the visibility timeout, so the published row is not published again on the next pass; the rows after it are released */
 func TestRelay_AFailedMarkSentMidBatchReleasesOnlyTheRowsAfterIt(t *testing.T) {
     repository := &markSentFailingRepository{fakeRepository{due: []Pending{
         {Id: 1, TypeName: "string", Payload: []byte("a"), ClaimToken: "batch-token"},
@@ -1998,7 +1951,6 @@ func TestRelay_AFailedMarkSentMidBatchReleasesOnlyTheRowsAfterIt(t *testing.T) {
     }
 }
 
-/* a repository failure recording the delivery attempt ends the batch at that row, and the rows after it are released */
 func TestRelay_AFailedDeliveryAttemptRecordMidBatchReleasesOnlyTheRowsAfterIt(t *testing.T) {
     repository := &recordRefusingRepository{
         fakeRepository: fakeRepository{due: []Pending{
@@ -2018,7 +1970,6 @@ func TestRelay_AFailedDeliveryAttemptRecordMidBatchReleasesOnlyTheRowsAfterIt(t 
     }
 }
 
-/* an outage probe whose resolution write fails ends the batch past the probed row, so only the rows after the probe are released */
 func TestRelay_AFailedOutageResolutionReleasesOnlyTheRowsAfterTheProbe(t *testing.T) {
     repository := &fakeRepository{
         due: []Pending{
@@ -2038,7 +1989,6 @@ func TestRelay_AFailedOutageResolutionReleasesOnlyTheRowsAfterTheProbe(t *testin
     }
 }
 
-/* a run cancelled during the hold releases the rows not yet held under a runtime the cancellation does not reach: the same scope, the run's values, and a deadline within ResolutionTimeout */
 func TestRelay_ARunCancelledDuringTheHoldReleasesUnderADetachedBoundedRuntime(t *testing.T) {
     type contextKey string
 

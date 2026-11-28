@@ -10,7 +10,6 @@ import (
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
 
-/* the capturing double stands in for whatever logger a suite exercises; the logger, recover, json-logger and request-logger tests all reach it from here. */
 type captureLogger struct {
     lastLevel   loggingcontract.Level
     lastMessage string
@@ -55,7 +54,6 @@ func (instance *captureLogger) CauseChainDepth() int {
 
 var _ loggingcontract.Logger = (*captureLogger)(nil)
 
-/* typedNilProbeError is the concrete error type whose typed nil the package has to read as the nil its producer meant, rather than dereference. */
 type typedNilProbeError struct {
     message string
 }
@@ -64,7 +62,6 @@ func (instance *typedNilProbeError) Error() string {
     return instance.message
 }
 
-/* recoveredPanicContext answers the context of the *exception.Error the callback panics with, nil when it does not. */
 func recoveredPanicContext(callback func()) (context exceptioncontract.Context) {
     defer func() {
         if exceptionErr, isExceptionError := recover().(*exception.Error); true == isExceptionError && nil != exceptionErr {

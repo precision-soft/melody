@@ -25,7 +25,6 @@ func TestApiDeleteHandlerRefusesAPeerAdministratorAndRemovesNothing(t *testing.T
     }
 }
 
-/* the peer decision is taken on the directory: an account the cache still holds as an editor, promoted behind it, is refused */
 func TestApiDeleteHandlerDecidesThePeerRefusalOnTheDirectoryNotTheCache(t *testing.T) {
     userRepository := newRecordingUserRepository(administrator("admin-1"), administrator("admin-2"))
     cacheInstance := &valueCache{values: map[string]any{service.CacheKeyUserById("admin-2"): editor("admin-2")}}

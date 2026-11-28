@@ -41,7 +41,6 @@ func (instance *stubEnvironmentSource) Load(ctx context.Context) (map[string]str
     return instance.values, nil
 }
 
-/* productDoorFixture carries what the write doors read past the binding: the product service over the in-memory repositories a handleless catalog storage answers, seeded as the application seeds them, so a door is pinned on what it stored and not only on what it refused */
 type productDoorFixture struct {
     container         melodycontainercontract.Container
     productRepository repository.ProductRepository
@@ -161,7 +160,6 @@ func newProductDoorFixtureOver(t *testing.T, wrap func(stores productDoorStores)
         },
         melodycontainer.RegisterOptions{},
     )
-    /* the read door lists the categories and the currencies beside the product */
     melodycontainer.MustRegister(
         containerInstance,
         service.ServiceCategoryService,
@@ -187,14 +185,12 @@ func newProductDoorFixtureOver(t *testing.T, wrap func(stores productDoorStores)
     }
 }
 
-/* call runs a door as an editor with the body and the route parameters given and answers the status and the body */
 func (instance *productDoorFixture) call(t *testing.T, handler melodyhttpcontract.Handler, method string, body string, parameters map[string]string) (int, string) {
     t.Helper()
 
     return instance.callAt(t, handler, method, "/products/api/", body, parameters)
 }
 
-/* callAt is call at a target of the caller's, so a door's query is read as the client sent it */
 func (instance *productDoorFixture) callAt(t *testing.T, handler melodyhttpcontract.Handler, method string, target string, body string, parameters map[string]string) (int, string) {
     t.Helper()
 

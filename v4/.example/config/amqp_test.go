@@ -12,7 +12,6 @@ import (
     melodycontainer "github.com/precision-soft/melody/v4/container"
 )
 
-/* the module registers the connection alone, built at boot in the warning mode, so a broker down at boot leaves the transports to redial */
 func TestAmqpModuleConfig_TheConnectionIsBuiltAtBootAndWarns(t *testing.T) {
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
@@ -40,7 +39,6 @@ func TestAmqpModule_IsRegisteredOnlyBesideAmqpDsn(t *testing.T) {
     }
 }
 
-/* one provider for the transports and the connection, so its plaintext judge names the broker's host once */
 func TestAmqpProvider_IsTheOneProviderOfTheExample(t *testing.T) {
     moduleInstance := moduleWithEnvironment(t, map[string]string{})
 

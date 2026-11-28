@@ -52,7 +52,6 @@ func TestKernel_TheSingletonsTheRequestPathBuildsFirstReadKindRequest(t *testing
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
             recorder.record(logging.ServiceLogger, resolver)
 
-            /* a logger whose provider pulls a collaborator in, as a real one reads the configuration */
             _ = config.ConfigMustFromResolver(resolver.Runtime().Context(), resolver)
 
             return logging.NewNopLogger(), nil

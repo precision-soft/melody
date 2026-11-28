@@ -17,7 +17,6 @@ import (
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
 
-/* unreachableSplitProvider fails the way a provider fails on an outage it could not get past: filed under ErrDatabaseUnreachable, the one class the splitter absorbs */
 type unreachableSplitProvider struct{}
 
 func (instance *unreachableSplitProvider) Open(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
@@ -28,7 +27,6 @@ func (instance *unreachableSplitProvider) OpenForMigration(runtimeInstance conta
     return instance.Open(runtimeInstance, parameters, logger)
 }
 
-/* refusingSplitProvider fails the way a provider refuses by name — a parameter left empty, a password the server refused — or the way a provider that files nothing under the class fails: a plain error, terminal by nature */
 type refusingSplitProvider struct{}
 
 func (instance *refusingSplitProvider) Open(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
@@ -179,7 +177,6 @@ func (instance *noDatabaseSplitProvider) OpenForMigration(runtimeInstance contai
     return instance.Open(runtimeInstance, parameters, logger)
 }
 
-/* a provider answering neither a database nor an error is the wiring mistake the registry refuses by name; folded into the fallback it routed every read of that replica to the primary forever, with no signal that the replica was dead */
 func TestReadWriteSplitter_ReaderRefusesAReplicaWhoseProviderAnsweredNoDatabase(t *testing.T) {
     registry, registryErr := NewManagerRegistry(
         []ProviderDefinition{
@@ -205,7 +202,6 @@ func TestReadWriteSplitter_ReaderRefusesAReplicaWhoseProviderAnsweredNoDatabase(
     }
 }
 
-/* a replica whose provider REFUSED — a parameter left empty, a password the server refused, a database that does not exist, or a provider that files nothing under the unreachable class — is refused with the provider's own answer, not served from the primary: the denylist of registry sentinels this replaced let every refusal it did not name fall to the primary, silently and for the life of the process */
 func TestReadWriteSplitter_ReaderRefusesAReplicaWhoseProviderRefused(t *testing.T) {
     registry, registryErr := NewManagerRegistry(
         []ProviderDefinition{
@@ -235,7 +231,6 @@ func TestReadWriteSplitter_ReaderRefusesAReplicaWhoseProviderRefused(t *testing.
     }
 }
 
-/* journaledUnreachableSplitProvider fails as unreachableSplitProvider does after journaling the failure and marking it logged, as the providers' terminal branches do */
 type journaledUnreachableSplitProvider struct{}
 
 func (instance *journaledUnreachableSplitProvider) Open(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
@@ -246,7 +241,6 @@ func (instance *journaledUnreachableSplitProvider) OpenForMigration(runtimeInsta
     return instance.Open(runtimeInstance, parameters, logger)
 }
 
-/* the double failure over a primary the provider already journaled stays marked logged, so it is not filed a second time; over an unmarked primary failure it stays unmarked */
 func TestReadWriteSplitter_ADoubleFailureOverAJournaledPrimaryStaysMarkedLogged(t *testing.T) {
     for _, journaled := range []bool{true, false} {
         var primaryProvider Provider = &unreachableSplitProvider{}
@@ -276,7 +270,6 @@ func TestReadWriteSplitter_ADoubleFailureOverAJournaledPrimaryStaysMarkedLogged(
     }
 }
 
-/* switchableSplitProvider fails as unreachable while down is set and opens otherwise, counting every open */
 type switchableSplitProvider struct {
     down      bool
     openCount int
@@ -297,7 +290,6 @@ func (instance *switchableSplitProvider) OpenForMigration(runtimeInstance contai
     return instance.Open(runtimeInstance, parameters, logger)
 }
 
-/* inside the retry interval an unreachable replica's reads go to the primary without dialling it, so a dead replica does not cost every read a connect timeout; past the interval it is dialled again */
 func TestReadWriteSplitter_AnUnreachableReplicaIsRememberedForTheInterval(t *testing.T) {
     replica := &switchableSplitProvider{down: true}
     registry, registryErr := NewManagerRegistry(
@@ -335,7 +327,6 @@ func TestReadWriteSplitter_AnUnreachableReplicaIsRememberedForTheInterval(t *tes
     }
 }
 
-/* under PrimaryFallbackDisabled an unreachable replica's read is refused with its failure, the primary never opened, and the replica is still remembered for the interval */
 func TestReadWriteSplitter_PrimaryFallbackDisabledRefusesTheReadOfAnUnreachableReplica(t *testing.T) {
     primary := &switchableSplitProvider{}
     replica := &switchableSplitProvider{down: true}
@@ -369,7 +360,6 @@ func TestReadWriteSplitter_PrimaryFallbackDisabledRefusesTheReadOfAnUnreachableR
     }
 }
 
-/* the move of the reads to the primary is journaled once, however many failures follow, and the replica taking them back once more */
 func TestReadWriteSplitter_WritesOneWarningPerTransition(t *testing.T) {
     logger := &capturingDiagnosticLogger{}
     replica := &switchableSplitProvider{down: true}
@@ -412,7 +402,6 @@ func TestReadWriteSplitter_WritesOneWarningPerTransition(t *testing.T) {
     }
 }
 
-/* the option refuses a negative interval where it is written, and a zero one keeps the default */
 func TestNewReadWriteSplitter_AnAbsentReplicaRetryIntervalTakesFiveSeconds(t *testing.T) {
     registry, registryErr := NewManagerRegistry([]ProviderDefinition{ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true}}, ManagerRegistryConfig{Logger: &fakeLogger{}})
     if nil != registryErr {
@@ -595,7 +584,6 @@ func TestReadWriteSplitter_OneReaderProbesALapsedReplicaWhileTheOthersKeepThePri
     }
 }
 
-/* departingCallerReplicaProvider parks its first open until the caller's context ends and answers that ending filed as unreachable, the class the splitter would otherwise absorb; later opens answer a database */
 type departingCallerReplicaProvider struct {
     opens   atomic.Int32
     entered chan struct{}
@@ -618,7 +606,6 @@ func (instance *departingCallerReplicaProvider) OpenForMigration(runtimeInstance
     return instance.Open(runtimeInstance, parameters, logger)
 }
 
-/* a replica open the caller's own context ended answers that refusal: the replica is not remembered unreachable, the primary is not opened in its place, and the next read under a live context dials the replica again */
 func TestReadWriteSplitter_AReplicaOpenTheCallerLeftIsNeitherRememberedNorServedFromThePrimary(t *testing.T) {
     primary := &fakeProvider{}
     replica := &departingCallerReplicaProvider{entered: make(chan struct{})}
@@ -673,7 +660,6 @@ func TestReadWriteSplitter_AReplicaOpenTheCallerLeftIsNeitherRememberedNorServed
     }
 }
 
-/* a remembered replica whose lone probe its own caller's context cut gives the reservation back: the next reader under a live context probes the replica instead of taking the primary for one more interval */
 func TestReadWriteSplitter_AProbeTheCallerCutGivesTheReservationBack(t *testing.T) {
     replica := &switchableSplitProvider{down: true}
     registry, registryErr := NewManagerRegistry(
@@ -716,7 +702,6 @@ func TestReadWriteSplitter_AProbeTheCallerCutGivesTheReservationBack(t *testing.
     }
 }
 
-/* a reservation given back leaves the replica alone when another reader dated it since: the later failure stands */
 func TestReadWriteSplitter_AReservationGivenBackLeavesALaterDateStanding(t *testing.T) {
     registry, registryErr := NewManagerRegistry(
         []ProviderDefinition{

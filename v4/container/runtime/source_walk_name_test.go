@@ -8,7 +8,6 @@ import (
     "testing"
 )
 
-/* an event name, a listener tag and a request attribute key are exported constants in the framework, its modules and the example, so userland names them and binds to them; the walk refuses a string literal handed straight to an event door, listed in a Tags or TagsToRunAfterFailure literal, keying a SubscribedEvents map or handed to Attributes().Set, Get or Has */
 func TestSourceWalk_NoEventTagOrAttributeNameIsAPlainString(t *testing.T) {
     nameDoors := map[string]bool{
         "AddListener":          true,

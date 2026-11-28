@@ -14,7 +14,6 @@ type utilityProbeInterface interface {
     Probe()
 }
 
-/* every registration and every by-type lookup goes through this canonicalisation: a service declared from a provider returning *T is filed under *T, so asking with T has to reach the same entry or Has and Get disagree about the same container. An interface is its own canonical form — wrapping it in a pointer would file it under a type no caller ever asks with. */
 func TestCanonicalServiceType_FilesValuesUnderTheirPointerAndLeavesInterfacesAlone(t *testing.T) {
     valueType := reflect.TypeOf(utilityProbe{})
     pointerType := reflect.TypeOf(&utilityProbe{})
@@ -37,7 +36,6 @@ func TestCanonicalServiceType_FilesValuesUnderTheirPointerAndLeavesInterfacesAlo
     }
 }
 
-/* the identity key is what the creation guard and the teardown are keyed on, so two DIFFERENT types sharing one key mean false cycles at resolution and merged nodes at close — the defect the container session repaired by refusing the second such registration. String() alone shares a key between same-named types of different packages; the import path is what separates them. */
 func TestTypeIdentityKey_SeparatesSameNamedTypesOfDifferentPackages(t *testing.T) {
     alphaKey := typeIdentityKey(reflect.TypeOf(&collisionalpha.Bus{}))
     betaKey := typeIdentityKey(reflect.TypeOf(&collisionbeta.Bus{}))
@@ -55,7 +53,6 @@ func TestTypeIdentityKey_SeparatesSameNamedTypesOfDifferentPackages(t *testing.T
     }
 }
 
-/* the key reaches the named type through any depth of pointer, so *T and **T of one declaration key to the same package while keeping their own spellings apart. */
 func TestTypeIdentityKey_ReachesTheNamedTypeThroughEveryPointer(t *testing.T) {
     singleKey := typeIdentityKey(reflect.TypeOf(&utilityProbe{}))
     doubleKey := typeIdentityKey(reflect.TypeOf(new(*utilityProbe)))
@@ -69,7 +66,6 @@ func TestTypeIdentityKey_ReachesTheNamedTypeThroughEveryPointer(t *testing.T) {
     }
 }
 
-/* the derived service name is what a by-type registration is filed under, and it has to be import-path qualified for the reason the identity key is: two same-named types would otherwise take one name, and the second registration would be refused as a duplicate of a service it has nothing to do with. */
 func TestDefaultServiceNameForType_QualifiesTheNameWithTheImportPath(t *testing.T) {
     alphaName := defaultServiceNameForType(reflect.TypeOf(&collisionalpha.Bus{}))
     betaName := defaultServiceNameForType(reflect.TypeOf(&collisionbeta.Bus{}))
@@ -82,7 +78,6 @@ func TestDefaultServiceNameForType_QualifiesTheNameWithTheImportPath(t *testing.
         t.Fatalf("expected both names to be derived, got %q and %q", alphaName, betaName)
     }
 
-    /* the canonicalisation happens inside, so asking with the value type derives the pointer's name */
     if alphaName != defaultServiceNameForType(reflect.TypeOf(collisionalpha.Bus{})) {
         t.Fatalf("expected the value type to derive the same name as its pointer")
     }
@@ -92,7 +87,6 @@ func TestDefaultServiceNameForType_QualifiesTheNameWithTheImportPath(t *testing.
     }
 }
 
-/* a builtin or unnamed type has no import path to qualify with and keeps its own spelling — the fallback is what stops the name from becoming a bare dot. */
 func TestUniqueTypeName_FallsBackToTheSpellingForUnqualifiedTypes(t *testing.T) {
     if "*int" != uniqueTypeName(reflect.TypeOf(new(int))) {
         t.Fatalf("unexpected name for a pointer to a builtin: %q", uniqueTypeName(reflect.TypeOf(new(int))))
@@ -103,7 +97,6 @@ func TestUniqueTypeName_FallsBackToTheSpellingForUnqualifiedTypes(t *testing.T) 
     }
 }
 
-/* the any refusal is what keeps a service from being filed under the empty interface, which every value satisfies — the by-type resolution would then answer whichever registration reached the map first, for any type asked. A NON-empty interface is a legitimate service type and must not be caught by it. */
 func TestIsAnyType_CatchesTheEmptyInterfaceAndNothingElse(t *testing.T) {
     anyType := reflect.TypeOf((*any)(nil)).Elem()
     if false == isAnyType(anyType) {
@@ -150,7 +143,6 @@ func TestOverrideValueFitsRegisteredType_JudgesRawAssignabilityAndCanonicalIdent
     }
 }
 
-/* the key of an UNNAMED composite type — a slice, a map, a channel of a named type — reaches the import path of the named element it is built from; read through pointers alone it carried no path, so a slice of one package's Bus and a slice of another package's Bus of the same short name shared one key, and a declaration on the first passed as registered through the second. */
 func TestTypeIdentityKey_KeepsTwoSameNamedPackagesApartOnACompositeType(t *testing.T) {
     pairs := [][2]reflect.Type{
         {reflect.TypeOf(&[]collisionalpha.Bus{}), reflect.TypeOf(&[]collisionbeta.Bus{})},
@@ -183,7 +175,6 @@ func TestTypeIdentityKey_KeepsTwoSameNamedPackagesApartOnACompositeType(t *testi
     }
 }
 
-/* the keys of named types, of pointers to them and of a builtin are exactly what they were: the identity key is what the creation guard, the type index and every teardown node key are keyed on, so a key that moved would be a node that moved. */
 func TestTypeIdentityKey_LeavesTheKeysOfNamedTypesAndPointersUnchanged(t *testing.T) {
     alphaPath := "github.com/precision-soft/melody/v4/container/internal/collisionalpha/contract"
 

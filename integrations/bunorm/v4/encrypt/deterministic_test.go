@@ -181,7 +181,6 @@ func TestEncryptedDeterministicString_FormatRedactsNumericVerbs(t *testing.T) {
     }
 }
 
-/* a column an attacker can write and later read back must not decrypt a seal handed to it as data: the seal of another row's secret, stored through this column, is read back as that seal and never as the secret */
 func TestEncryptedDeterministicString_ASealWrittenAsDataIsSealedAndReadBackAsTheSeal(t *testing.T) {
     cipherInstance := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(7)}}))
     installCipher(t, defaultCipherName, cipherInstance)
@@ -210,7 +209,6 @@ func TestEncryptedDeterministicString_ASealWrittenAsDataIsSealedAndReadBackAsThe
     }
 }
 
-/* the deterministic plain column refuses a bound seal the same way */
 func TestEncryptedDeterministicString_ScanRefusesABoundSeal(t *testing.T) {
     cipherInstance := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(7)}}))
     installCipher(t, defaultCipherName, cipherInstance)

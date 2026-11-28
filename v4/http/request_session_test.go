@@ -479,7 +479,6 @@ func TestRequestSession_ALoadTheClientsHangupCancelledIsRecordedAtWarning(t *tes
     }
 }
 
-/* boundedSessionManager declares a storage bound, records the context each storage call received, and can hang until that context ends, answering its bare error */
 type boundedSessionManager struct {
     sessioncontract.Manager
     mutex          sync.Mutex

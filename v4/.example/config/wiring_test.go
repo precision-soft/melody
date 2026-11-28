@@ -10,7 +10,7 @@ import (
 const (
     generatedWiringFile = "../generated/wiring_gen.go"
     generatedPackage    = "generated"
-    /* the tests run from the config package, one level below the application root, so this is the same project directory the running application reports through KernelProjectDirectory */
+    /* the tests run one level below the application root, the directory KernelProjectDirectory reports */
     wiringProjectDirectory = ".."
 )
 
@@ -29,7 +29,6 @@ func generateWiring(t *testing.T) (string, *melodywiring.GenerateReport) {
     return source, report
 }
 
-/* the generated file is what the application registers, so it has to stay what the generator produces; .dev/generate.sh writes it at the dev container's start and before every gate, and without this check a constructor edited since gains an argument and the wiring silently stops matching it */
 func TestWiring_GeneratedFileIsUpToDate(t *testing.T) {
     source, _ := generateWiring(t)
 
@@ -46,7 +45,6 @@ func TestWiring_GeneratedFileIsUpToDate(t *testing.T) {
     }
 }
 
-/* the two assertions carry different properties and neither implies the other. The skip list is "nothing the scan found was left out"; the count is "the scan finds every constructor it should", the half that notices a package silently dropping out of the bind set, which loses constructors with nothing skipped. The report offers counts and not names, so the count moves whenever a constructor is added or removed, and the number is updated in the same edit that does it. */
 func TestWiring_CoversEveryConstructorInTheScannedPackages(t *testing.T) {
     _, report := generateWiring(t)
 
@@ -54,7 +52,6 @@ func TestWiring_CoversEveryConstructorInTheScannedPackages(t *testing.T) {
         t.Fatalf("the scan found %d constructors, wanted 16 — add or remove one and update this number with it", report.ConstructorCount)
     }
 
-    /* the scoped half is counted apart: a scoped constructor the generator stops emitting moves neither the number above nor the skip list */
     if 1 != report.ScopedConstructorCount {
         t.Fatalf("the scan found %d scoped constructors, wanted 1 — the request report trail — add or remove one and update this number with it", report.ScopedConstructorCount)
     }
@@ -64,7 +61,6 @@ func TestWiring_CoversEveryConstructorInTheScannedPackages(t *testing.T) {
     }
 }
 
-/* a bind that matches nothing is the misspelling this reporting exists to catch, and it must stay empty for the example */
 func TestWiring_DeclaresNoUnusedBinds(t *testing.T) {
     _, report := generateWiring(t)
 

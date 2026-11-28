@@ -22,7 +22,6 @@ func testRuntimeUnder(ctx context.Context) containercontract.Runtime {
     return runtime.NewRun(ctx, container.NewContainer(container.ContainerConfig{}).NewScope())
 }
 
-/* contextlessTestRuntime carries no context, which no constructor of the runtime package builds; with its typed nil and the nil runtime it is what every door refuses before it reads anything */
 type contextlessTestRuntime struct {
     containercontract.Runtime
 }
@@ -39,7 +38,6 @@ func refusedTestRuntimes() []containercontract.Runtime {
     return []containercontract.Runtime{nil, typedNil, &contextlessTestRuntime{}}
 }
 
-/* the cache sweep is the one thing in this package that reads a clock, so its doubles are shared by every test file that builds a backend. */
 type cacheTestTicker struct {
     channel chan time.Time
 }
@@ -48,7 +46,7 @@ func (instance *cacheTestTicker) Channel() <-chan time.Time {
     return instance.channel
 }
 
-/* the Ticker contract forbids closing the channel on Stop — a consumer selecting on a stopped ticker's channel would spin on the zero value from a closed one — and demands idempotence, so the fixture's Stop does nothing */
+/* the Ticker contract forbids closing the channel on Stop and demands idempotence, so Stop does nothing */
 func (instance *cacheTestTicker) Stop() {}
 
 type cacheTestClock struct {

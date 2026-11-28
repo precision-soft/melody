@@ -113,7 +113,6 @@ type recordedLogRecord struct {
     context loggingcontract.Context
 }
 
-/* recordingLogger captures every record with its level, so a test can assert the SEVERITY a path logged at, not only that it logged. */
 type recordingLogger struct {
     mutex   sync.Mutex
     records []recordedLogRecord
@@ -425,7 +424,6 @@ func bearerRequest(tokenString string) httpcontract.Request {
     return testhelper.NewHttpTestRequestFromHttpRequest(request)
 }
 
-/* unauthenticatedRoledToken carries roles while answering IsAuthenticated false — the shape a "remembered" or half-logged-in token takes. It is what proves the voters refuse a token that reports roles it has not authenticated for; the in-package tokens never combine the two. */
 type unauthenticatedRoledToken struct {
     roles []string
 }
@@ -562,7 +560,6 @@ func expectAnonymousToken(t *testing.T, token securitycontract.Token) {
     }
 }
 
-/* mustSession hands on the session a manager door answered, panicking with the error it answered instead */
 func mustSession(sessionInstance sessioncontract.Session, sessionErr error) sessioncontract.Session {
     if nil != sessionErr {
         panic(sessionErr)
@@ -590,7 +587,6 @@ func (instance *fallibleTestVoter) Vote(runtimeInstance containercontract.Runtim
 
 var _ securitycontract.Voter = (*fallibleTestVoter)(nil)
 
-/* withItsRuntime hands a door the request together with the runtime the request carries */
 func withItsRuntime(request httpcontract.Request) (containercontract.Runtime, httpcontract.Request) {
     return request.RuntimeInstance(), request
 }
@@ -603,7 +599,6 @@ func sessionRuntimeUnder(ctx context.Context) containercontract.Runtime {
     return runtime.NewRun(ctx, container.NewContainer(container.ContainerConfig{}).NewScope())
 }
 
-/* contextlessRuntime answers no context, the third form RefuseNilRuntime refuses beside nil and a typed nil */
 type contextlessRuntime struct {
     containercontract.Runtime
 }
@@ -647,7 +642,6 @@ func (instance *csrfStatelessTokenSource) Resolve(runtimeInstance containercontr
     return NewAnonymousToken(), nil
 }
 
-/* csrfFixture serves a session firewall over a route of every method and a route that turned the check off */
 type csrfFixture struct {
     registry  *FirewallRegistry
     kernel    *testKernel
@@ -664,7 +658,6 @@ type csrfProbe struct {
     headers     map[string]string
     body        string
     contentType string
-    /* bodyReads, when set, counts the reads the body answers */
     bodyReads *atomic.Int64
 }
 
@@ -726,7 +719,6 @@ func newCsrfFixture(t *testing.T, mutate func(*CompiledFirewallConfig)) *csrfFix
     }
 }
 
-/* storedSession saves a session holding the values and a csrf secret, and answers its id and a token of the secret */
 func (instance *csrfFixture) storedSession(t *testing.T, values map[string]any) (string, string) {
     t.Helper()
 
@@ -790,7 +782,6 @@ func (instance *csrfFixture) serve(t *testing.T, probe csrfProbe) *httptest.Resp
     return recorder
 }
 
-/* csrfRefusals collects the refusals the kernel.exception path sees */
 func (instance *csrfFixture) refusals() *[]error {
     recorded := make([]error, 0)
 
@@ -809,7 +800,6 @@ func (instance *csrfFixture) refusals() *[]error {
     return &recorded
 }
 
-/* recordingFailedAttemptStore counts in a map, answering the remainder it is told to and recording each call, so the throttle is read without a cache */
 type recordingFailedAttemptStore struct {
     mutex           sync.Mutex
     countByKey      map[string]int
@@ -871,7 +861,6 @@ func (instance *failingFailedAttemptStore) Reset(_ containercontract.Runtime, _ 
     return instance.failure
 }
 
-/* newTestCache is the application's default cache over a backend reading the clock, closed with the test */
 func newTestCache(t *testing.T, clockInstance clockcontract.Clock) cachecontract.Cache {
     t.Helper()
 
@@ -887,7 +876,6 @@ func newTestCache(t *testing.T, clockInstance clockcontract.Clock) cachecontract
     return manager
 }
 
-/* runtimeWithCache is a request runtime whose scope resolves the cache as the application's */
 func runtimeWithCache(t *testing.T, cacheInstance cachecontract.Cache) (containercontract.Runtime, *recordingLogger) {
     t.Helper()
 
@@ -908,7 +896,6 @@ func runtimeWithCache(t *testing.T, cacheInstance cachecontract.Cache) (containe
     return runtime.NewRequest(context.Background(), scope), logger
 }
 
-/* newTestJwtValidator builds a validator over the one-secret key set, the shape every HS256 test verifies against */
 func newTestJwtValidator(secret []byte, config JwtConfig) *JwtTokenValidator {
     return NewJwtTokenValidator(NewJwtSecretKeySet(secret, JwtSecretKeySetConfig{}), config)
 }

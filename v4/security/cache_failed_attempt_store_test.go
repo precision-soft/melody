@@ -13,7 +13,6 @@ import (
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
-/* failingCache answers every call with its failure, the cache that is down */
 type failingCache struct {
     cachecontract.Cache
     failure error
@@ -27,7 +26,6 @@ func (instance *failingCache) DeleteMultiple(_ containercontract.Runtime, _ []st
     return instance.failure
 }
 
-/* deadlineFailingCache counts as the cache does and fails the deadline's read and write */
 type deadlineFailingCache struct {
     cachecontract.Cache
     failure error

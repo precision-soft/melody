@@ -117,7 +117,6 @@ func TestEncryptedString_MasksPlaintextWhenFormatted(t *testing.T) {
     }
 }
 
-/* the column read path is where a truncated ciphertext actually surfaces: Scan must refuse it rather than hand the model a marker and half a base64 blob as though the application had stored them. */
 func TestEncryptedString_ScanReportsATruncatedCiphertext(t *testing.T) {
     provider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(7)}})
     cipherInstance := NewCipher(provider)
@@ -140,7 +139,6 @@ func TestEncryptedString_ScanReportsATruncatedCiphertext(t *testing.T) {
     }
 }
 
-/* every column type reads through Decrypt, so a stored value of an unknown seal format is an error on Scan and the destination keeps what it held */
 func TestEncryptedColumn_ScanRefusesAnUnknownSealFormat(t *testing.T) {
     installCipher(t, defaultCipherName, NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(7)}})))
     installCipher(t, crmCipherReference{}.CipherName(), NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "crm-v1", Keys: map[string][]byte{"crm-v1": newKey(11)}})))
@@ -171,7 +169,6 @@ func TestEncryptedColumn_ScanRefusesAnUnknownSealFormat(t *testing.T) {
     }
 }
 
-/* a column still holding unconverted rows must keep reading while it is encrypted one write at a time. */
 func TestEncryptedString_ScanStillPassesGenuinePlaintextThrough(t *testing.T) {
     provider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(7)}})
     installCipher(t, defaultCipherName, NewCipher(provider))
@@ -345,7 +342,6 @@ func BenchmarkEncryptedString_UnmarshalJSON(b *testing.B) {
     }
 }
 
-/* a column an attacker can write and later read back must not decrypt a seal handed to it as data: the seal of another row's secret, stored through this column, is read back as that seal and never as the secret */
 func TestEncryptedString_ASealWrittenAsDataIsSealedAndReadBackAsTheSeal(t *testing.T) {
     cipherInstance := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(7)}}))
     installCipher(t, defaultCipherName, cipherInstance)
@@ -374,7 +370,6 @@ func TestEncryptedString_ASealWrittenAsDataIsSealedAndReadBackAsTheSeal(t *testi
     }
 }
 
-/* a plain column has no binding, so a bound seal moved into it is refused, never served */
 func TestEncryptedString_ScanRefusesABoundSeal(t *testing.T) {
     cipherInstance := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(7)}}))
     installCipher(t, defaultCipherName, cipherInstance)

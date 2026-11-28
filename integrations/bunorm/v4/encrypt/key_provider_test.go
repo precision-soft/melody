@@ -17,7 +17,6 @@ func TestStaticKeyProvider_ActiveKeyIdsCurrentFirst(t *testing.T) {
     }
 }
 
-/* The %#v and %v verbs walk unexported fields, so a provider dropped into a debug log — or into an error context that is later formatted — would print every master key as raw bytes. This is the same redaction class the encrypted column types close; the keys are worth strictly more than the ciphertext they protect. */
 func TestStaticKeyProvider_RedactsKeysUnderEveryVerb(t *testing.T) {
     provider := NewStaticKeyProvider(KeyRing{
         CurrentKeyId: "current",
@@ -39,7 +38,7 @@ func TestStaticKeyProvider_RedactsKeysUnderEveryVerb(t *testing.T) {
     }
 }
 
-/* fmt routes only %v %s %q %x %X and %#v through Stringer/GoStringer; the numeric verbs (%d %o %b %c %U) consult fmt.Formatter alone, so without it they reflection-walk the unexported keysById field and dump the raw master key bytes — %d as decimal codes (48 49 50 ...), %c as the verbatim key characters. The Format method must redact every verb on both the value and the pointer form. */
+/* the numeric verbs consult fmt.Formatter alone, never Stringer, so they would walk the unexported keys */
 func TestStaticKeyProvider_RedactsKeysUnderNumericVerbs(t *testing.T) {
     provider := NewStaticKeyProvider(KeyRing{
         CurrentKeyId: "current",
@@ -67,7 +66,6 @@ func TestStaticKeyProvider_RedactsKeysUnderNumericVerbs(t *testing.T) {
     }
 
     for _, testCase := range cases {
-        /* A numeric verb that reached the key would print the byte "48" (the decimal code of '0') for %d and the character "a" for %c; the redacted form contains neither. */
         if true == strings.Contains(testCase.rendered, "48 49 50 51") {
             t.Fatalf("%s: a master key leaked as decimal bytes through fmt: %s", testCase.name, testCase.rendered)
         }
@@ -94,7 +92,6 @@ func TestStaticKeyProvider_RefusesAnAllZeroKey(t *testing.T) {
     NewStaticKeyProvider(KeyRing{CurrentKeyId: "zeroed", Keys: map[string][]byte{"zeroed": make([]byte, 32)}})
 }
 
-/* a key of one repeated non-zero byte is accepted on purpose: the door refuses the one shape a key that was never generated has, and judges nothing else about a key that is the operator's */
 func TestStaticKeyProvider_AcceptsAKeyOfOneRepeatedByte(t *testing.T) {
     provider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "filled", Keys: map[string][]byte{"filled": newKey(1)}})
 

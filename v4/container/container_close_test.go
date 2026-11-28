@@ -89,7 +89,6 @@ func TestContainer_Close_ClosesDependentsBeforeDependencies_ByServiceName(t *tes
     }
 }
 
-/* a pin of the fact the plan's WaveIndex documents, not of a guard: the sequential teardown honours the one edge here and still interleaves the waves, closing a wave-one service before a wave-zero one it has no relation to, because it drains creation latest-first among what is free */
 func TestContainer_TheSequentialCloseOrderInterleavesTheWaves(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{TeardownSequential: true})
 
@@ -560,8 +559,6 @@ func TestContainer_Close_ClosesDiamondDependencyInDeterministicOrder(t *testing.
     }
 }
 
-/* OverrideProtectedInstance on a value service registered with TypeRegistrationDisabled must close once */
-
 type overrideValueCloser struct {
     counter *int
     lock    *sync.Mutex
@@ -612,7 +609,6 @@ func TestContainer_Close_OverrideProtectedInstanceWithTypeRegistrationDisabledCl
     }
 }
 
-/* a concurrent second Close must not report success while the first is still tearing services down: both callers get the first teardown's result once it finishes */
 func TestClose_ConcurrentCallersShareTheResult(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -651,7 +647,6 @@ func TestClose_ConcurrentCallersShareTheResult(t *testing.T) {
     firstErr := <-firstDone
     secondErr := <-secondDone
 
-    /* the equality below says nothing while both results are nil — two callers who each got a plain success share it by accident. The blocking service fails its Close so the shared result is a value there is only one of */
     if nil == firstErr {
         t.Fatalf("expected the teardown failure to be reported to the first caller, got nil")
     }
@@ -681,7 +676,6 @@ func (instance *panickingCloseService) CloseWithContext(closeContext context.Con
     panic("teardown exploded")
 }
 
-/* a service whose Close panics must not abort the teardown: the remaining services still close, the panic is recorded as a close failure, and a repeated Close reports the same error instead of a silent success */
 func TestContainer_Close_PanickingServiceCloseIsRecordedAndSiblingsStillClose(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -763,7 +757,6 @@ func (instance *panickingErrorMessageService) CloseWithContext(closeContext cont
     return panickingErrorMessage{}
 }
 
-/* a user error whose Error() panics must not escape the teardown: the failure is recorded with a deterministic message and a repeated Close reports the same error instead of a silent success */
 func TestContainer_Close_PanickingErrorMessageIsContainedAndRecorded(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -948,7 +941,7 @@ func (instance *sameTypeZeroSizeCloser) CloseWithContext(closeContext context.Co
     return nil
 }
 
-/* two distinct services of one zero-size type share an address, so pairing the address with the type is not enough to tell them apart; without the dependency-graph qualifier the second one was collapsed onto the first and never closed */
+/* two services of one zero-size type share an address, so address and type alone cannot tell them apart */
 func TestContainer_Close_DistinctServicesOfOneZeroSizeTypeEachClose(t *testing.T) {
     sameTypeZeroSizeCloseCount.Store(0)
 
@@ -984,7 +977,6 @@ func TestContainer_Close_DistinctServicesOfOneZeroSizeTypeEachClose(t *testing.T
     }
 }
 
-/* the mirror case: a service whose provider hands back what it resolved from another service holds the same instance, and the dependency edge proves it, so the shared instance is still closed exactly once */
 func TestContainer_Close_ResolverMediatedZeroSizeAliasClosesOnce(t *testing.T) {
     sameTypeZeroSizeCloseCount.Store(0)
 
@@ -1110,7 +1102,6 @@ func (instance *secondReplacedFailingProbe) CloseWithContext(closeContext contex
     return instance.failure
 }
 
-/* two replaced built instances whose closes both fail are both recorded: the graveyard entries carry no node key of their own, so a shared constant key let the second failure overwrite the first's record, naming one failure where two happened */
 func TestContainer_Close_TwoFailingReplacedInstancesAreBothRecorded(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -1176,7 +1167,6 @@ func TestContainer_Close_TwoFailingReplacedInstancesAreBothRecorded(t *testing.T
     }
 }
 
-/* an override evicting an EARLIER override closes nothing: an installed override belongs to whoever installed it, and only what the container itself built enters the graveyard. */
 func TestContainer_Close_ReplacedOverrideIsNotClosed(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -1287,7 +1277,6 @@ func TestContainer_Close_CycleFailureNamesTheNodes(t *testing.T) {
     }
 }
 
-/* IsClosed is asked before a defensive Close: the memoized close error makes a repeated Close indistinguishable from the discovering one, and the asker must not re-report a failure somebody else already carried away. */
 func TestContainerIsClosed_FlipsExactlyAtClose(t *testing.T) {
     containerInstance := NewContainer(ContainerConfig{})
 
@@ -1342,7 +1331,6 @@ func TestContainer_Close_ClosesAHolderBeforeTheServiceItResolvedThroughAKeptReso
     if err := serviceContainer.Register(
         "app.holder",
         func(resolver containercontract.Resolver) (*lazyHoldingService, error) {
-            /* nothing is resolved here: the handle defers it to first use, which is the whole point */
             return &lazyHoldingService{
                 recorder: recorder,
                 handle:   Lazy[*closeOrderServiceA](resolver, "service.a"),
@@ -1358,12 +1346,10 @@ func TestContainer_Close_ClosesAHolderBeforeTheServiceItResolvedThroughAKeptReso
         t.Fatalf("unexpected get error: %v", err)
     }
 
-    /* the dependency is built before the handle ever asks for it, which is the ordinary case and the one that tells the read path from the write path: a resolution that finds the instance already there still has an edge to record */
     if _, err := serviceContainer.Get(t.Context(), "service.a"); nil != err {
         t.Fatalf("unexpected get error: %v", err)
     }
 
-    /* the first use, on a path that runs long after the provider returned */
     if nil == holder.handle.getOver(t.Context()) {
         t.Fatalf("expected the lazy handle to resolve the service")
     }
@@ -1391,7 +1377,6 @@ func (instance *panickingCloseWithTextService) CloseWithContext(closeContext con
     panic("the drain buffer was nil")
 }
 
-/* TestContainer_Close_APanickingCloseCarriesItsCauseAndItsStack pins what an operator learns from the one boundary that contains a teardown panic: nothing above it sees the panic and nothing below it survives, so whatever the recorded failure drops is gone. An error-shaped panic value kept only as its stringified message collapsed to one line at the render boundary, taking the context map and the cause chain of the very error the Close raised with it, and the frames that ran existed only inside the recover. */
 func TestContainer_Close_APanickingCloseCarriesItsCauseAndItsStack(t *testing.T) {
     panicCause := exception.NewError(
         "the socket was already gone",
@@ -1425,7 +1410,6 @@ func TestContainer_Close_APanickingCloseCarriesItsCauseAndItsStack(t *testing.T)
     }
 }
 
-/* the failure map holds one line per service, and a line is where the recovered value, the frames that ran and the cause of a contained panic collapsed; the details map beside it carries them whole, under the same key, only when a close left any */
 func TestContainer_Close_CarriesTheFailureDetailsOfAPanickingCloseBesideItsLine(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -1492,11 +1476,6 @@ func TestContainer_Close_AFailureThatSaysNothingBeyondItsLineAddsNoDetailsMap(t 
     }
 }
 
-/* the drop of the duplicate entry is ONE key — the one LogContext seeds with the error's own message —
-   and only when it holds the failure line verbatim. Swept by VALUE across the whole key space, it took a
-   producer's own keys with it whenever their value happened to be that message, which is exactly the
-   shape a refusal written for an operator has: the line, and the same line filed under the name of the
-   thing to do about it. */
 func TestContainer_Close_TheDuplicateDropTakesOnlyTheSeededMessage(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -1550,9 +1529,6 @@ func (instance *operatorFailingCloseService) CloseWithContext(closeContext conte
     )
 }
 
-/* the recovered value is bounded for the reason the frames are: it is the panic value as the SERVICE
-   wrote it, so twenty services panicking with five kilobytes apiece put a hundred into the one record
-   the stack limit exists to keep out of it. */
 func TestContainer_Close_TheRecoveredValueOfAPanickingCloseIsBounded(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -1601,7 +1577,6 @@ func (instance *hugePanicCloseService) CloseWithContext(closeContext context.Con
     panic(strings.Repeat("H", 5000))
 }
 
-/* the frames of one contained panic are bounded: the teardown error is ONE record the application journals, and an unbounded stack per failed node made a shutdown that loses twenty services write sixty kilobytes of it in a single line. The cut names itself and keeps the top frames, which are the ones that name the close. */
 func TestContainer_Close_TheFramesOfAPanickingCloseAreBounded(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -1698,7 +1673,6 @@ func (instance panickingUnwrapError) Error() string { return "the drain refused"
 
 func (instance panickingUnwrapError) Unwrap() error { panic("unwrap of a half-built error") }
 
-/* a panic value that is not an error has no cause to give, and the record still carries what it can */
 func TestContainer_Close_APanickingCloseWithoutAnErrorValueStillRecordsTheStack(t *testing.T) {
     closeErr := closeServiceValueWithin(t.Context(), &panickingCloseWithTextService{})
 
@@ -1747,7 +1721,6 @@ func TestContainer_Close_ClosesTheEarliestCreatedServiceLast(t *testing.T) {
             t.Fatalf("unexpected register error: %v", registerErr)
         }
 
-        /* the shared service is resolved FIRST and no edge is ever declared: this is the whole shape of a logger resolved at boot and used by everything through its own door afterwards */
         if _, getErr := serviceContainer.Get(t.Context(), "service.mmm.shared"); nil != getErr {
             t.Fatalf("unexpected get error: %v", getErr)
         }
@@ -1770,7 +1743,6 @@ func TestContainer_Close_ClosesTheEarliestCreatedServiceLast(t *testing.T) {
     }
 }
 
-/* a declared edge is honoured: the provider resolves its dependency during construction, so the edge is recorded and the dependency closes last. The creation-order tie-break answers the same here — a dependency built DURING its dependent finishes its own filing FIRST and is therefore the older node, which latest-first closes last anyway — so this pins that the edge is read, not that it outranks the tie-break. The fixture where the two disagree is the kept-handle one below, whose dependency is built after the holder that reaches for it. */
 func TestContainer_Close_ADeclaredEdgeIsHonoured(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -1805,7 +1777,6 @@ func TestContainer_Close_ADeclaredEdgeIsHonoured(t *testing.T) {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    /* the dependent is resolved first, but its dependency is built INSIDE that provider and finishes its own filing before it returns, so the dependency is the OLDER node: the edge and the creation-order tie-break agree here */
     if _, getErr := serviceContainer.Get(t.Context(), "service.dependent"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
@@ -1884,7 +1855,6 @@ func TestContainer_Close_AServiceStillResolvesDuringTheTeardown(t *testing.T) {
     }
 }
 
-/* TestContainer_Get_RefusesAfterTheTeardownFinished pins the second closing state. A resolution performed once the teardown is over is refused, since answering it out of the maps the teardown has just emptied of meaning would hand a caller holding a resolver a service every Close in the process has already run on, with a nil error. The fast path is asked separately because a memoized instance never reaches the creation guard that refuses a closed container. */
 func TestContainer_Get_RefusesAfterTheTeardownFinished(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -1969,7 +1939,6 @@ func (instance *probeClosableService) CloseWithContext(closeContext context.Cont
     return nil
 }
 
-/* the refusal covers the resolution paths the fast path never sees: a resolution made through a SCOPE skips the memoized read entirely and reaches the creation guard, which is the second door the same closing state has to be asked at */
 func TestScope_Get_RefusesAfterTheContainerTeardownFinished(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -2006,7 +1975,6 @@ func TestScope_Get_RefusesAfterTheContainerTeardownFinished(t *testing.T) {
     }
 }
 
-/* the built mark leaves the maps together with the instance it marks: the first override moves the BUILT instance to the graveyard and takes the mark down, so the second override evicts a value that is its installer's, not the container's. With the mark left standing, the first override was graveyarded as if the container had built it, and closed under the feet of whoever installed it. */
 func TestContainer_Close_AnEvictedOverrideAfterABuiltInstanceIsNotClosed(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -2069,7 +2037,6 @@ func TestContainer_Close_AnEvictedOverrideAfterABuiltInstanceIsNotClosed(t *test
     }
 }
 
-/* TestContainer_Close_ADeclaredTeardownDependencyBeatsTheCreationOrder is the declarative twin of the test above, for the registration that resolves nothing. Neither provider touches the resolver, so the container derives no edge at all, and the two are resolved in the order that makes the creation-order tie-break answer WRONG on its own: the dependency is created LAST, so the latest-first tie-break would close it FIRST, while its dependent is still alive. Only the declaration can put it last, which is what makes this probe separate the guard from the ordering the container would have reached anyway. */
 func TestContainer_Close_ADeclaredTeardownDependencyBeatsTheCreationOrder(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -2100,7 +2067,6 @@ func TestContainer_Close_ADeclaredTeardownDependencyBeatsTheCreationOrder(t *tes
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    /* the dependent is built FIRST and the dependency SECOND, so the creation-order tie-break alone would close the dependency first — the wrong way round. Nothing resolves anything, so the declaration is the only edge there is. */
     if _, getErr := serviceContainer.Get(t.Context(), "service.dependent"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
@@ -2118,7 +2084,6 @@ func TestContainer_Close_ADeclaredTeardownDependencyBeatsTheCreationOrder(t *tes
     }
 }
 
-/* TestContainer_Close_TheCreationOrderAloneClosesTheDependencyFirst is the positive control for the test above: the same two services, the same resolution order, the declaration removed. It asserts the order the container reaches WITHOUT the declaration, so a reader can see that the probe above is not green for a reason that has nothing to do with the option — and so a change to the tie-break itself fails here rather than quietly making the guard vacuous. */
 func TestContainer_Close_TheCreationOrderAloneClosesTheDependencyFirst(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{TeardownSequential: true})
 
@@ -2166,7 +2131,6 @@ func TestContainer_Close_TheCreationOrderAloneClosesTheDependencyFirst(t *testin
     }
 }
 
-/* TestContainer_Close_ADeclaredTeardownDependencyOnAnUnbuiltServiceIsDropped pins the promise the option's documentation makes about an optional collaborator: the edge names a service that was registered but never resolved, so the teardown walk drops it rather than refusing the walk or wedging the dependent behind a node that will never close. */
 func TestContainer_Close_ADeclaredTeardownDependencyOnAnUnbuiltServiceIsDropped(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -2197,7 +2161,6 @@ func TestContainer_Close_ADeclaredTeardownDependencyOnAnUnbuiltServiceIsDropped(
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    /* only the dependent is ever built */
     if _, getErr := serviceContainer.Get(t.Context(), "service.dependent"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
@@ -2223,7 +2186,6 @@ func (instance *labelledLazyHolder) CloseWithContext(closeContext context.Contex
     return nil
 }
 
-/* the in-degree is what makes a shared dependency wait for the LAST of its dependents, and only a fixture where releasing it on the first one changes the answer can tell that apart from the creation-order tie-break. Both holders keep a handle and reach through it after their providers returned, so the shared service is stamped after both of them: released on the first decrement it is the newest node with nothing left pointing at it, and it closes BETWEEN the two holders — the teardown running over a service the second holder is still about to use. The sibling diamond above cannot see this, because there the shared dependency is built during its dependents and is the oldest node either way. */
 func TestContainer_Close_ASharedDependencyWaitsForEveryDependent(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{TeardownSequential: true})
 
@@ -2283,7 +2245,6 @@ func TestContainer_Close_ASharedDependencyWaitsForEveryDependent(t *testing.T) {
         t.Fatalf("unexpected get error: %v", secondErr)
     }
 
-    /* the shared service is built here, after BOTH holders, and each reach records an edge onto it */
     if nil == firstHolder.handle.getOver(t.Context()) {
         t.Fatalf("expected the first handle to resolve the shared service")
     }
@@ -2305,7 +2266,6 @@ func TestContainer_Close_ASharedDependencyWaitsForEveryDependent(t *testing.T) {
     }
 }
 
-/* an alias group is as old as its OLDEST member, and only a group that SPANS a third node can tell that from taking the newest. Two registered names answer the same pointer — the ordinary shape of an override installed over a service somebody already holds — and an unrelated service is built between the two filings, so the group runs from the first name to the second with the middle node inside it. Read as old as its first filing the pair closes after the middle; read as new as its second it closes before, tearing a service down ahead of one built later than it. No edge exists anywhere here, which is what keeps this pinned to the collapse and not to the graph. */
 func TestContainer_Close_AnAliasGroupIsAsOldAsItsOldestMember(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{TeardownSequential: true})
 
@@ -2356,7 +2316,6 @@ func TestContainer_Close_AnAliasGroupIsAsOldAsItsOldestMember(t *testing.T) {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
-    /* the same pointer under a second name, filed after the middle service: this is the far end of the group */
     if overrideErr := serviceContainer.OverrideInstance("app.zzz.second", shared, OverrideOptions{}); nil != overrideErr {
         t.Fatalf("unexpected override error: %v", overrideErr)
     }
@@ -2374,7 +2333,6 @@ func TestContainer_Close_AnAliasGroupIsAsOldAsItsOldestMember(t *testing.T) {
     }
 }
 
-/* the nodes a cycle leaves behind are still closed, and the order they are closed in is the same latest-first the rest of the teardown uses — the sibling above asserts only that the cycle is NAMED, so the comparator that sorts the remainder can be reversed with the suite green. The two are stamped apart and the edges are installed by hand, which is the only way to build a cycle the container refuses to create on its own. */
 func TestContainer_Close_TheCycleRemainderClosesLatestFirst(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{}).(*container)
 
@@ -2431,7 +2389,6 @@ func TestContainer_Close_TheCycleRemainderClosesLatestFirst(t *testing.T) {
     }
 }
 
-/* a service that carries the context-taking door is closed through it, with the teardown's own deadline, and its plain Close is not called at all: the two would otherwise both run, or the budget would stop at the container that has it while the component that spends the time never hears of it. */
 type contextCloseRecorder struct {
     plainCalls   int
     contextCalls int
@@ -2508,7 +2465,6 @@ func TestContainer_CloseWithContext_PrefersTheContextTakingDoorAndHandsItTheDead
     }
 }
 
-/* Close with no context reaches the same door with no deadline, so a caller that declared no budget does not have one invented for it. */
 func TestContainer_Close_ReachesTheContextTakingDoorWithoutADeadline(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -2542,7 +2498,6 @@ func TestContainer_Close_ReachesTheContextTakingDoorWithoutADeadline(t *testing.
     }
 }
 
-/* waveMateCloser closes by announcing that it started and then waiting, for a bounded moment, to be told that its wave-mate started too. Serially the first one to close waits the whole moment out and reports it, because the second has not begun; in one wave both announce before either waits. The bound is what keeps the failing arm a failure rather than a hung suite. */
 type waveMateCloser struct {
     started      chan struct{}
     mateStarted  <-chan struct{}
@@ -2598,7 +2553,6 @@ func registerWaveMatePair(t *testing.T, serviceContainer containercontract.Conta
     }
 }
 
-/* the two services below have no edge between them, so the graph puts them in one wave: under the waves, both are inside their Close at the same moment and neither has to wait. */
 func TestContainer_Close_WavesTheServicesOfOneWaveCloseAtOnce(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -2609,7 +2563,6 @@ func TestContainer_Close_WavesTheServicesOfOneWaveCloseAtOnce(t *testing.T) {
     }
 }
 
-/* the sibling that makes the test above mean something: the same pair, the same bound, the container configured sequential. One of the two waits its whole moment out and says so, which is the observation the waves have to remove. Without it, a teardown in waves that closed serially would pass on a bound nobody exercised. */
 func TestContainer_Close_SequentialTheServicesOfOneWaveCloseOneAfterTheOther(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{TeardownSequential: true})
 
@@ -2625,7 +2578,6 @@ func TestContainer_Close_SequentialTheServicesOfOneWaveCloseOneAfterTheOther(t *
     }
 }
 
-/* a wave is the set of nodes with no relation to one another, so a dependency is one wave past the LAST dependent that frees it — which is what keeps the ordering the whole point of the walk. */
 func TestTeardownCloseOrder_ADependencyIsOneWavePastItsLastDependent(t *testing.T) {
     nodeKeys := []string{"service:dependent.first", "service:dependent.second", "service:shared", "service:unrelated"}
 
@@ -2662,7 +2614,6 @@ func TestTeardownCloseOrder_ADependencyIsOneWavePastItsLastDependent(t *testing.
     }
 }
 
-/* the waves are read off the same drain that produces the serial order, so a caller that ignores them closes exactly what it closed before, in exactly that order. The order asserted here is the one the walk answered before the waves existed: newest first among the free nodes, the shared dependency last. */
 func TestTeardownCloseOrder_TheSerialOrderIsUnchangedByTheWaves(t *testing.T) {
     nodeKeys := []string{"service:dependent.first", "service:dependent.second", "service:shared", "service:unrelated"}
 
@@ -2687,7 +2638,6 @@ func TestTeardownCloseOrder_TheSerialOrderIsUnchangedByTheWaves(t *testing.T) {
     }
 }
 
-/* a ring the drain cannot open is closed as one unit and the drain CONTINUES past it: a pure dependency of a ring member — created after its dependent, so the creation-order tie-break put it first — is released by the ring's close and closed after it, as the edge says. Closed whole in creation order, the remainder closed that dependency FIRST, against the one edge that ordered it, and the remainder named it as if it were on the ring. */
 func TestTeardownCloseOrder_APureDependencyOfARingMemberClosesAfterTheRingAndIsNotARingMember(t *testing.T) {
     nodeKeys := []string{"service:ring.a", "service:ring.b", "service:ring.dependency"}
 
@@ -2719,7 +2669,6 @@ func TestTeardownCloseOrder_APureDependencyOfARingMemberClosesAfterTheRingAndIsN
     }
 }
 
-/* two rings joined by a bridge: the first ring closes, the bridge is released and closes, the second ring closes — the bridge is on no ring and is not reported as one, and the two rings take two waves of their own, each closed serially */
 func TestTeardownCloseOrder_TwoRingsJoinedByABridgeCloseInOrderAndTheBridgeIsNoRingMember(t *testing.T) {
     nodeKeys := []string{"service:ring.a", "service:ring.b", "service:bridge", "service:ring.e", "service:ring.f"}
 
@@ -2760,7 +2709,6 @@ func TestTeardownCloseOrder_TwoRingsJoinedByABridgeCloseInOrderAndTheBridgeIsNoR
     }
 }
 
-/* a ring that depends on another ring DIRECTLY — a member's edge into the other ring, no bridge node between them — is the one shape where the count of what depends on a ring is fed by a ring member: with that term dropped the dependency ring reads as depended on by nothing and closes first, under the very edge that orders it after. The bridge shape beside it does not see the term, because there the dependent of the second ring is the bridge, a plain node. */
 func TestTeardownCloseOrder_ARingDependingDirectlyOnAnotherRingClosesBeforeIt(t *testing.T) {
     nodeKeys := []string{"service:ring.a", "service:ring.b", "service:ring.c", "service:ring.d"}
 
@@ -2790,7 +2738,6 @@ func TestTeardownCloseOrder_ARingDependingDirectlyOnAnotherRingClosesBeforeIt(t 
     }
 }
 
-/* a ring's wave is one of its own, past every wave the drain assigned so far: a ring sharing its index with a drained, unrelated node would have that node closed one at a time with the ring's members under the waves, for no reason the graph gives */
 func TestTeardownCloseOrder_ARingTakesAWaveOfItsOwn(t *testing.T) {
     nodeKeys := []string{"service:lone.dependent", "service:lone.dependency", "service:ring.a", "service:ring.b"}
 
@@ -2816,7 +2763,6 @@ func TestTeardownCloseOrder_ARingTakesAWaveOfItsOwn(t *testing.T) {
     }
 }
 
-/* a ring's wave is one past the last wave that CLOSED, not one past every wave assigned: the probe's chain of three pushes the dependency it shares with the ring to a provisional wave three, and a ring counted past that assignment would leave a wave nothing closes in, which the operator's view prints */
 func TestTeardownCloseOrder_TheWaveIndexesHaveNoHole(t *testing.T) {
     nodeKeys := []string{"service:chain.0", "service:chain.1", "service:chain.2", "service:dep", "service:ring.a", "service:ring.b"}
 
@@ -2859,7 +2805,6 @@ func TestTeardownCloseOrder_TheWaveIndexesHaveNoHole(t *testing.T) {
     }
 }
 
-/* a dependency shared by two dependents lands one past the LATEST of them, not one past whichever released it last: the drain meets Q, which R released, after P, and Y — depended on by both — is bumped to the wave past Q, not left at the wave past P, or the wave of a dependent and its dependency would coincide and a wave would close a pair the graph orders */
 func TestTeardownCloseOrder_ADependencyLandsOnePastItsLatestDependentNotItsLastReleaser(t *testing.T) {
     nodeKeys := []string{"service:y", "service:p", "service:q", "service:r"}
 
@@ -2894,7 +2839,6 @@ func TestTeardownCloseOrder_ADependencyLandsOnePastItsLatestDependentNotItsLastR
     }
 }
 
-/* two rings nothing bridges are closed latest-created first, like any two unrelated services, and each takes a wave of its own */
 func TestTeardownCloseOrder_TwoIndependentRingsCloseLatestFirst(t *testing.T) {
     nodeKeys := []string{"service:a1", "service:a2", "service:b1", "service:b2"}
 
@@ -2957,7 +2901,6 @@ func TestTeardownCloseOrder_HundredsOfRingsCloseInMilliseconds(t *testing.T) {
     }
 }
 
-/* the verification runs once the wiring is done, so it is the moment a declared edge naming a service nobody registered stops being a name still to come and becomes the ordering that is not there. */
 func TestContainer_VerifyDeclaredTeardownDependencies_RefusesADeclaredDependencyOnAServiceThatWasNeverRegistered(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -2995,7 +2938,6 @@ func TestContainer_VerifyDeclaredTeardownDependencies_RefusesADeclaredDependency
     }
 }
 
-/* the sibling that keeps the refusal above from being a refusal of the door's own purpose: a dependency that WAS registered and simply never built is the lazy singleton, and it must pass. */
 func TestContainer_VerifyDeclaredTeardownDependencies_AdmitsADeclaredDependencyOnARegisteredServiceNobodyBuilt(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -3022,7 +2964,6 @@ func TestContainer_VerifyDeclaredTeardownDependencies_AdmitsADeclaredDependencyO
     verifyDeclaredTeardownDependencies(t, serviceContainer)
 }
 
-/* a declaration keyed by TYPE writes into the same graph the name form writes into, so it orders the teardown the same way — and T and *T name one node, because the container files them under one canonical type. */
 func TestContainer_Close_ADeclaredTeardownDependencyKeyedByTypeOrdersTheTeardown(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -3053,7 +2994,6 @@ func TestContainer_Close_ADeclaredTeardownDependencyKeyedByTypeOrdersTheTeardown
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    /* the DEPENDENT is built first and the dependency second, so the creation stamp alone would close the dependency FIRST — under the service still holding it. Only the declared edge can turn that around, which is what makes this an observation rather than a coincidence. */
     if _, getErr := FromResolver[*closeOrderServiceA](t.Context(), serviceContainer, "app.reporter"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
@@ -3075,7 +3015,6 @@ func TestContainer_Close_ADeclaredTeardownDependencyKeyedByTypeOrdersTheTeardown
     }
 }
 
-/* labelledCloser records its own name, which is what a test about WHICH of several services an ordering reached needs: the shared fixtures above record one letter per type, and the question below is about two services of the SAME type. */
 type labelledCloser struct {
     label    string
     recorder *closeOrderRecorder
@@ -3087,7 +3026,6 @@ func (instance *labelledCloser) CloseWithContext(closeContext context.Context) e
     return nil
 }
 
-/* declaringCloser is a second type, so the declaration under test names a type its declarer is not itself registered under — the self-declaration is refused at the registration door and is a different case. */
 type declaringCloser struct {
     label    string
     recorder *closeOrderRecorder
@@ -3106,7 +3044,6 @@ func newAmbiguousTypeRecorder() (*closeOrderRecorder, *[]string) {
     return &closeOrderRecorder{mutex: mutex, closeSequence: &closeSequence}, &closeSequence
 }
 
-/* registerAmbiguousTypeWiring is the shape the fan-out turned into a cycle nobody declared. The author writes TWO orderings, neither circular: the router closes before the type it knows its collaborator by, and one service closes before the router. The second service happens to be registered under the same type, which only a non-strict type registration allows — and reading the declaration as "before EVERY service of that type" adds router -> primary, which nobody wrote and which closes the ring. */
 func registerAmbiguousTypeWiring(t *testing.T, serviceContainer containercontract.Container, recorder *closeOrderRecorder) {
     t.Helper()
 
@@ -3141,7 +3078,6 @@ func registerAmbiguousTypeWiring(t *testing.T, serviceContainer containercontrac
     }
 }
 
-/* a teardown dependency declared on a TYPE that more than one service is registered under orders NOTHING, and a close that reaches it does not report a cycle nobody declared: expanded onto every name of the type, it would write an edge the declaring code never asked for, and where one service of that type orders itself before the declarer that edge would close a ring over a teardown in which all three services close and every Close returns nil. The container is configured sequential here. */
 func TestContainer_Close_ADeclarationOnAnAmbiguousTypeOrdersNothingAndReportsNoCycle(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{TeardownSequential: true})
 
@@ -3159,7 +3095,6 @@ func TestContainer_Close_ADeclarationOnAnAmbiguousTypeOrdersNothingAndReportsNoC
     }
 }
 
-/* the same wiring is refused under the waves, at the registration of the declarer: a type several services are registered under names a set, and there is no reading of "close me before this type" that a set answers. The refusal lands at the door where the author can still choose. */
 func TestContainer_Register_RefusesADeclarationOnAnAmbiguousType(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -3199,7 +3134,6 @@ func TestContainer_Register_RefusesADeclarationOnAnAmbiguousType(t *testing.T) {
         t.Fatalf("expected the refused registration to leave nothing behind")
     }
 
-    /* the declarer and the set it could not choose between are what the author acts on, and they travel in the context rather than in the message */
     var typedError *exception.Error
     if false == errors.As(verifyErr, &typedError) {
         t.Fatalf("the refusal is not a melody error carrying a context: %v", verifyErr)
@@ -3215,7 +3149,6 @@ func TestContainer_Register_RefusesADeclarationOnAnAmbiguousType(t *testing.T) {
     }
 }
 
-/* a type exactly one service is registered under folds onto that service, so a declaration by type closing a ring with a declaration by name is refused at its registration: the single service of the type ordered itself before the router, and the router declaring the type would close the ring */
 func TestContainer_ADeclarationOnAnUnambiguousTypeClosingARingIsRefused(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -3241,7 +3174,6 @@ func TestContainer_ADeclarationOnAnUnambiguousTypeClosingARingIsRefused(t *testi
     }
 }
 
-/* concurrentCloser records how many closes run at once — the peak is what tells a wave from a serial loop — and, where a test hands it a counter, how many closes it answered. */
 type concurrentCloser struct {
     running *atomic.Int64
     peak    *atomic.Int64
@@ -3292,7 +3224,6 @@ func TestContainer_Close_WavesTheCycleRemainderClosesOneAfterTheOther(t *testing
 
     writeDependencyRingEdge(t, serviceContainer, "cycle.c", "cycle.a")
 
-    /* verified after the wiring, as the door asks: the first of these declarations names a service registered only later */
     verifyDeclaredTeardownDependencies(t, serviceContainer)
 
     buildEveryRegisteredService(t, serviceContainer, "cycle.a", "cycle.b", "cycle.c")
@@ -3307,7 +3238,6 @@ func TestContainer_Close_WavesTheCycleRemainderClosesOneAfterTheOther(t *testing
     }
 }
 
-/* two rings — each a pair ordered against one another — are two waves closed one service at a time */
 func TestContainer_Close_WavesEachRingClosesOneAfterTheOther(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -3347,7 +3277,6 @@ func TestContainer_Close_WavesEachRingClosesOneAfterTheOther(t *testing.T) {
     }
 }
 
-/* the close report names the members of the ring alone: the pure dependency a ring member resolves is closed after the ring, in the order the graph proves, and naming it beside the ring would send the operator looking for a ring it is not on */
 func TestContainer_Close_TheCycleReportNamesTheRingMembersAlone(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -3554,7 +3483,6 @@ func (instance *mutualWaveMate) CloseWithContext(closeContext context.Context) e
     return instance.mate.CloseWithContext(context.Background())
 }
 
-/* the case that keeps the group from being a serialisation of the whole wave: two mutually held pairs with no relation between them are two groups, and the groups still start at once. Each pair's first member waits for the other pair's first member to have started; closed group after group, one of them waits its whole moment out and says so. */
 func TestContainer_Close_WavesTwoUnrelatedMutuallyHeldPairsCloseAtOnce(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -3596,7 +3524,6 @@ func TestContainer_Close_WavesTwoUnrelatedMutuallyHeldPairsCloseAtOnce(t *testin
     }
 }
 
-/* budgetSleeper closes by sleeping through its deadline, ignoring the context it is handed, and answering nil: the plain closer CONTAINER.md declares bounded by nothing but itself, and the one that ate the budget without anything naming it. */
 type budgetSleeper struct {
     sleep time.Duration
     label string
@@ -3612,7 +3539,6 @@ func (instance *budgetSleeper) Close() error {
     return instance.CloseWithContext(context.Background())
 }
 
-/* deadlineNotingCloser answers at once through the context-taking door and notes whether its context carries a deadline at all */
 type deadlineNotingCloser struct {
     sawDeadline bool
 }
@@ -3627,7 +3553,6 @@ func (instance *deadlineNotingCloser) Close() error {
     return instance.CloseWithContext(context.Background())
 }
 
-/* refusingSleeper is budgetSleeper's failing twin: it sleeps through its deadline and then refuses, so the teardown that ran it both overran and failed and carries the deadline record in its error. */
 type refusingSleeper struct {
     sleep time.Duration
 }
@@ -3721,7 +3646,6 @@ func TestContainer_CloseWithContext_AnOverrunNamesTheServiceThatSpentTheBudget(t
     }
 }
 
-/* a teardown reached with its budget already gone records a budget of zero, not the negative remainder: the closer it reached is starved, nothing spent anything, and the record still says so */
 func TestContainer_ATeardownReachedWithTheBudgetGoneRecordsAZeroBudget(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -3758,7 +3682,6 @@ func TestContainer_ATeardownReachedWithTheBudgetGoneRecordsAZeroBudget(t *testin
     }
 }
 
-/* the record travels twice, in the error of a failed teardown and through the door, and a reader may decorate what the door answered before writing it; it must not be decorating the error's record with it */
 func TestContainer_TeardownDeadlineOverrunAnswersItsOwnCopyOfTheRecord(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -3806,7 +3729,6 @@ func TestContainer_TeardownDeadlineOverrunAnswersItsOwnCopyOfTheRecord(t *testin
     }
 }
 
-/* the fast service is registered FIRST, so the eater built after it closes before it — latest created, first closed — and the fast one is reached with the deadline already gone: starved, and named as such, while the eater is named as the one that spent it */
 func TestContainer_CloseWithContext_AServiceReachedWithTheBudgetSpentIsNamedStarved(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{TeardownSequential: true})
 
@@ -3838,7 +3760,6 @@ func TestContainer_CloseWithContext_AServiceReachedWithTheBudgetSpentIsNamedStar
     }
 }
 
-/* under the waves two unrelated closers start together; both are running when the deadline passes, both are named, and the whole teardown costs one of them rather than two */
 func TestContainer_CloseWithContext_WavesTwoClosersOfOneWaveThatOverlapAreBothNamed(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -3870,7 +3791,6 @@ func TestContainer_CloseWithContext_WavesTwoClosersOfOneWaveThatOverlapAreBothNa
     }
 }
 
-/* a teardown reached with its deadline already gone and nothing to close spent nothing on anything: it kept a record naming nobody — an empty budget, an empty map of durations — and the application then wrote "teardown overran its deadline" about a teardown that did nothing */
 func TestContainer_CloseWithContext_ATeardownThatClosedNothingKeepsNoOverrunRecord(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -3890,7 +3810,6 @@ func TestContainer_CloseWithContext_ATeardownThatClosedNothingKeepsNoOverrunReco
     }
 }
 
-/* a close that failed under an overrun carries the deadline record beside its failures, so the operator reading a failed teardown asks the same question about the budget as one reading a clean one */
 func TestContainer_CloseWithContext_AFailureUnderAnOverrunCarriesTheDeadlineRecordBesideTheFailures(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -3955,7 +3874,6 @@ type plainValueService struct {
     label string
 }
 
-/* the durations name the closes that RAN: a service without a Close and a second filing of a value already claimed are neither closed nor timed */
 func TestContainer_CloseWithContext_ANonCloserAndADuplicateValueAreNotRecorded(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -3994,7 +3912,6 @@ type scopedOnlyService struct {
 
 func (instance *scopedOnlyService) CloseWithContext(closeContext context.Context) error { return nil }
 
-/* the two spellings of one declaration answer one cause: a dependency on a type only a scoped registration filed, registered after the declaration, is refused as scoped at the verification, the way the same dependency by name is, and not as never registered — the service IS registered, one lifetime away */
 func TestContainer_VerifyDeclaredTeardownDependencies_RefusesADeclaredDependencyOnAScopedTypeAsScoped(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -4018,7 +3935,6 @@ func TestContainer_VerifyDeclaredTeardownDependencies_RefusesADeclaredDependency
     }
 }
 
-/* a declaration by type counts as an edge to the one service the type stands for: the declarer closing before the pool while the pool, resolved through its type, depends on the declarer is a ring, refused at that resolution before anything is built */
 func TestContainer_ADeclarationOnATypeRefusesTheTypeResolutionClosingARing(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -4049,7 +3965,6 @@ func TestContainer_ADeclarationOnATypeRefusesTheTypeResolutionClosingARing(t *te
     }
 }
 
-/* capturedDeclarerPool holds the declarer by a pointer it received, not one it resolved: the walk sees the pointer, the graph sees nothing */
 type capturedDeclarerPool struct {
     declarer *poolDeclarerService
 }
@@ -4103,7 +4018,6 @@ func TestContainer_Close_WavesACapturedPointerBackAgainstATypeDeclarationIsNoRin
     }
 }
 
-/* a resolution between two names of ONE instance collapses onto a self-edge, and a self-edge is no edge: a plan that kept it would list a service as closed before itself */
 func TestContainer_TeardownPlan_AResolutionBetweenTwoNamesOfOneInstanceIsNoEdge(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -4135,7 +4049,6 @@ func TestContainer_TeardownPlan_AResolutionBetweenTwoNamesOfOneInstanceIsNoEdge(
     }
 }
 
-/* what a declared type stands for is the plan's to expand, for one plan: the operator's view asked for the plan while the type has one name writes no expanded edge into the graph, so a second, non-strict name registered under the type later leaves the declaration ordering nothing and the teardown clean */
 func TestContainer_Close_TheViewLeavesNoExpandedTypeEdgeBehindOnTheSequentialPath(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{TeardownSequential: true})
 
@@ -4182,7 +4095,6 @@ func TestContainer_Close_TheViewLeavesNoExpandedTypeEdgeBehindOnTheSequentialPat
     }
 }
 
-/* contextDoorOnlyService carries the context-taking close door and NOT Close: the shape a service grows when the deadline is the only reason it closes at all. */
 type contextDoorOnlyService struct {
     closes      int
     hadDeadline bool
@@ -4222,9 +4134,6 @@ func TestContainer_Close_ClosesAServiceThatCarriesOnlyCloseWithContextAndHandsIt
     }
 }
 
-/* a service whose Close answers a TYPED nil: the interface is not nil, the pointer
-inside it is, which is what an application closer built on a *exception.Error it
-never assigned hands back. */
 type typedNilCloseErrorService struct {
     closeCount int
 }
@@ -4237,9 +4146,6 @@ func (instance *typedNilCloseErrorService) CloseWithContext(closeContext context
     return refusal
 }
 
-/* a typed nil is the nil its producer meant: the close of a service that answers
-one is a close that succeeded, and the teardown reports no failure for it. The
-service counts its closes, so the answer is a close that RAN, not one skipped. */
 func TestContainerClose_ATypedNilCloseErrorIsReadAsASuccessfulClose(t *testing.T) {
     containerInstance := NewContainer(ContainerConfig{})
     service := &typedNilCloseErrorService{}
@@ -4269,10 +4175,6 @@ func TestContainerClose_ATypedNilCloseErrorIsReadAsASuccessfulClose(t *testing.T
     }
 }
 
-/* LogContext answers a NIL map for a typed nil, and the details of a failed close are
-written into what it answers: the book is read without a write into it, and a context
-with nothing in it books nothing. Latent since the containment reads a typed nil as
-success; a write into the nil map would end this test with a panic. */
 func TestRecordCloseFailureDetails_ATypedNilErrorWritesIntoNoNilMap(t *testing.T) {
     failureDetails := map[string]exceptioncontract.Context{}
     var refusal *exception.Error
@@ -4284,10 +4186,6 @@ func TestRecordCloseFailureDetails_ATypedNilErrorWritesIntoNoNilMap(t *testing.T
     }
 }
 
-/* The limit is counted in bytes and one of the two details it bounds is the panic
-value as the SERVICE wrote it, so arbitrary application text. A cut taken at the
-byte alone splits whatever rune straddles it; the probe puts a three-byte rune
-across the boundary deliberately. */
 func TestBoundedCloseFailureDetail_CutsOnARuneBoundary(t *testing.T) {
     /* one filler byte short of the limit, then a three-byte rune straddling it */
     detail := strings.Repeat("a", CloseFailureStackBytesRule().Default-1) + strings.Repeat("\u4e16", 64)
@@ -4308,11 +4206,6 @@ func TestBoundedCloseFailureDetail_CutsOnARuneBoundary(t *testing.T) {
     }
 }
 
-/* The back-off looks for the start of the rune the limit lands in, which is at
-most three bytes back. A byte that is not valid UTF-8 ELSEWHERE in the text is the
-service's own and is not the cut's to repair: asked of the whole prefix instead,
-the back-off walked down to that byte and kept nothing of a value that led with
-one. */
 func TestBoundedCloseFailureDetail_KeepsTheLimitPastAnInvalidByte(t *testing.T) {
     for _, invalidAt := range []int{0, 100, CloseFailureStackBytesRule().Default - 8} {
         detail := strings.Repeat("a", invalidAt) + "\xff" + strings.Repeat("a", 2*CloseFailureStackBytesRule().Default)
@@ -4329,8 +4222,6 @@ func TestBoundedCloseFailureDetail_KeepsTheLimitPastAnInvalidByte(t *testing.T) 
         }
     }
 
-    /* a run of stray continuation bytes across the limit starts no rune anywhere in it: the walk stops at its
-       bound of three bytes rather than following the run down */
     detail := strings.Repeat("a", CloseFailureStackBytesRule().Default-8) + strings.Repeat("\x80", 20) + strings.Repeat("a", CloseFailureStackBytesRule().Default)
     bounded, _ := boundedCloseFailureDetail(detail, defaultCloseFailureStackBytes()).(string)
     if kept := strings.Split(bounded, "\n\t\u2026 cut,")[0]; CloseFailureStackBytesRule().Default-(utf8.UTFMax-1) != len(kept) {
@@ -4338,7 +4229,6 @@ func TestBoundedCloseFailureDetail_KeepsTheLimitPastAnInvalidByte(t *testing.T) 
     }
 }
 
-/* doublyPanickingCloseValue panics, when rendered, with a value whose own rendering panics: fmt contains the first panic and re-raises the second */
 type doublyPanickingCloseValue struct{}
 
 func (instance doublyPanickingCloseValue) Error() string {
@@ -4373,7 +4263,6 @@ func TestContainer_Close_APanicValueWhoseRenderingPanicsIsRecordedInsteadOfEscap
     }
 }
 
-/* a ring closed through a Lazy handle is refused at the resolution that closes it: the partner's provider resolving its holder would write the edge back, so the handle's resolution fails with ErrCircularDependency, the partner is not memoized, the plan holds no cycle and the holder alone closes */
 func TestContainer_ARingClosedThroughALazyHandleIsRefusedAtTheResolutionThatClosesIt(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{}).(*container)
 
@@ -4415,7 +4304,6 @@ func TestContainer_ARingClosedThroughALazyHandleIsRefusedAtTheResolutionThatClos
     }
 }
 
-/* a declared teardown edge counts as an edge of the ring: with the holder declaring the partner, by type as by name, the partner's provider resolving the holder is refused the same way */
 func TestContainer_ADeclaredEdgeRefusesTheLazyResolutionThatWouldCloseARing(t *testing.T) {
     for _, declaration := range []struct {
         name   string
@@ -4449,7 +4337,6 @@ func TestContainer_ADeclaredEdgeRefusesTheLazyResolutionThatWouldCloseARing(t *t
     }
 }
 
-/* the edge a Lazy handle writes still orders the teardown where it closes no ring: the holder closes before the partner it resolved later, against the latest-first order the creation stamps alone would give */
 func TestContainer_Close_ALazyEdgeThatClosesNoRingStillOrders(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{}).(*container)
 
@@ -4477,7 +4364,6 @@ func TestContainer_Close_ALazyEdgeThatClosesNoRingStillOrders(t *testing.T) {
     }
 }
 
-/* a declared teardown edge closing a ring with an edge already recorded is refused at its declaration, through RegisterOptions by name and by type and through DeclareTeardownDependency, and nothing of the refused declaration is kept */
 func TestContainer_ADeclaredRingIsRefusedAtTheDeclaration(t *testing.T) {
     newDeclaredPair := func(t *testing.T) containercontract.Container {
         t.Helper()
@@ -4574,7 +4460,6 @@ func TestContainer_ADeclaredRingIsRefusedAtTheDeclaration(t *testing.T) {
     })
 }
 
-/* a lookup that failed and was handled leaves no edge behind: a provider falling back when an optional collaborator is missing does not depend on it, so that collaborator, registered later, may depend on the provider's service */
 func TestContainer_AFailedLookupLeavesNoDependency(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{}).(*container)
 
@@ -4614,7 +4499,6 @@ func TestContainer_AFailedLookupLeavesNoDependency(t *testing.T) {
     }
 }
 
-/* an edge two resolutions hold stays while one of them still holds it, and one that acquired it is kept whatever the other answers */
 func TestHoldProvisionalEdge_TheLastFailingHolderTakesTheEdgeBackAndAnAcquiredOneStays(t *testing.T) {
     graph := make(map[string]map[string]struct{})
     provisional := make(map[string]map[string]int)
@@ -4650,7 +4534,6 @@ func TestHoldProvisionalEdge_TheLastFailingHolderTakesTheEdgeBackAndAnAcquiredOn
     }
 }
 
-/* a declaration acquires the edge a resolution in flight holds, so that resolution failing does not take the declared ordering back */
 func TestContainer_ADeclarationAcquiresAnEdgeAFailingResolutionHolds(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{}).(*container)
 
@@ -4666,7 +4549,6 @@ func TestContainer_ADeclarationAcquiresAnEdgeAFailingResolutionHolds(t *testing.
     }
 }
 
-/* an edge resolved through a type standing for one name is that name's, so a second name registered under the type afterwards cannot unfold it and let a ring through */
 func TestContainer_ASecondNameUnderATypeDoesNotUnfoldAResolvedEdge(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -4715,7 +4597,6 @@ func TestContainer_ASecondNameUnderATypeDoesNotUnfoldAResolvedEdge(t *testing.T)
     }
 }
 
-/* a type declaration counts as an edge only to the very type it declares: a same-named type of another scope sharing the key of a registered one orders nothing, so it closes no ring with that service */
 func TestContainer_ADeclarationOnASameNamedTypeClosesNoRing(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -4746,7 +4627,6 @@ func TestContainer_DeclareTeardownDependency_OrdersAServiceAgainstOneItCaptured(
     serviceContainer.MustRegister("app.bus", func(_ containercontract.Resolver) (*closeOrderServiceA, error) { return &closeOrderServiceA{recorder: recorder}, nil }, RegisterOptions{})
     serviceContainer.MustRegister("app.transports", func(_ containercontract.Resolver) (*closeOrderServiceB, error) { return &closeOrderServiceB{recorder: recorder}, nil }, RegisterOptions{})
 
-    /* the bus is built first, so creation order alone would close the transports before it */
     MustFromResolver[*closeOrderServiceA](t.Context(), serviceContainer, "app.bus")
     MustFromResolver[*closeOrderServiceB](t.Context(), serviceContainer, "app.transports")
 
@@ -5238,7 +5118,6 @@ func TestContainer_Register_AnOptionalTeardownDependencyOnARegisteredServiceOrde
                 RegisterOptions{},
             )
 
-            /* the storage is built first, so the creation order alone would close it last; the edge is what this pins */
             MustFromResolver[*closeOrderServiceB](t.Context(), serviceContainer, "app.storage")
             MustFromResolver[*closeOrderServiceA](t.Context(), serviceContainer, "app.reporter")
 
@@ -5479,7 +5358,6 @@ func TestContainerResolve_AProviderLeavingThroughGoexitAnswersTheWaiterAndRunsAg
     }
 }
 
-/* a service with no close door of its own, closed only through a declared closer */
 type closerlessService struct {
     name string
 }
@@ -5488,7 +5366,6 @@ type otherCloserlessService struct {
     name string
 }
 
-/* an instance an override evicted from a name with a declared closer, still held under a second name without one, is closed through that closer: the second name's candidate has no door and must not spend the claim */
 func TestClose_AnEvictedInstanceHeldUnderASecondNameIsClosedThroughItsDeclaredCloser(t *testing.T) {
     for _, sequential := range []bool{false, true} {
         t.Run(fmt.Sprintf("sequential=%v", sequential), func(t *testing.T) {
@@ -5535,7 +5412,6 @@ func closeAnEvictedInstanceHeldUnderASecondName(t *testing.T, config ContainerCo
     }
 }
 
-/* two names collapsed onto one instance close it through the closer that takes it, whichever name sorts first */
 func TestClose_ACollapsedNodeUsesTheCloserThatTakesItsValueWhateverTheNamesSort(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
     shared := &otherCloserlessService{name: "c"}
@@ -5571,7 +5447,6 @@ func TestClose_ACollapsedNodeUsesTheCloserThatTakesItsValueWhateverTheNamesSort(
     }
 }
 
-/* a value with a door of its own, filed under a second name without a closer, is still closed by the closer its first name declared, once, and never by its own door */
 type ownDoorService struct {
     ownCloses int
 }
@@ -5622,7 +5497,6 @@ func TestClose_ADeclaredCloserWinsOverTheDoorASecondNameReachesTheValueBy(t *tes
     }
 }
 
-/* two names registered relaxed under one type, each with its own closer, close each value through its own name's closer, never through the type node's */
 func TestClose_EachNameOfARelaxedTypeClosesThroughItsOwnCloser(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -5710,7 +5584,6 @@ func TestWithDeclarationRefusal_AForeignErrorKeepsTheDeadlineRecordAndIsReachabl
 }
 
 
-/* the type node of a relaxed type carries the last closer declared for that type, another name's; a name that declared none is not closed through it */
 func TestClose_ANameWithoutACloserIsNotClosedThroughTheTypeNodesCloser(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -5819,12 +5692,10 @@ func TestBoundedCloseFailureDetail_FollowsTheConfiguredCut(t *testing.T) {
     }
 }
 
-/* hugePanicScopedService is the panicking close under a type of its own, for a scoped registration beside the container one */
 type hugePanicScopedService struct {
     hugePanicCloseService
 }
 
-/* recoveredValueOfAnyFailure answers the recovered value one failure detail carries, whichever node it is keyed under */
 func recoveredValueOfAnyFailure(t *testing.T, closeErr error) string {
     t.Helper()
 

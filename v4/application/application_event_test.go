@@ -178,7 +178,6 @@ func TestNewApplication_DeclaresTheFrameworkEventsSoALaterDeclarationIsRefused(t
     dispatcher.DeclareEvent("app.event", eventcontract.EventConfig{TagsToRunAfterFailure: []string{"audit"}})
 }
 
-/* a new framework event constant without a row in frameworkEvents fails here */
 func TestFrameworkEvents_ListEveryFrameworkEventConstant(t *testing.T) {
     declarations := frameworkEvents()
     declaredNames := make([]string, 0, len(declarations))

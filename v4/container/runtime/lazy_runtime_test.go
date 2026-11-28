@@ -71,7 +71,6 @@ func newContainerOwnedHolder(t *testing.T, failFirst bool) (containercontract.Co
     return newContainerOwnedHolderWith(t, failFirst, func(containercontract.Container) {})
 }
 
-/* newContainerOwnedHolderWith registers what register adds before the holder's resolution freezes the registrations */
 func newContainerOwnedHolderWith(t *testing.T, failFirst bool, register func(serviceContainer containercontract.Container)) (containercontract.Container, *lazyRuntimeHolder, *atomic.Int64) {
     t.Helper()
 
@@ -140,7 +139,6 @@ func TestLazy_AHandleOverTheContainerCreatesUnderTheCallersKindAndContext(t *tes
                 t.Fatalf("the created provider read %s / %v, wanted %s / %q", created.kind, created.value, testCase.kind, testCase.name)
             }
 
-            /* resolved through the container, never the caller's scope: the provider's scope is suspended */
             if registerErr := created.scope.RegisterScoped("app.lazy.runtime.other", func(resolver containercontract.Resolver) (string, error) { return "", nil }, containercontract.RegisterOptions{}); nil == registerErr {
                 t.Fatalf("the created provider's scope accepted a registration: the handle resolved through the caller's scope")
             }
@@ -643,7 +641,6 @@ func TestLazyService_APhaseReservedNameAnswersAlikeThroughEverySource(t *testing
     }
 }
 
-/* unspecifiedKindRuntime answers the zero kind, which only a runtime of another implementation can */
 type unspecifiedKindRuntime struct {
     containercontract.Runtime
 }

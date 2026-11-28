@@ -25,7 +25,6 @@ import (
     melodysessioncontract "github.com/precision-soft/melody/v4/session/contract"
 )
 
-/* with redis the hub's provider installs the cross-node backplane on the hub it builds, over the connection it resolves: a second backplane is refused, which only an installed one makes it */
 func TestHub_TheRedisBackplaneIsInstalledByTheHubsProvider(t *testing.T) {
     client := redisTestClient(t)
 
@@ -62,7 +61,6 @@ func TestHub_TheRedisBackplaneIsInstalledByTheHubsProvider(t *testing.T) {
     hub.SetBackplane(refusingBackplane{})
 }
 
-/* without redis the hub carries no backplane: one installed by hand is taken */
 func TestHub_WithoutRedisTheProviderInstallsNoBackplane(t *testing.T) {
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
@@ -92,7 +90,6 @@ func TestWebsocketModuleConfig_ServesSlashWsUnderItsCountedRouteWithAThirtySecon
     }
 }
 
-/* the module's hub provider answers the hub the container publishes, resolved through the connection's runtime */
 func TestWebsocketModuleConfig_TheHubIsTheOneTheContainerPublishes(t *testing.T) {
     registeredHub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
     t.Cleanup(func() { _ = registeredHub.CloseWithContext(context.Background()) })
@@ -112,7 +109,6 @@ func TestWebsocketModuleConfig_TheHubIsTheOneTheContainerPublishes(t *testing.T)
     }
 }
 
-/* without the hub service the provider answers the resolution's refusal, never a nil hub */
 func TestWebsocketModuleConfig_AnswersTheRefusalWhenTheHubIsNotRegistered(t *testing.T) {
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
 
@@ -122,7 +118,6 @@ func TestWebsocketModuleConfig_AnswersTheRefusalWhenTheHubIsNotRegistered(t *tes
     }
 }
 
-/* the /ws connection subscribes to the topic its query names, as the event stream reads it, the catalogue's when it names none */
 func TestWebsocketModuleConfig_ResolvesTheTopicFromTheQuery(t *testing.T) {
     resolver := websocketModuleConfig().Streams[0].Handler.TopicResolver
     if nil == resolver {
@@ -141,7 +136,6 @@ func TestWebsocketModuleConfig_ResolvesTheTopicFromTheQuery(t *testing.T) {
     }
 }
 
-/* the re-read reads the account through the directory and the session through the session storage: a deleted account reads absent and a deleted session reads ended */
 func TestEventStreamRevision_ReReadsTheDirectoryAndTheSessionStorage(t *testing.T) {
     userRepository, repositoryErr := repository.NewUserRepository(persistence.NewCatalogStorage(nil).WithAccountSeed(), &persistence.CatalogSchema{})
     if nil != repositoryErr {

@@ -51,7 +51,6 @@ func TestResolveOptionalClock_ATypedNilIsRefusedNamingTheField(t *testing.T) {
     requireTypedNilRefusal(t, resolveErr, "component clock is a typed nil", "Config.Clock")
 }
 
-/* one row per constructor of the sweep: an absent clock builds, a typed nil is refused with one text naming the field */
 func TestOptionalDependencies_NilIsTheDefaultAndATypedNilIsRefused(t *testing.T) {
     var typedNil *clock.FrozenClock
 

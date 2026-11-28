@@ -283,7 +283,6 @@ func TestRegisterHttpRoutes_PutsTheBackendSpendingDoorsBehindTheWriteBudget(t *t
     }
 }
 
-/* every write door of the catalogue and the user directory stands behind the write budget: a door registered without it would read past the spent budget */
 func TestRegisterHttpRoutes_PutsEveryCatalogueWriteDoorBehindTheWriteBudget(t *testing.T) {
     moduleInstance := moduleWithEnvironment(t, map[string]string{})
     moduleInstance.trustedProxyResolver = newTrustedProxyResolver("", time.Now)

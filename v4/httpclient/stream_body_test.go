@@ -72,7 +72,6 @@ func TestLimitedStreamBody_CloseReachesTheWrappedBody(t *testing.T) {
     }
 }
 
-/* silentReader answers the first read with neither a byte nor an error, which a real network body may legitimately do and no reader used elsewhere in this suite ever does. */
 type silentReader struct {
     reads int
     tail  string

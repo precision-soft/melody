@@ -741,7 +741,6 @@ func TestNewConfiguration_ApplicationKeyFeedingAKernelParameterOrRetiringAFramew
     }
 }
 
-/* declared before the construction's resolve, an application key's default reaches a .env line that reads it, where a module's key, declared at boot, is refused there */
 func TestNewConfiguration_ALineReadsAnApplicationKeysDefaultAtConstruction(t *testing.T) {
     configuration, configurationErr := newConfigurationWithApplicationKeys(
         map[string]string{"APP_LINK": "https://%env(APP_HOST)%/path"},

@@ -252,7 +252,6 @@ func TestServerSentEventBackplane_PublishAppliesCallTimeout(t *testing.T) {
     }
 }
 
-/* deadlineRecordingClient records the deadline of every Do and, when blockUntilDone is set, holds the call until its context ends */
 type deadlineRecordingClient struct {
     redisclient.Client
     mutex          sync.Mutex
@@ -433,7 +432,6 @@ func TestServerSentEventBackplane_AListenerThatLeftAnswersNilEvenPastTheDeadline
     }
 }
 
-/* scriptedReceiveClient answers each Receive after the duration its script gives, recording when each call started and returned */
 type scriptedReceiveClient struct {
     redisclient.Client
     mutex      sync.Mutex

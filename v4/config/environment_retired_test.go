@@ -151,7 +151,6 @@ func TestDeclareEnvironmentKey_ApplicationRetiredLowerCase_Refused(t *testing.T)
     }
 }
 
-/* both shapes: a spelling of the application's own and a MELODY_ spelling a deployment renames to the application's key */
 func TestDeclareEnvironmentKey_ApplicationRetiredSpellingOutsideAndInsideMelody(t *testing.T) {
     configuration := mustConfigurationFromValues(t, map[string]string{"APP_OLD": "", "MELODY_OLD_TEXT": "x"})
 

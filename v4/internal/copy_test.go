@@ -5,7 +5,6 @@ import (
     "time"
 )
 
-/* the two defined types below are the only shapes that reach the reflect paths carrying interface elements: the type switch above them matches []any and map[string]any exactly, so a named type with the same underlying type walks past it, and an interface element holding nothing is the untyped nil the zero-value clauses exist for */
 type copyTestAnySlice []any
 
 type copyTestAnyMap map[string]any
@@ -203,7 +202,7 @@ func TestCopyAnyMap_DeepCopiesTypedSliceOfTypedSlices(t *testing.T) {
 }
 
 func TestCopyAnyMap_CyclicValueDoesNotStackOverflow(t *testing.T) {
-    /* the test completing is the assertion: a stack overflow is a fatal error no recover() can catch, so the depth bound cannot be observed any other way */
+    /* the test completing is the assertion: a stack overflow is a fatal error no recover() can catch */
     cyclic := map[string]any{}
     cyclic["self"] = cyclic
     cyclic["name"] = "value"
@@ -506,7 +505,6 @@ func TestCopyAnyMap_SubslicesOfOneArrayStayDistinct(t *testing.T) {
 type copyProbeMeta map[string]any
 type copyProbeList []any
 
-/* a defined type over map[string]any shares its header with the plain map it was converted from, so the memo saw one pointer under two static types and the typed fast path asserted the reflect path's copy; both orders of the two keys are constructed explicitly, because the map iteration order that made it intermittent is not something a test can control */
 func TestCopyAnyMap_ANamedMapTypeSharingABackingArrayDoesNotPoisonTheMemo(t *testing.T) {
     shared := map[string]any{"k": 1}
     plainThenNamed := map[string]any{"a": shared, "b": copyProbeMeta(shared)}

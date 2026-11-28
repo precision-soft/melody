@@ -11,12 +11,6 @@ import (
     "github.com/uptrace/bun/schema"
 )
 
-/* renderingDialect is the least a bun handle needs in order to RENDER a statement: the mysql dialect asks
-   the connection for its version as it is installed, so a handle built on it cannot be made without a
-   database, while what these tests read is the statement bun composes, not the answer a server would give.
-   Nothing here executes, so the handle carries no driver at all. The repository and migration packages keep
-   twins of this shape, the second of which also records what was executed; a test fixture cannot cross a
-   package boundary, so the three are the same shape written where each package can reach it. */
 type renderingDialect struct {
     schema.BaseDialect
 
@@ -37,7 +31,6 @@ func (instance *renderingDialect) Name() dialect.Name {
     return dialect.SQLite
 }
 
-/* the one feature the statements under test render differently with and without: bun writes the mysql form of the upsert only for a dialect that declares it, and without it writes an ON DUPLICATE KEY UPDATE SET that mysql refuses — a rendering the tests would have read as the production statement. */
 func (instance *renderingDialect) Features() feature.Feature {
     return feature.InsertOnDuplicateKey
 }
@@ -65,14 +58,12 @@ func (instance *renderingDialect) DefaultSchema() string {
     return "main"
 }
 
-/* newRenderingDatabase answers a handle that can compose a statement and cannot run one. */
 func newRenderingDatabase() *bun.DB {
     return bun.NewDB(nil, newRenderingDialect())
 }
 
 var _ schema.Dialect = (*renderingDialect)(nil)
 
-/* moduleRegistrar hands the encrypt module's services to a container, as the application's registration does at boot */
 type moduleRegistrar struct {
     melodycontainercontract.Container
 }

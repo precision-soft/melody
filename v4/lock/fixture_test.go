@@ -19,7 +19,6 @@ import (
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
 
-/* recordingLogger captures every record with its level and message, so a test can assert both that a record was written and what it said. */
 type recordingLogger struct {
     mutex   sync.Mutex
     records []recordedLogEntry
@@ -83,7 +82,6 @@ func (instance *recordingLogger) hasMessageContaining(fragment string) bool {
     return false
 }
 
-/* runtimeWithRecordingLogger builds a runtime whose scope carries the recording logger under the logger service, mirroring how a framework-assembled scope resolves logging.LoggerFromRuntime. */
 func runtimeWithRecordingLogger(ctx context.Context) (containercontract.Runtime, *recordingLogger) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := serviceContainer.NewScope()
@@ -94,7 +92,6 @@ func runtimeWithRecordingLogger(ctx context.Context) (containercontract.Runtime,
     return runtime.NewRun(ctx, scope), logger
 }
 
-/* sessionStyleLocker stands in for the MySQL and PostgreSQL lockers, which hold until their connection drops and ignore the ttl, unlimited included: it hands the in-memory store an absent ttl whatever it is given. */
 type sessionStyleLocker struct {
     inner lockcontract.Locker
 }
@@ -103,7 +100,6 @@ func (instance *sessionStyleLocker) CreateLock(name string, options lockcontract
     return instance.inner.CreateLock(name, lockcontract.CreateLockOptions{})
 }
 
-/* ttlRecordingLocker records the ttl every CreateLock is handed before it reaches the inner locker, so a test can pin what a door resolved its configuration to. */
 type ttlRecordingLocker struct {
     inner lockcontract.Locker
     mutex sync.Mutex
@@ -131,7 +127,6 @@ func (instance *ttlRecordingLocker) firstTtl(t *testing.T) bound.Duration {
     return instance.ttls[0]
 }
 
-/* mustCreateLock answers the lock a test's CreateLock made, a refusal failing the test where it happened */
 func mustCreateLock(lock lockcontract.Lock, createErr error) lockcontract.Lock {
     if nil != createErr {
         panic(createErr)
@@ -140,14 +135,12 @@ func mustCreateLock(lock lockcontract.Lock, createErr error) lockcontract.Lock {
     return lock
 }
 
-/* noLockLocker answers neither a lock nor an error, the slip a locker of the application's own can make */
 type noLockLocker struct{}
 
 func (instance *noLockLocker) CreateLock(name string, options lockcontract.CreateLockOptions) (lockcontract.Lock, error) {
     return nil, nil
 }
 
-/* namesNoLock reports whether a refusal's cause chain carries the no-lock refusal */
 func namesNoLock(err error) bool {
     return nil != err && true == strings.Contains(fmt.Sprint(exception.LogContext(err, exception.LogContextOptions{})), "the locker answered no lock")
 }
@@ -160,7 +153,6 @@ func (instance *namespaceEnvironmentSource) Load(ctx context.Context) (map[strin
     return map[string]string{config.NamespaceKey: instance.namespace}, nil
 }
 
-/* runtimeWithNamespace answers a runtime whose configuration service reads MELODY_NAMESPACE as the namespace given. */
 func runtimeWithNamespace(t *testing.T, namespace string) containercontract.Runtime {
     t.Helper()
 
@@ -181,7 +173,6 @@ func runtimeWithNamespace(t *testing.T, namespace string) containercontract.Runt
     return runtime.NewRun(context.Background(), serviceContainer.NewScope())
 }
 
-/* refreshRecordingLocker wraps every lock it hands out so a test reads the ttls the refreshes were handed */
 type refreshRecordingLocker struct {
     inner lockcontract.Locker
     mutex sync.Mutex

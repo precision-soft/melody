@@ -27,7 +27,6 @@ import (
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
 
-/* installCipher restores the name's previous entry when the test ends, so no cipher leaks into the next test */
 func installCipher(t *testing.T, name string, cipherInstance Cipher) {
     t.Helper()
 
@@ -47,7 +46,6 @@ func installCipher(t *testing.T, name string, cipherInstance Cipher) {
     })
 }
 
-/* storeSealBinding sets one entry of the binding table, where the module replaces the whole table */
 func storeSealBinding(marker reflect.Type, binding sealBinding) {
     sealBindingRegistryMutex.Lock()
     defer sealBindingRegistryMutex.Unlock()
@@ -55,7 +53,6 @@ func storeSealBinding(marker reflect.Type, binding sealBinding) {
     sealBindingRegistry[marker] = binding
 }
 
-/* storeCipher sets one entry of the cipher table, where the module replaces the whole table; a nil cipher is refused, as validateConfig refuses it */
 func storeCipher(name string, cipherInstance Cipher) {
     if true == isNilCipher(cipherInstance) {
         exception.Panic(exception.NewError("cipher instance is nil", map[string]any{"cipherName": name}, nil))
@@ -67,7 +64,6 @@ func storeCipher(name string, cipherInstance Cipher) {
     cipherRegistry[name] = cipherInstance
 }
 
-/* preserveRegistries restores both whole tables when the test ends, since a module registration replaces them */
 func preserveRegistries(t *testing.T) {
     t.Helper()
 
@@ -96,7 +92,6 @@ func preserveRegistries(t *testing.T) {
     })
 }
 
-/* the bound markers of the pins: two columns of the crm compartment, one of the default cipher, and one never declared */
 type crmIbanBinding struct{}
 
 func (instance crmIbanBinding) CipherName() string {
@@ -135,7 +130,6 @@ func (instance undeclaredBinding) SealBinding() string {
     return "customer.undeclared"
 }
 
-/* installSealBinding declares a marker's binding for one test, the earlier entry restored after it */
 func installSealBinding(t *testing.T, reference SealBindingReference, refuseUnbound bool) {
     t.Helper()
 
@@ -157,7 +151,6 @@ func installSealBinding(t *testing.T, reference SealBindingReference, refuseUnbo
     })
 }
 
-/* newCrmCipher installs a package cipher of two keys, crm-v2 current, under the crm compartment for one test */
 func newCrmCipher(t *testing.T) Cipher {
     t.Helper()
 
@@ -167,7 +160,6 @@ func newCrmCipher(t *testing.T) Cipher {
     return cipherInstance
 }
 
-/* recoverRefusalContext runs a callback that must panic with a melody error and answers that error's context */
 func recoverRefusalContext(t *testing.T, callback func()) map[string]any {
     t.Helper()
 
@@ -221,14 +213,12 @@ func deterministicCandidateMatches(t *testing.T, cipher Cipher, plaintext string
     return false
 }
 
-/* scriptedSqlDriver answers each query by the first matching fragment, so a test can shape the information_schema answer, the keyset pages and the update results independently. */
 type scriptedSqlResponse struct {
     fragment    string
     columns     []string
     columnTypes []string
     rows        [][]driver.Value
     err         error
-    /* nextErr is what the rows answer once the scripted ones are read, in place of the end of the set — a failure surfacing through Rows.Err */
     nextErr error
 }
 
@@ -239,14 +229,11 @@ type recordedScriptedQuery struct {
 
 type scriptedSqlDriver struct {
     mutex          sync.Mutex
-    /* execErr is what every Exec answers when set, a server refusal of the run's write */
     execErr        error
     responses      []scriptedSqlResponse
     queries        []string
-    /* connectionOf is the number of the connection each recorded query ran on, beside queries */
     connectionOf   []int
     opened         int
-    /* failFirstPing makes the first connection's ping answer a bad connection */
     failFirstPing  bool
     queryArguments []recordedScriptedQuery
 }
@@ -260,7 +247,6 @@ func (instance *scriptedSqlDriver) Open(name string) (driver.Conn, error) {
     return &scriptedSqlConnection{shared: instance, number: instance.opened}, nil
 }
 
-/* connectionsOf answers the connections the recorded queries containing the fragment ran on, distinct */
 func (instance *scriptedSqlDriver) connectionsOf(fragment string) map[int]bool {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
@@ -303,7 +289,6 @@ func (instance *scriptedSqlConnection) Prepare(query string) (driver.Stmt, error
     return &scriptedSqlStatement{shared: instance.shared, query: query}, nil
 }
 
-/* Ping fails the first connection when the script asks it to, the shape of a pooled connection the server closed while idle */
 func (instance *scriptedSqlConnection) Ping(ctx context.Context) error {
     if true == instance.shared.failFirstPing && 1 == instance.number {
         return driver.ErrBadConn
@@ -333,7 +318,6 @@ func (instance *scriptedSqlStatement) NumInput() int {
     return -1
 }
 
-/* Exec records its arguments beside the queries', so a test can read the value an update wrote */
 func (instance *scriptedSqlStatement) Exec(arguments []driver.Value) (driver.Result, error) {
     instance.shared.mutex.Lock()
     instance.shared.queryArguments = append(instance.shared.queryArguments, recordedScriptedQuery{
@@ -385,7 +369,6 @@ func (instance *scriptedSqlRows) Columns() []string {
     return instance.columns
 }
 
-/* ColumnTypeDatabaseTypeName reports the scripted type name, empty when the script declared none — the same silence a driver without the capability answers. */
 func (instance *scriptedSqlRows) ColumnTypeDatabaseTypeName(index int) string {
     if index >= len(instance.columnTypes) {
         return ""
@@ -418,7 +401,6 @@ var scriptedSqlSequence atomic.Uint64
 func newScriptedMigrator(t *testing.T, responses []scriptedSqlResponse) (*Migrator, *scriptedSqlDriver) {
     t.Helper()
 
-    /* every run reads the table's charsets first; a script that does not answer it reads every column as utf8mb4, the shape of the tables these pins describe */
     answersCharsets := false
     for _, response := range responses {
         if true == strings.Contains(response.fragment, "CHARACTER_SET_NAME") {
@@ -450,7 +432,6 @@ func newScriptedMigrator(t *testing.T, responses []scriptedSqlResponse) (*Migrat
     }, stub
 }
 
-/* withSchemaJudgeDefaults answers the judge's three queries for a script that does not: the table holds the columns the script's select reads, every one NOT NULL, the first the primary key, under a strict session; a script that answers one of them itself keeps its own */
 func withSchemaJudgeDefaults(responses []scriptedSqlResponse) []scriptedSqlResponse {
     answers := func(fragment string) bool {
         for _, response := range responses {
@@ -524,7 +505,7 @@ func (instance fakeRuntime) Kind() containercontract.Kind {
     return containercontract.KindRun
 }
 
-/* newRampKey is the 32-byte ramp key the live mysql suites seal with; the sibling newKey fills every byte alike, and the two must stay distinguishable because a rotation test needs two keys that differ in every position. */
+/* a ramp, distinguishable from newKey's repeated byte, since a rotation test needs two keys that differ */
 func newRampKey() []byte {
     key := make([]byte, 32)
     for index := range key {
@@ -533,7 +514,6 @@ func newRampKey() []byte {
     return key
 }
 
-/* capturingCommand delegates to the command under test and keeps its error, so a test can tell a refused command line — which the dispatch answers — from the command's own failure, which is what it is asserting. */
 type capturingCommand struct {
     clicontract.Command
     runtimeInstance containercontract.Runtime
@@ -551,12 +531,10 @@ func (instance *capturingCommand) Run(
     return nil
 }
 
-/* wrappedCipher forwards every door to the package cipher it embeds, the shape of an application's metrics or tracing wrapper: it carries none of the package's unexported doors */
 type wrappedCipher struct {
     Cipher
 }
 
-/* accountsNotesBinding is the default cipher's marker of accounts.notes, the column the bound Migrator and command pins run over */
 type accountsNotesBinding struct {
     DefaultCipherReference
 }
@@ -565,7 +543,6 @@ func (instance accountsNotesBinding) SealBinding() string {
     return "accounts.notes"
 }
 
-/* accountsBodyBinding is a second declared label of the default cipher on the same table */
 type accountsBodyBinding struct {
     DefaultCipherReference
 }
@@ -574,10 +551,8 @@ func (instance accountsBodyBinding) SealBinding() string {
     return "accounts.body"
 }
 
-/* accountsNotesSealBinding is that column's binding as the cipher reads it */
 var accountsNotesSealBinding = sealBinding{label: "accounts.notes"}
 
-/* scriptedNotesTable answers a run over accounts(id, notes) holding the given rows, wide enough for any seal and its width probes empty */
 func scriptedNotesTable(rows [][]driver.Value) []scriptedSqlResponse {
     return []scriptedSqlResponse{
         {
@@ -590,7 +565,6 @@ func scriptedNotesTable(rows [][]driver.Value) []scriptedSqlResponse {
     }
 }
 
-/* updatedValues answers, per row id, the value the run's update wrote into its one column */
 func updatedValues(stub *scriptedSqlDriver) map[string]string {
     written := make(map[string]string)
 
@@ -605,7 +579,6 @@ func updatedValues(stub *scriptedSqlDriver) map[string]string {
     return written
 }
 
-/* boundNotesSpec is the specification of accounts.notes bound to its label */
 func boundNotesSpec(refuseUnbound bool, deterministic bool) TableSpecification {
     return TableSpecification{
         Table:         "accounts",
@@ -616,7 +589,6 @@ func boundNotesSpec(refuseUnbound bool, deterministic bool) TableSpecification {
     }
 }
 
-/* migrateModeRuns are the three modes of a run, the rotation onto v2 */
 var migrateModeRuns = map[string]func(migrator *Migrator, specification TableSpecification) (int, error){
     "encrypt": func(migrator *Migrator, specification TableSpecification) (int, error) {
         return migrator.MigrateEncrypt(testRuntime(), specification)
@@ -629,7 +601,6 @@ var migrateModeRuns = map[string]func(migrator *Migrator, specification TableSpe
     },
 }
 
-/* runQueries answers the queries a run sent, leaving out the version probe bun sends when the handle is built */
 func runQueries(stub *scriptedSqlDriver) []string {
     var queries []string
 
@@ -642,7 +613,6 @@ func runQueries(stub *scriptedSqlDriver) []string {
     return queries
 }
 
-/* recordingLogger keeps every record it is handed, for a pin on what a run logs */
 type recordingLogger struct {
     mutex   sync.Mutex
     records []recordedLog
@@ -688,7 +658,6 @@ func (instance *recordingLogger) CauseChainDepth() int {
     return 8
 }
 
-/* runCommandLine runs one command line through the command's own flags under a runtime whose logger is the one given, and answers the command's error */
 func runCommandLine(t *testing.T, command *EncryptDatabaseCommand, logger loggingcontract.Logger, arguments ...string) error {
     t.Helper()
 
@@ -721,7 +690,6 @@ func runCommandLine(t *testing.T, command *EncryptDatabaseCommand, logger loggin
     return runErr
 }
 
-/* newScriptedNotesCommand builds the bulk command over a scripted accounts table holding the rows, handed the declarations */
 func newScriptedNotesCommand(t *testing.T, cipherInstance Cipher, rows [][]driver.Value, sealBindings ...SealBindingConfig) (*EncryptDatabaseCommand, *scriptedSqlDriver) {
     t.Helper()
 

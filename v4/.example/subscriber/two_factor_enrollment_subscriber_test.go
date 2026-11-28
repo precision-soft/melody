@@ -43,7 +43,6 @@ func deleteEnrollmentStatementsAfter(t *testing.T, eventName string, payload any
     return recorder.recordedQueries()
 }
 
-/* the enrollment is keyed on the account identifier and the example mints identifiers as the highest suffix plus one, so a row that outlives its account would start the next holder of the identifier enrolled with the previous holder's secret and recovery codes: the deletion the account publishes releases the factor, keyed on the identifier the event carries and on nothing wider. */
 func TestTwoFactorEnrollmentSubscriber_ADeletedAccountReleasesItsEnrollment(t *testing.T) {
     statements := deleteEnrollmentStatementsAfter(t, event.EventUserDeleted, event.NewUserDeletedEvent("user-4", "dave"))
 
@@ -57,7 +56,6 @@ func TestTwoFactorEnrollmentSubscriber_ADeletedAccountReleasesItsEnrollment(t *t
     }
 }
 
-/* a payload that is not a deletion — or none at all — releases nothing: the listener is registered on the deletion name and still reads the payload it is handed, the way every subscriber of the example does. */
 func TestTwoFactorEnrollmentSubscriber_APayloadThatIsNotADeletionReleasesNothing(t *testing.T) {
     if statements := deleteEnrollmentStatementsAfter(t, event.EventUserDeleted, "user-4"); 0 != len(statements) {
         t.Fatalf("expected no statement for a payload that is not a deletion, got %v", statements)
@@ -69,7 +67,6 @@ func TestTwoFactorEnrollmentSubscriber_APayloadThatIsNotADeletionReleasesNothing
     }
 }
 
-/* refusingCache refuses every delete, the way the cache listener meets its backend under a redis outage */
 type refusingCache struct {
     melodycachecontract.Cache
 }
@@ -78,7 +75,6 @@ func (instance *refusingCache) Delete(runtimeInstance melodycontainercontract.Ru
     return errors.New("redis: connection refused")
 }
 
-/* the order is what runs first when nothing fails: in the application the release carries a tag the deletion declares, so it runs after a failing cache listener too, and this dispatcher, undeclared, pins the order alone. The release outranks the cache listener on the deletion event, read off the two real subscribers, and with the cache refusing its first delete the enrollment is still released: the dispatch fails on the cache, after the row is gone. */
 func TestTwoFactorEnrollmentSubscriber_ReleasesTheEnrollmentBeforeTheCacheListenerRuns(t *testing.T) {
     database, recorder := newRecordingDatabase()
     enrollmentSubscriber := NewTwoFactorEnrollmentSubscriber(fixedTwoFactorStore(twofactor.NewStore(database)))
@@ -133,7 +129,6 @@ func TestTwoFactorEnrollmentSubscriber_ReleasesTheEnrollmentBeforeTheCacheListen
     }
 }
 
-/* the release resolves the store at each deletion, and a store that cannot be resolved is journaled and the deletion goes on: the cascade on the account is the authoritative release, and a dispatch the listener ended would skip every listener after it */
 func TestTwoFactorEnrollmentSubscriber_AStoreThatCannotBeResolvedIsJournaledAndTheDeletionGoesOn(t *testing.T) {
     refusal := errors.New("the catalogue database refused the migration")
     asked := 0

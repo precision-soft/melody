@@ -60,8 +60,6 @@ func (instance *countingUserRepository) DeleteById(ctx context.Context, id strin
     return nil, nil
 }
 
-/* an absence is remembered under a key its caller spelled, so it has to lapse: the unauthenticated login
-   door writes one of these for every name anyone invents. */
 func TestRememberEntityOrAbsenceBoundsAnAbsence(t *testing.T) {
     cacheInstance := newTtlRecordingCache()
 
@@ -90,8 +88,6 @@ func TestRememberEntityOrAbsenceBoundsAnAbsence(t *testing.T) {
     }
 }
 
-/* an entity that was found keeps the unbounded entry the event listeners clear by name: an expiry here
-   would send every request after it back to the database for a value nothing had invalidated. */
 func TestRememberEntityOrAbsenceLeavesAFoundEntityUnbounded(t *testing.T) {
     cacheInstance := newTtlRecordingCache()
 
@@ -116,7 +112,6 @@ func TestRememberEntityOrAbsenceLeavesAFoundEntityUnbounded(t *testing.T) {
     }
 }
 
-/* a found entity re-stored on a hit would cost one cache write per request served from memory */
 func TestRememberEntityOrAbsenceAnswersAFoundHitWithoutWritingItBack(t *testing.T) {
     cacheInstance := newTtlRecordingCache()
     if setErr := cacheInstance.Set(exampleTestRuntime(), "hit-key", lookupTestEntity(), melodybound.Of(entityCacheTtl), melodycachecontract.SetOptions{}); nil != setErr {
@@ -153,8 +148,6 @@ func TestRememberEntityOrAbsenceAnswersAFoundHitWithoutWritingItBack(t *testing.
     }
 }
 
-/* the absence keeps the expiry it was given: nothing on the read path writes it back, so a name someone
-   keeps trying still lapses on its own schedule. */
 func TestRememberEntityOrAbsenceLeavesARememberedAbsenceUntouched(t *testing.T) {
     cacheInstance := newTtlRecordingCache()
     if setErr := cacheInstance.Set(exampleTestRuntime(), "absent-hit-key", nil, melodybound.Of(absenceCacheTtl), melodycachecontract.SetOptions{}); nil != setErr {
@@ -183,8 +176,6 @@ func TestRememberEntityOrAbsenceLeavesARememberedAbsenceUntouched(t *testing.T) 
     }
 }
 
-/* the door is what has to bound the absence, not the helper alone: this is the one reachable without
-   credentials, and a lookup that stopped going through the helper would leave it permanent again. */
 func TestFindByUsernameBoundsTheAbsenceItRemembers(t *testing.T) {
     cacheInstance := newTtlRecordingCache()
     userRepository := &countingUserRepository{}
@@ -211,15 +202,11 @@ func TestFindByUsernameBoundsTheAbsenceItRemembers(t *testing.T) {
         t.Fatalf("expected one write for the absence, got %d", len(writes))
     }
 
-    /* the window is asserted as the VALUE, not as the constant the code reads: comparing against
-       absenceCacheTtl moves both sides of the assertion together, so a window shortened to nothing —
-       which is what an unbounded entry is spelled as — would read as correct. */
     if melodybound.Of(time.Minute) != writes[0].ttl {
         t.Fatalf("expected the door to bound the absence to a minute, got %s", writes[0].ttl)
     }
 }
 
-/* a loader that parks until it is released puts twenty readers of one key in flight together, so Remember coalesces them onto one loader; what is counted is the writes of the found value: one, under the entity bound, and none under the absence bound, since a waiter that wrote after the leader would re-install whatever a listener cleared in between. */
 func TestRememberEntityOrAbsenceWritesAFoundValueOnceForEveryWaiterOfOneLoad(t *testing.T) {
     cacheInstance := newTtlRecordingCache()
 
@@ -256,7 +243,6 @@ func TestRememberEntityOrAbsenceWritesAFoundValueOnceForEveryWaiterOfOneLoad(t *
 
     started.Wait()
 
-    /* the readers are started, and the one whose loader is running is parked at the gate; the others wait on it inside Remember. The gate opens once the leader's loader has been entered, which the run counter shows. */
     deadline := time.Now().Add(2 * time.Second)
     for 1 > loaderRuns.Load() && time.Now().Before(deadline) {
         time.Sleep(time.Millisecond)
@@ -283,7 +269,6 @@ func TestRememberEntityOrAbsenceWritesAFoundValueOnceForEveryWaiterOfOneLoad(t *
     }
 }
 
-/* the helper reads the store only through Remember: a read of its own before it would add one read to every miss */
 func TestRememberEntityOrAbsenceReadsTheStoreAsRememberAloneDoes(t *testing.T) {
     helperCache := newTtlRecordingCache()
     if _, rememberErr := rememberEntityOrAbsence(melodycache.For(exampleTestRuntime(), helperCache), "read-key", func(runtimeInstance melodycontainercontract.Runtime) (*string, error) {
@@ -304,7 +289,6 @@ func TestRememberEntityOrAbsenceReadsTheStoreAsRememberAloneDoes(t *testing.T) {
     }
 }
 
-/* a list is remembered under the entities' bound, so a load racing a write and its invalidation serves the stale list for at most that long */
 func TestTheCatalogueListsAreRememberedUnderTheEntityBound(t *testing.T) {
     storage := persistence.NewCatalogStorage(nil)
     productRepository, _ := repository.NewProductRepository(storage, &persistence.CatalogSchema{})

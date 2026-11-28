@@ -13,8 +13,6 @@ import (
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
 )
 
-/* the three Must resolvers are how the framework and an application reach the routing services out of the container. Each is bound to a service name, and a resolver reading the wrong name would hand back a service of the wrong kind — the failure surfaces as a type assertion deep inside url generation rather than at the wiring mistake. */
-
 func newRoutingServiceContainer() (containercontract.Container, *RouteRegistry, *Router) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
@@ -104,8 +102,6 @@ func TestRouterMustFromResolver_ResolvesTheRegisteredRouterThroughAScope(t *test
         t.Fatalf("expected a scope to resolve the container's router")
     }
 }
-
-/* the three service names are distinct constants: two resolvers sharing one name would silently hand the same service to both callers, and the mistake would only appear where the returned value is used. */
 
 func TestRoutingServiceNames_AreDistinct(t *testing.T) {
     names := map[string]string{

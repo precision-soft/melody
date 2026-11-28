@@ -26,7 +26,6 @@ import (
     melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
 
-/* recordingJournalRepository counts the batches that reached it, which is what makes the ordering between the handler and the flush observable from a test. */
 type recordingJournalRepository struct {
     batchCount int
     entryCount int
@@ -58,14 +57,12 @@ func (instance *recordingJournalRepository) Count(ctx context.Context) (int, err
 
 var _ repository.CatalogJournalRepository = (*recordingJournalRepository)(nil)
 
-/* newTrailRuntime builds the two levels the http kernel builds: a container holding the scoped registration, and a scope carrying the request context that only a request has. */
 func newTrailRuntime(t *testing.T, journalRepository repository.CatalogJournalRepository, requestId string) containercontract.Runtime {
     t.Helper()
 
     return newTrailRuntimeOver(t, func(ctx context.Context) (repository.CatalogJournalRepository, error) { return journalRepository, nil }, requestId)
 }
 
-/* newTrailRuntimeOver builds the trail runtime over a journal source, so a test can hand it a journal that cannot be built; the container also carries a logger that keeps the error records */
 func newTrailRuntimeOver(t *testing.T, journalSource reporting.CatalogJournalSource, requestId string) containercontract.Runtime {
     t.Helper()
 
@@ -108,7 +105,6 @@ func newTrailRuntimeOver(t *testing.T, journalSource reporting.CatalogJournalSou
     return melodyruntime.NewRequest(context.Background(), scope)
 }
 
-/* trailFromRuntime reaches the same scope-owned trail the event listeners reach. */
 func trailFromRuntime(t *testing.T, runtimeInstance containercontract.Runtime) *reporting.RequestReportTrail {
     t.Helper()
 
@@ -135,8 +131,6 @@ func runFlushMiddleware(
 
     return NewCatalogJournalFlushMiddleware()(next)(runtimeInstance, httptest.NewRecorder(), request)
 }
-
-/* the flush has to happen AFTER the handler ran and BEFORE the response leaves. The scope's own Close runs from a deferred call in the http kernel, which is after the response has already gone to the client, so a caller reading the journal on receipt of its 201 would be racing the write */
 
 func TestCatalogJournalFlushMiddlewareWritesAfterTheHandlerAndBeforeTheResponse(t *testing.T) {
     journalRepository := &recordingJournalRepository{}
@@ -185,13 +179,10 @@ func TestCatalogJournalFlushMiddlewareWritesAfterTheHandlerAndBeforeTheResponse(
     }
 }
 
-/* the middleware and the event listeners must reach the SAME instance. Were they not the same, the middleware would flush a trail nobody wrote to and the journal would stay empty while every response still looked correct — which is the whole claim the scoped registration makes */
-
 func TestCatalogJournalFlushMiddlewareSharesTheTrailWithTheHandler(t *testing.T) {
     journalRepository := &recordingJournalRepository{}
     runtimeInstance := newTrailRuntime(t, journalRepository, "request-2")
 
-    /* resolved here, written to inside the handler, flushed by the middleware — three reaches, one object */
     outerTrail := trailFromRuntime(t, runtimeInstance)
 
     _, err := runFlushMiddleware(
@@ -218,8 +209,6 @@ func TestCatalogJournalFlushMiddlewareSharesTheTrailWithTheHandler(t *testing.T)
     }
 }
 
-/* a request that changed nothing must not pay a query. A read is the common case and it resolves the trail too */
-
 func TestCatalogJournalFlushMiddlewareWritesNothingForARequestThatChangedNothing(t *testing.T) {
     journalRepository := &recordingJournalRepository{}
     runtimeInstance := newTrailRuntime(t, journalRepository, "request-3")
@@ -244,8 +233,6 @@ func TestCatalogJournalFlushMiddlewareWritesNothingForARequestThatChangedNothing
     }
 }
 
-/* a journal write that fails has to fail the REQUEST. The change to the nomenclature already happened; a caller told it succeeded while the record of it was lost has been told something untrue */
-
 func TestCatalogJournalFlushMiddlewareFailsTheRequestWhenTheJournalWriteFails(t *testing.T) {
     journalRepository := &recordingJournalRepository{appendErr: fmt.Errorf("database is gone")}
     runtimeInstance := newTrailRuntime(t, journalRepository, "request-4")
@@ -265,7 +252,6 @@ func TestCatalogJournalFlushMiddlewareFailsTheRequestWhenTheJournalWriteFails(t 
     }
 }
 
-/* trailErrorRecorder keeps the error records the flush middleware filed, one per container */
 type trailErrorRecorder struct {
     melodyloggingcontract.Logger
     mutex   sync.Mutex
@@ -350,7 +336,6 @@ func TestCatalogJournalFlushMiddleware_ReturnsTheHandlersErrorOverAFlushFailure(
     }
 }
 
-/* capturingMiddlewareRegistrar keeps the middlewares a module registers, in the order the kernel installs them */
 type capturingMiddlewareRegistrar struct {
     middlewares []melodyhttpcontract.Middleware
 }
@@ -359,7 +344,6 @@ func (instance *capturingMiddlewareRegistrar) Use(registration melodyapplication
     instance.middlewares = append(instance.middlewares, registration.Middlewares...)
 }
 
-/* the websocket route's topic is gated ahead of its slot count: an editor whose account holds every slot and asks for the user directory topic is told the topic is not his, 403, not that he holds too many streams, which a slot taken first would answer */
 func TestRegisterHttpMiddlewares_TheTopicGateTakesNoSlotWhenItRefuses(t *testing.T) {
     moduleInstance := moduleWithEnvironment(t, map[string]string{})
     moduleInstance.eventStreamSlots = handlerevent.NewStreamSlots(1, 1)
@@ -401,7 +385,6 @@ func TestRegisterHttpMiddlewares_TheTopicGateTakesNoSlotWhenItRefuses(t *testing
     }
 }
 
-/* the websocket route's account is re-read after its slot is taken: an account at its cap is told it holds too many streams, 429, before a missing session is read, and with a slot free the missing session is the 401 the revision answers, the slot given back */
 func TestRegisterHttpMiddlewares_OrdersTheTopicGateTheSlotAndTheRevision(t *testing.T) {
     moduleInstance := moduleWithEnvironment(t, map[string]string{})
     moduleInstance.eventStreamSlots = handlerevent.NewStreamSlots(1, 1)

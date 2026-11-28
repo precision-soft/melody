@@ -15,10 +15,6 @@ import (
     "github.com/uptrace/bun/schema"
 )
 
-/* renderingDialect is the least a bun handle needs in order to RENDER a statement: the mysql dialect asks
-   the connection for its version as it is installed, so a handle built on it cannot be made without a
-   database, while what these tests read is the statement bun composes, not the answer a server would give.
-   newRenderingDatabase carries no driver at all; newFakeBunDatabase puts the recording driver below it. */
 type renderingDialect struct {
     schema.BaseDialect
 
@@ -66,20 +62,15 @@ func (instance *renderingDialect) DefaultSchema() string {
     return "main"
 }
 
-/* newRenderingDatabase answers a handle that can compose a statement and cannot run one. */
 func newRenderingDatabase() *bun.DB {
     return bun.NewDB(nil, newRenderingDialect())
 }
-
-/* The fake database/sql driver below runs a real *bun.DB over a statement recorder, so a repository answer is proven on the result the driver hands back without a live server; it renders through renderingDialect. */
 
 type queryRecorder struct {
     mutex     sync.Mutex
     queries   []string
     queryHook func(query string) ([]string, [][]driver.Value, error)
-    /* rowsAffected answers the changed-row count of a statement; without it every statement changed one row */
     rowsAffected func(query string) int64
-    /* execErr answers the failure of a statement, nil for one that succeeds */
     execErr func(query string) error
 }
 
@@ -121,7 +112,6 @@ func (instance *queryRecorder) countMatching(matcher func(query string) bool) in
     return count
 }
 
-/* countingRows answers every count select with the given total and every other select with no rows, which is all the seeding and listing guards need. */
 func countingRows(total int64) func(query string) ([]string, [][]driver.Value, error) {
     return func(query string) ([]string, [][]driver.Value, error) {
         if true == strings.Contains(query, "count(*)") {
@@ -144,7 +134,6 @@ func (instance *fakeConnection) Close() error {
     return nil
 }
 
-/* Begin opens a transaction the recorder sees as BEGIN, COMMIT and ROLLBACK, so a door that runs its own transaction is proven on the statements it issued inside it */
 func (instance *fakeConnection) Begin() (driver.Tx, error) {
     instance.recorder.record("BEGIN")
 
@@ -248,7 +237,6 @@ func (instance *fakeConnector) Driver() driver.Driver {
     return nil
 }
 
-/* newFakeBunDatabase answers a handle whose statements reach the recorder, rendered by renderingDialect */
 func newFakeBunDatabase() (*bun.DB, *queryRecorder) {
     recorder := &queryRecorder{}
     sqlDatabase := sql.OpenDB(&fakeConnector{recorder: recorder})
@@ -265,10 +253,8 @@ var (
     _ driver.Tx             = (*fakeTransaction)(nil)
 )
 
-/* concurrentRounds is shared by the four in-memory suites in this package. */
 const concurrentRounds = 500
 
-/* everySessionLive answers every held session as still stored, the admission's liveness read for a test about the cap alone */
 func everySessionLive(sessionId string) (bool, error) {
     return true, nil
 }

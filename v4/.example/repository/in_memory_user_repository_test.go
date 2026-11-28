@@ -8,7 +8,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/entity"
 )
 
-/* every repository is a process-wide singleton and net/http serves each request on its own goroutine, so a listing request and a deleting request overlap; the writer here always removes a non-terminal element, which is what makes DeleteById compact the backing array under the reader */
+/* net/http overlaps a listing and a delete; a non-terminal element makes DeleteById compact the array under the reader */
 
 func TestInMemoryUserRepositoryConcurrentReadAndDelete(t *testing.T) {
     ctx := context.Background()
@@ -79,8 +79,6 @@ func TestInMemoryUserRepositoryConcurrentReadAndDelete(t *testing.T) {
     }
 }
 
-/* usernames are matched without regard to case in both implementations, so the comparison is normalised in the example rather than left to a database collation */
-
 func TestInMemoryUserRepositoryFindByUsernameIgnoresCase(t *testing.T) {
     ctx := context.Background()
     repositoryInstance := newInMemoryUserRepository(true)
@@ -99,7 +97,6 @@ func TestInMemoryUserRepositoryFindByUsernameIgnoresCase(t *testing.T) {
     }
 }
 
-/* the three sibling repositories, products, categories and currencies, refuse an identifier that is already taken, and so does the user repository: an occupied id appended as a second row could be reached by no door that goes through the id, since FindById and DeleteById find the first. The refusal carries the message the identifier ceiling's rationale promises the caller. */
 func TestInMemoryUserRepositoryRefusesAnIdentifierThatIsAlreadyTaken(t *testing.T) {
     ctx := context.Background()
     repositoryInstance := newInMemoryUserRepository(true)
@@ -118,8 +115,6 @@ func TestInMemoryUserRepositoryRefusesAnIdentifierThatIsAlreadyTaken(t *testing.
         t.Fatalf("expected the refusal the sibling repositories answer, got %q", createErr.Error())
     }
 
-    /* the assertion that separates a refusal from a message: nothing was stored under the identifier a
-       second time, so the reading and the deleting doors still reach exactly one account. */
     all, allErr := repositoryInstance.All(ctx)
     if nil != allErr {
         t.Fatalf("all: %v", allErr)
@@ -146,8 +141,6 @@ func TestInMemoryUserRepositoryRefusesAnIdentifierThatIsAlreadyTaken(t *testing.
     }
 }
 
-/* GrantRole answers what it did — granted, already held, or no such account — and appends onto a copy, so a
-   reader holding the previous value is not handed a set that grows under it */
 func TestInMemoryUserRepositoryGrantRoleAppendsOnceOntoACopy(t *testing.T) {
     ctx := context.Background()
     repositoryInstance := newInMemoryUserRepository(true)
@@ -163,7 +156,6 @@ func TestInMemoryUserRepositoryGrantRoleAppendsOnceOntoACopy(t *testing.T) {
         t.Fatalf("the value read before the grant now holds %v: the roles were appended in place", before.Roles)
     }
 
-    /* the door hands back the account it wrote, widened — a copy of its own, so a caller mutating it does not reach the stored value */
     if nil == granted || 2 != len(granted.Roles) || entity.RoleEditor != granted.Roles[1] {
         t.Fatalf("the grant handed back %v, wanted the widened account", granted)
     }
@@ -188,7 +180,6 @@ func TestInMemoryUserRepositoryGrantRoleAppendsOnceOntoACopy(t *testing.T) {
     }
 }
 
-/* deleting the newest SEEDED account hands its identifier, and the history that names it, to nobody */
 func TestInMemoryUserRepositoryCreate_NeverMintsADeletedSeededIdentifier(t *testing.T) {
     ctx := context.Background()
     repositoryInstance := newInMemoryUserRepository(true)

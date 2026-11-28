@@ -27,7 +27,6 @@ import (
     melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
 
-/* refusingCategoryRepository answers every listing with the failure of a nomenclature that cannot be read */
 type refusingCategoryRepository struct {
     repository.CategoryRepository
 }
@@ -118,7 +117,6 @@ func TestProductListCommandJournalsACurrencyNomenclatureItCouldNotRead(t *testin
     }
 }
 
-/* the listing still renders when a nomenclature cannot be read, every name of it as the dash, but the loss is journaled with its cause, since a column of dashes in silence reads as products filed under nothing */
 func TestProductListCommandJournalsANomenclatureItCouldNotRead(t *testing.T) {
     journal := &bytes.Buffer{}
     runtimeInstance, _, _ := productListRuntimeOver(t, context.Background(), journal, func(stores productListStores) productListStores {
@@ -224,7 +222,7 @@ func TestProductListCommand_EscapesControlCharactersInTheRows(t *testing.T) {
     }
 }
 
-/* the `--limit` flag parses in base ten, as the standard integer flags do: with the engine's inferred base --limit=010 would read as eight and --limit=08 would be refused */
+/* with the engine's inferred base --limit=010 would read as eight and --limit=08 would be refused */
 func TestProductListCommand_IntegerFlagsParseInBaseTen(t *testing.T) {
     for _, flagName := range []string{"limit"} {
         for spelling, expected := range map[string]int{"010": 10, "08": 8} {

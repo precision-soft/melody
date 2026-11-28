@@ -11,11 +11,6 @@ import (
     "github.com/precision-soft/melody/v4/bound"
 )
 
-/* the schedule is a set of decisions each entry's comment gives the reason for — the reading on the hour, the
-   listing every six hours with its own arguments, the rates on the half hour, the daily information at noon —
-   and the catalogue commands run as the configured account while the information runs as none. Each entry is
-   pinned whole, so a schedule, an argument or the account moved on any one of them is named by the command it
-   moved on. */
 func TestCronConfiguration_SchedulesEachCommandAtItsOwnCadenceUnderTheCatalogueAccount(t *testing.T) {
     expected := map[string]string{
         melodycron.CommandName(cli.NewCatalogReportRefreshCommand):   "0 * user=catalogue args=",
@@ -43,9 +38,6 @@ func TestCronConfiguration_SchedulesEachCommandAtItsOwnCadenceUnderTheCatalogueA
     }
 }
 
-/* the in-process runner is handed the commands the Configuration schedules by name, and the two lists are
-   written apart: a command scheduled and not handed to the runner is one a single-binary deployment never runs,
-   and one handed and not scheduled is dead weight. Compared as sets — the runner does not read an order. */
 func TestCronRunnerCommands_AreTheCommandsTheConfigurationSchedules(t *testing.T) {
     scheduled := []string{}
     for _, entry := range cronConfiguration("catalogue").Entries() {
@@ -83,7 +75,6 @@ func TestCronConfiguration_EvaluatesOnTheBucharestDayAndBoundsTheRatesRefresh(t 
     }
 }
 
-/* the heartbeat is per worker by nature, so it alone opts out of the runner's tick dedup: the other entries run once per tick across replicas */
 func TestCronConfiguration_OnlyTheHeartbeatRunsOnEveryReplica(t *testing.T) {
     for _, entry := range cronConfiguration("catalogue").Entries() {
         heartbeat := melodycron.CommandName(cli.NewApplicationInformationCommand) == entry.CommandName

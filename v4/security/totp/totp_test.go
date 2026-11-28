@@ -48,7 +48,6 @@ func TestVerify_AcceptsCodeWithinSkew(t *testing.T) {
     secret, _ := GenerateSecret()
     now := time.Unix(1_700_000_000, 0)
 
-    /* a code from the previous 30s step must still verify with the default ±1 skew */
     previous, _ := GenerateCodeAt(secret, now.Add(-30*time.Second), Options{})
 
     ok, _ := Verify(secret, previous, Options{Clock: clock.NewFrozenClock(now)})
@@ -57,7 +56,7 @@ func TestVerify_AcceptsCodeWithinSkew(t *testing.T) {
     }
 }
 
-/* the negative control sits on the boundary, at two steps: the default window is one step either way, so two is the FIRST offset that must be refused. Probing at three would leave a window one step too wide indistinguishable from the right one — a loop bound written Skew+1 accepts the two-step code. Both directions, because the loop is symmetric and a bound wrong on one side only would otherwise hide. */
+/* two steps is the first offset the one-step window must refuse; three would hide a Skew+1 bound */
 func TestVerify_RejectsCodeOutsideSkew(t *testing.T) {
     secret, _ := GenerateSecret()
     now := time.Unix(1_700_000_000, 0)
@@ -115,7 +114,6 @@ func TestGenerateRecoveryCodes_UniqueAndFormatted(t *testing.T) {
         }
         seen[code] = true
 
-        /* the documented format is xxxxx-xxxxx: five base32 chars, a dash, five base32 chars (eleven runes total). */
         if 11 != len(code) || '-' != code[5] {
             t.Fatalf("unexpected recovery code format %q", code)
         }
@@ -196,7 +194,6 @@ func TestResolve_APeriodOfAFractionOfASecondIsRefused(t *testing.T) {
     expectRefusalNamingField(t, resolveErr, "totp.Options.Period")
 }
 
-/* each instant is counter 1 under its period, the counter of the RFC 6238 known answer */
 func TestVerify_ANonDefaultPeriodStepsTheCounterByItsSeconds(t *testing.T) {
     for period, at := range map[time.Duration]int64{
         time.Second:      1,
@@ -282,7 +279,6 @@ func TestVerify_ToleratesWhitespaceInTheSubmittedCode(t *testing.T) {
         t.Fatalf("unexpected code error: %v", codeErr)
     }
 
-    /* authenticator display format, plain copy/paste padding, and the NBSP mobile keyboards produce */
     variants := []string{
         " " + code + " ",
         code[:3] + " " + code[3:],
@@ -310,7 +306,6 @@ func TestVerify_StillRejectsWrongAndShortCodes(t *testing.T) {
         t.Fatalf("unexpected code error: %v", codeErr)
     }
 
-    /* flip the last digit so the normalized form is a well-formed but wrong code */
     flipped := code[:5] + string('0'+(code[5]-'0'+1)%10)
 
     for _, invalid := range []string{"12 34", "  ", flipped[:3] + " " + flipped[3:]} {
@@ -325,7 +320,6 @@ func TestVerify_StillRejectsWrongAndShortCodes(t *testing.T) {
     }
 }
 
-/* NormalizeCode is the single normalization Verify applies; callers that key a replay guard on an accepted code must use it, so it is exported and must stay in step with Verify. */
 func TestNormalizeCode_StripsEveryWhitespaceForm(t *testing.T) {
     /* the last variant carries a real non-breaking space (U+00A0), the separator a mobile copy/paste of a displayed code keeps */
     for _, variant := range []string{"123456", "123 456", " 123456 ", "1 2 3 4 5 6", "123\t456", "123 456"} {

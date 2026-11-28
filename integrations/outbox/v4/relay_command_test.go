@@ -41,7 +41,6 @@ func runRelayCommand(t *testing.T, runtimeInstance containercontract.Runtime, re
     return runRelayCommandWith(t, runtimeInstance, relay, NewRelayCommand(RelayCommandConfig{}), arguments)
 }
 
-/* runRelayCommandWith places the relay in the run's scope under service.outbox.relay, where the command resolves it; a nil relay leaves the scope as the test built it. */
 func runRelayCommandWith(t *testing.T, runtimeInstance containercontract.Runtime, relay *Relay, relayCommand *RelayCommand, arguments []string) error {
     t.Helper()
 
@@ -134,7 +133,7 @@ func TestRelayCommand_TheErrorBackoffMaxCapsTheDoublingDelay(t *testing.T) {
         t.Fatalf("expected the fourth batch to recover, got %v", runErr)
     }
 
-    /* capped: the interval is above the cap, so 10ms, 10ms, 10ms; the 1m default would wait 50ms, 100ms, 200ms, and a loop that skipped the delay would wait nothing */
+    /* capped: the interval is above the cap, so 10ms each; the 1m default would wait 50ms, 100ms, 200ms */
     elapsed := time.Since(started)
     if 250*time.Millisecond <= elapsed {
         t.Fatalf("expected the doubling delay capped at 10ms, the run took %s", elapsed)
@@ -278,7 +277,6 @@ func TestRelayCommand_ReadsTheIntervalAndTheIdleBackoffWithTheirFallbacks(t *tes
     }
 }
 
-/* the engine prints a duration flag's default from its Value: the interval declares its 1s, and the idle backoff, whose default is the interval read at the run, hides the zero it would print */
 func TestRelayCommand_TheHelpPrintsTheDeclaredDefaultAndNoZeroDefault(t *testing.T) {
     var help strings.Builder
 
@@ -301,7 +299,6 @@ func TestRelayCommand_TheHelpPrintsTheDeclaredDefaultAndNoZeroDefault(t *testing
     }
 }
 
-/* `--interval=` with nothing after the sign, what `--interval=$UNSET` becomes in a script, is refused at the parse naming the flag */
 func TestRelayCommand_RefusesADurationFlagWithNothingAfterTheSign(t *testing.T) {
     for _, flagName := range []string{RelayIntervalFlagName, RelayIdleBackoffFlagName} {
         relayCommand := NewRelayCommand(RelayCommandConfig{})
@@ -317,7 +314,6 @@ func TestRelayCommand_RefusesADurationFlagWithNothingAfterTheSign(t *testing.T) 
     }
 }
 
-/* through the run loop: an empty batch sleeps the idle backoff and a batch that published sleeps the interval, the other one an hour that would outlast the bound */
 func TestRelayCommand_RunSleepsTheIdleBackoffAfterAnEmptyBatchAndTheIntervalAfterAFullOne(t *testing.T) {
     for name, testCase := range map[string]struct {
         due       []Pending
@@ -379,7 +375,6 @@ func TestNewRelayCommand_ConstructsBeforeTheRelayIsRegisteredAndDefersResolution
     }
 }
 
-/* nilYieldingScope models a decorating scope that answers nil with no error, the shape the container's own door refuses, so the command's guard is reached only through such a scope. */
 type nilYieldingScope struct {
     containercontract.Scope
 }
@@ -434,7 +429,6 @@ func TestRelayCommand_ACancellationExplainedErrorStillExitsClean(t *testing.T) {
     }
 }
 
-/* cancellationEchoRepository answers the claim with the context's own cancellation, the way a driver does mid-drain. */
 type cancellationEchoRepository struct {
     fakeRepository
 }
@@ -447,7 +441,6 @@ func (instance *cancellationEchoRepository) ClaimDueMessages(runtimeInstance con
     return instance.fakeRepository.ClaimDueMessages(runtimeInstance, limit, visibility, options)
 }
 
-/* capturingCommand delegates to the command under test and keeps its error, so a test can tell a refused command line — which the dispatch answers — from the command's own failure, which is what it is asserting. */
 type capturingCommand struct {
     clicontract.Command
     runtimeInstance containercontract.Runtime
@@ -480,7 +473,7 @@ func TestRelayCommand_ADeadlineExplainedErrorStillExitsClean(t *testing.T) {
     }
 }
 
-/* the `--limit` flag parses in base ten, as the standard integer flags do: with the engine's inferred base --limit=010 would read as eight and --limit=08 would be refused */
+/* with the engine's inferred base --limit=010 would read as eight and --limit=08 would be refused */
 func TestRelayCommand_IntegerFlagsParseInBaseTen(t *testing.T) {
     for _, flagName := range []string{RelayLimitFlagName} {
         for spelling, expected := range map[string]int{"010": 10, "08": 8} {
@@ -612,7 +605,6 @@ func TestRelayCommand_TheDefaultErrorBackoffDoublesFromThePollIntervalToOneMinut
     }
 }
 
-/* scriptedClaimRepository fails the claims its script marks and records when each claim was made */
 type scriptedClaimRepository struct {
     fakeRepository
     failures  []bool

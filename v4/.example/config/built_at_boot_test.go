@@ -99,7 +99,6 @@ func TestBuiltAtBoot_ACurrentKeyNotBoundToTheSignerApplicationFailsTheBoot(t *te
     t.Fatalf("expected the boot refused over the unbound key, got %v", resolveErr)
 }
 
-/* buildServicesBuiltAtBoot builds what the application's Boot builds, through a boot runtime: the services registered with BuiltAtBoot, in registration order */
 func buildServicesBuiltAtBoot(t *testing.T, containerInstance melodycontainercontract.Container) error {
     t.Helper()
 
@@ -128,7 +127,6 @@ func buildServicesBuiltAtBoot(t *testing.T, containerInstance melodycontainercon
     return nil
 }
 
-/* kindRecordingSecrets records the kind of the runtime each provider door is asked under */
 type kindRecordingSecrets struct {
     melodysecurity.HmacSecretProvider
     kinds []melodycontainercontract.Kind
@@ -174,7 +172,6 @@ func TestBuiltAtBoot_TheInternalAuthSignerIsJudgedUnderTheBootRuntime(t *testing
     }
 }
 
-/* every service the example builds at boot states its mode, the default included, so the composition root reads as the document of the option */
 func TestBuiltAtBoot_EveryRegistrationOfTheCompositionRootStatesItsMode(t *testing.T) {
     sourcePaths, globErr := filepath.Glob("*.go")
     if nil != globErr {

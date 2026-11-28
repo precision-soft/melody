@@ -10,7 +10,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/entity"
 )
 
-/* every repository is a process-wide singleton and net/http serves each request on its own goroutine, so a listing request and a deleting request overlap; the writer here always removes a non-terminal element, which is what makes DeleteById compact the backing array under the reader */
+/* net/http overlaps a listing and a delete; a non-terminal element makes DeleteById compact the array under the reader */
 
 func TestInMemoryProductRepositoryConcurrentReadAndDelete(t *testing.T) {
     ctx := context.Background()
@@ -86,8 +86,6 @@ func TestInMemoryProductRepositoryConcurrentReadAndDelete(t *testing.T) {
     }
 }
 
-/* All() must hand back a copy: mutating the returned slice may not reach the repository */
-
 func TestInMemoryProductRepositoryAllReturnsCopy(t *testing.T) {
     ctx := context.Background()
     repositoryInstance := newInMemoryProductRepository(true)
@@ -112,8 +110,6 @@ func TestInMemoryProductRepositoryAllReturnsCopy(t *testing.T) {
         t.Fatalf("expected the repository slice to be unaffected by a caller write")
     }
 }
-
-/* the two implementations share one validation, so a write the in-memory catalogue refuses is refused by the database-backed one with the same words */
 
 func TestInMemoryProductRepositoryCreateRefusesAnIncompleteProduct(t *testing.T) {
     ctx := context.Background()
@@ -145,7 +141,6 @@ func TestInMemoryProductRepositoryCreateAnswersATakenIdentifierWithTheSentinel(t
     }
 }
 
-/* deleting the newest SEEDED product hands its identifier to nobody: the repository starts from the seed's floor */
 func TestInMemoryProductRepositoryCreate_NeverMintsADeletedSeededIdentifier(t *testing.T) {
     ctx := context.Background()
     repositoryInstance := newInMemoryProductRepository(true)
@@ -164,7 +159,6 @@ func TestInMemoryProductRepositoryCreate_NeverMintsADeletedSeededIdentifier(t *t
     }
 }
 
-/* a stored identifier at the ceiling would raise the floor to it, and every later mint would collide with it */
 func TestInMemoryProductRepositoryCreate_RefusesASuppliedIdentifierAtTheCeiling(t *testing.T) {
     ctx := context.Background()
     repositoryInstance := newInMemoryProductRepository(true)
@@ -185,7 +179,6 @@ func TestInMemoryProductRepositoryCreate_RefusesASuppliedIdentifierAtTheCeiling(
     }
 }
 
-/* a supplied identifier the margin admits still leaves the mints after it room to land */
 func TestInMemoryProductRepositoryCreate_TheMintsAfterTheHighestAdmittedIdentifierStillLand(t *testing.T) {
     ctx := context.Background()
     repositoryInstance := newInMemoryProductRepository(true)

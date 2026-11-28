@@ -129,7 +129,6 @@ func TestRegisterOptions_ACloserMissingOneOfItsHalvesIsRefusedNamingTheField(t *
     }
 }
 
-/* foreignClosingService stands for a value of a type the application does not own, whose own Close the teardown must not reach */
 type foreignClosingService struct {
     ownCloses atomic.Int32
 }
@@ -231,7 +230,6 @@ func TestRegisterOptionsCloser_AnInstanceAnOverrideEvictedIsClosedThroughTheClos
     }
 }
 
-/* otherClosingService is an override of another type than the closer takes, installed under a name registered without its type */
 type otherClosingService struct {
     ownCloses atomic.Int32
 }

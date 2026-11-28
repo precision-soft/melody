@@ -185,7 +185,7 @@ const environmentKeyRefusalChildVariable = "MELODY_TEST_ENVIRONMENT_KEY_REFUSAL_
 
 const environmentKeyServicesRanMarker = "the module's services were registered"
 
-/* Boot exits the process at the refusal, so it runs in a child of the test binary and the parent reads the child's journal */
+/* Boot exits the process at the refusal, so it runs in a child of the test binary */
 func TestBoot_RefusesAModuleKeyOutsideItsRule(t *testing.T) {
     if projectDirectory := os.Getenv(environmentKeyRefusalChildVariable); "" != projectDirectory {
         applicationInstance := newEnvironmentKeyBootApplicationIn(t, map[string]string{"MELODY_X_COUNT": "%env(APP_X_SOURCE)%", "APP_X_SOURCE": "-424242"}, projectDirectory)
@@ -232,7 +232,6 @@ func TestBoot_RefusesAModuleKeyOutsideItsRule(t *testing.T) {
 
 const applicationEnvironmentKeyRefusalChildVariable = "MELODY_TEST_APPLICATION_ENVIRONMENT_KEY_REFUSAL_CHILD"
 
-/* the application's keys are judged with the modules' after the resolve, so a value its rule refuses fails the boot naming the application */
 func TestBoot_AnApplicationKeyOutsideItsRuleRefuses(t *testing.T) {
     if projectDirectory := os.Getenv(applicationEnvironmentKeyRefusalChildVariable); "" != projectDirectory {
         countKey := environmentKeyCount("")
@@ -489,7 +488,7 @@ func retiringEnvironmentKeyText() configcontract.EnvironmentKey {
     return key
 }
 
-/* Boot exits the process at the refusal, so the boot runs in a child of the test binary and the parent reads its output and its journal */
+/* Boot exits the process at the refusal, so the boot runs in a child of the test binary */
 func bootRetiredEnvironmentKeyChild(t *testing.T, values map[string]string, modules ...applicationcontract.Module) (string, string, bool) {
     t.Helper()
 

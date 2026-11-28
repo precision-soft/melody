@@ -14,7 +14,6 @@ func candidateFormats(candidates [][]byte) []string {
     return formats
 }
 
-/* while the binding admits unbound values, the bound candidates come first, current key first, then the unbound ones of the same keys */
 func TestCiphertextCandidatesFor_ABoundColumnAnswersBoundThenUnbound(t *testing.T) {
     newCrmCipher(t)
     installSealBinding(t, crmIbanBinding{}, false)
@@ -30,7 +29,6 @@ func TestCiphertextCandidatesFor_ABoundColumnAnswersBoundThenUnbound(t *testing.
     }
 }
 
-/* a binding that refuses unbound values answers its bound candidates alone */
 func TestCiphertextCandidatesFor_RefusingUnboundAnswersBoundAlone(t *testing.T) {
     newCrmCipher(t)
     installSealBinding(t, crmIbanBinding{}, true)
@@ -41,7 +39,6 @@ func TestCiphertextCandidatesFor_RefusingUnboundAnswersBoundAlone(t *testing.T) 
     }
 }
 
-/* a marker without a binding answers what its cipher answers */
 func TestCiphertextCandidatesFor_AnUnboundMarkerAnswersTheCipherCandidates(t *testing.T) {
     cipherInstance := newCrmCipher(t)
 
@@ -53,7 +50,6 @@ func TestCiphertextCandidatesFor_AnUnboundMarkerAnswersTheCipherCandidates(t *te
     }
 }
 
-/* what the deterministic column writes is the first candidate, so the lookup finds the row it wrote */
 func TestCiphertextCandidatesFor_HoldsWhatTheColumnWrites(t *testing.T) {
     newCrmCipher(t)
     installSealBinding(t, crmIbanBinding{}, false)

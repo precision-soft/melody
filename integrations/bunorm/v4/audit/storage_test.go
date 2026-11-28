@@ -145,7 +145,6 @@ func TestFileStorage_WritesChangesThatAreNotAJsonArrayAsAString(t *testing.T) {
     }
 }
 
-/* a tracker-made binding is atomicity within one database, not a routing decision: a storage over a separate audit database must keep its own handle, or a split-database deployment finds its audit rows in the business database — while the caller's explicit WithDatabase stays honoured unconditionally */
 func TestDatabaseFromContext_TrackerBindingIsIgnoredByAnotherDatabase(t *testing.T) {
     businessDatabase := newTestDatabase()
     auditDatabase := newTestDatabase()
@@ -167,7 +166,6 @@ func TestDatabaseFromContext_TrackerBindingIsIgnoredByAnotherDatabase(t *testing
     }
 }
 
-/* Save is a public door and the table flows unquoted through ModelTableExpr as raw SQL; a direct caller bypasses the Registry's validation entirely, so the grammar is checked here, and an empty table is refused like any other invalid one rather than read as the default */
 func TestBunStorage_SaveRefusesATableTheGrammarDoesNotAllow(t *testing.T) {
     storage := NewBunStorage(newTestDatabase())
 
@@ -212,7 +210,6 @@ func TestFileStorage_RefusesAContextAlreadyDone(t *testing.T) {
     }
 }
 
-/* a BunStorage rides a caller-made binding, which carries no origin, and a tracker-made one over its own database; over another database it writes to its own, so it does not ride that transaction */
 func TestBunStorage_RidesACallersBindingAndATransactionOfItsOwnDatabase(t *testing.T) {
     ownDatabase := newTestDatabase()
     storage := NewBunStorage(ownDatabase)

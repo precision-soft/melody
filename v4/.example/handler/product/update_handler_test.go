@@ -25,7 +25,6 @@ func TestApiUpdateDoor_RefusesAPriceAtTheBound(t *testing.T) {
     }
 }
 
-/* the update door trims the path identifier as the delete door does */
 func TestApiUpdateDoor_UpdatesTheProductUnderAPaddedIdentifier(t *testing.T) {
     fixture := newProductDoorFixture(t)
 

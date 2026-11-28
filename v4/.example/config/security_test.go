@@ -32,7 +32,6 @@ import (
     melodysession "github.com/precision-soft/melody/v4/session"
 )
 
-/* compiledSecurityModule builds the module up to what RegisterSecurity reads — the internal-auth secrets, the token validators, and the impersonation resolver — and compiles the configuration it registers, so a test asks the rule table the same question the access-control listener asks. */
 func compiledSecurityModule(t *testing.T) *melodysecurityconfig.Builder {
     t.Helper()
 
@@ -47,7 +46,6 @@ func compiledSecurityModule(t *testing.T) *melodysecurityconfig.Builder {
     return builder
 }
 
-/* The doors that write through the example into a backend it does not own — the object storage, the outbox, the message bus — and the platform check, which spends the distributed lock and three storage operations per call, are not public: each is asserted on its own so a rule moved back to public is named by the path that moved. */
 func TestRegisterSecurity_TheDoorsThatWriteIntoABackendCarryARole(t *testing.T) {
     control := compiledSecurityModule(t).BuildAndCompile().GlobalAccessControl()
 
@@ -69,7 +67,6 @@ func TestRegisterSecurity_TheDoorsThatWriteIntoABackendCarryARole(t *testing.T) 
     }
 }
 
-/* The currency writes are catalogue data and carry the editor's requirement, while the listing keeps the user's; the listing's rule is a prefix of the writes, so each write path is asked on its own. */
 func TestRegisterSecurity_TheCurrencyWritesRequireTheEditor(t *testing.T) {
     control := compiledSecurityModule(t).BuildAndCompile().GlobalAccessControl()
 
@@ -89,7 +86,6 @@ func TestRegisterSecurity_TheCurrencyWritesRequireTheEditor(t *testing.T) {
     }
 }
 
-/* the category writes carry the editor's requirement ahead of the listing's rule, a prefix of theirs, so each write path is asked on its own */
 func TestAccessControl_CategoryWritesRequireTheEditor(t *testing.T) {
     control := compiledSecurityModule(t).BuildAndCompile().GlobalAccessControl()
 
@@ -111,7 +107,6 @@ func TestAccessControl_CategoryListingRequiresAUser(t *testing.T) {
     }
 }
 
-/* The public rules are the readiness probe, the login and logout doors, the frontend bundle, the metrics and the openapi document, and the cipher round-trip probe, which reads nothing from the caller; the list is closed, so a rule added as public shows up here as the path that was not expected. */
 func TestRegisterSecurity_ThePublicRulesAreTheClosedListTheReadmeStates(t *testing.T) {
     control := compiledSecurityModule(t).BuildAndCompile().GlobalAccessControl()
 
@@ -137,7 +132,6 @@ func TestRegisterSecurity_ThePublicRulesAreTheClosedListTheReadmeStates(t *testi
     }
 }
 
-/* the greeting is public under the locales its route serves and nowhere else: an unlisted locale and the unprefixed spelling fall to the catch-all's reader requirement */
 func TestRegisterSecurity_TheGreetingIsPublicOnlyUnderItsServedLocales(t *testing.T) {
     control := compiledSecurityModule(t).BuildAndCompile().GlobalAccessControl()
 
@@ -159,7 +153,6 @@ func TestRegisterSecurity_TheGreetingIsPublicOnlyUnderItsServedLocales(t *testin
     }
 }
 
-/* a door that is one path is opened for that spelling alone: a neighbouring spelling such as /healthz falls to the catch-all's reader requirement, and the trailing slash stays one spelling */
 func TestRegisterSecurity_TheOnePathDoorsArePublicForTheirOwnSpellingOnly(t *testing.T) {
     control := compiledSecurityModule(t).BuildAndCompile().GlobalAccessControl()
 
@@ -185,7 +178,6 @@ func TestRegisterSecurity_TheOnePathDoorsArePublicForTheirOwnSpellingOnly(t *tes
     }
 }
 
-/* the machine firewall carries its whole policy: under overrideOnly it reads its one rule and nothing of the global list, which claims every path under /internal for the service role, and the global list names nothing under /internal, which it leaves to the catch-all */
 func TestRegisterSecurity_TheInternalFirewallCarriesItsOwnRuleAlone(t *testing.T) {
     compiled := compiledSecurityModule(t).BuildAndCompile()
 
@@ -217,7 +209,6 @@ func TestRegisterSecurity_TheInternalFirewallCarriesItsOwnRuleAlone(t *testing.T
     }
 }
 
-/* with a metrics token the exposition is the scraper's alone: a firewall named metrics, registered ahead of main, authenticates exactly "Bearer <token>" as the scraper role, which is what /metrics requires; a wrong credential authenticates as nobody */
 func TestRegisterSecurity_TheMetricsTokenPutsTheExpositionBehindTheScraperRole(t *testing.T) {
     moduleInstance := moduleWithEnvironment(t, map[string]string{})
     moduleInstance.metricsToken = "scrape-secret"
@@ -278,7 +269,6 @@ func TestRegisterSecurity_TheMetricsTokenPutsTheExpositionBehindTheScraperRole(t
     }
 }
 
-/* the device firewall is wired over the account enricher: a stored device token resolves through the firewall's own source as authenticated, with the roles its account holds NOW, while the account exists, and as nobody once the account is gone */
 func TestRegisterSecurity_TheDeviceFirewallHonoursATokenOnlyWhileItsAccountExists(t *testing.T) {
     for _, accountExists := range []bool{true, false} {
         moduleInstance := moduleWithEnvironment(t, map[string]string{})
@@ -364,7 +354,6 @@ func (instance *securityListenerKernel) EventDispatcher() melodyeventcontract.Ev
     return instance.dispatcher
 }
 
-/* The internal firewall's access control, decision manager, entry point and delay as RegisterSecurity declares them, around an HMAC source over a replay guard that cannot answer, since the guard is picked from the redis client: a signed envelope is told to retry, and a request without an envelope keeps the entry point's 401. */
 func TestRegisterSecurity_TheInternalFirewallAnswersAGuardOutageWith503AndRetryAfter(t *testing.T) {
     moduleInstance := moduleWithEnvironment(t, map[string]string{})
     moduleInstance.buildInternalAuth()
@@ -486,7 +475,6 @@ func TestRegisterSecurity_DeclaresWhichFirewallsAreStateless(t *testing.T) {
     }
 }
 
-/* The main firewall as RegisterSecurity declares it, around the example's session resolver over an account repository that cannot answer: a protected page is told to retry, and a public one is served. */
 func TestRegisterSecurity_TheMainFirewallAnswersAnAccountLookupOutageWith503AndRetryAfter(t *testing.T) {
     moduleInstance := moduleWithEnvironment(t, map[string]string{})
     moduleInstance.buildInternalAuth()

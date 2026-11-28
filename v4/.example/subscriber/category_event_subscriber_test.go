@@ -48,7 +48,6 @@ func TestCategoryEventSubscriber_EveryListenerDropsItsEntriesUnderACanceledEvent
     }
 }
 
-/* assertCategoryChangeHandled runs one listener and asserts what every category write owes: both entries dropped, one notification on the catalogue topic and one journal entry, each naming the action and the category */
 func assertCategoryChangeHandled(t *testing.T, eventName string, payload any, action string) {
     t.Helper()
 

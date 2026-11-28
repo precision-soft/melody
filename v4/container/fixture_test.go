@@ -14,7 +14,6 @@ import (
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
 )
 
-/* refusalStageOf reads which of a pair of closed-lifetime checks answered. Both registerOnScope and OverrideProtectedInstance guard twice — once at entry and once after the lock hand-off — with refusals that are otherwise identical, so without the stage a test written for the second window passes when the first one answered, which is exactly the run where the window was missed. */
 func refusalStageOf(t *testing.T, err error) string {
     t.Helper()
 
@@ -51,7 +50,6 @@ func buildEveryRegisteredService(t *testing.T, serviceContainer containercontrac
     }
 }
 
-/* scopedCloseRecorder records the order its services were closed in, which is the only way to observe that a teardown honoured the dependency graph rather than the node names. */
 type scopedCloseRecorder struct {
     mutex sync.Mutex
     order []string
@@ -159,7 +157,6 @@ func (instance *panickingCloseWithCauseService) CloseWithContext(closeContext co
     panic(instance.cause)
 }
 
-/* assertCloseFailureDetails reads the details a teardown error carries for one failed node: the line in the failure map, and beside it the recovered value and the frames of the contained panic. */
 func assertCloseFailureDetails(t *testing.T, context exceptioncontract.Context, nodeKey string) {
     t.Helper()
 
@@ -230,7 +227,6 @@ type providerContractProbe struct {
     value string
 }
 
-/* renderedCauseChain walks the whole chain because a provider panic is wrapped by the creation guard before it reaches the caller, and only the chain says what the provider itself refused. */
 func renderedCauseChain(err error) string {
     rendered := ""
     for current := err; nil != current; current = errors.Unwrap(current) {
@@ -286,7 +282,6 @@ type scopeTestService struct {
     value string
 }
 
-/* capturingHolder is the shape the reflection walk exists for: a service that HOLDS a collaborator it never resolved, because its provider closed over a value built before it. Nothing about it writes an edge. */
 type capturingHolder struct {
     recorder *closeOrderRecorder
     held     *closeOrderServiceB
@@ -301,7 +296,6 @@ func (instance *capturingHolder) CloseWithContext(closeContext context.Context) 
 func registerCapturingPair(t *testing.T, serviceContainer containercontract.Container, recorder *closeOrderRecorder) {
     t.Helper()
 
-    /* built before the container, the way a composition root builds what it then publishes: the provider below has nothing to resolve and hands it back */
     captured := &closeOrderServiceB{recorder: recorder}
 
     if registerErr := serviceContainer.Register(
@@ -324,7 +318,6 @@ func registerCapturingPair(t *testing.T, serviceContainer containercontract.Cont
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    /* the holder is built FIRST, so the creation stamp alone closes the storage before it — which is the wrong order, and the accident the walk has to correct */
     if _, getErr := FromResolver[*capturingHolder](t.Context(), serviceContainer, "app.holder"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
@@ -344,7 +337,6 @@ func (instance *fitsProbeImplementer) Greet() string {
     return "fits"
 }
 
-/* localCollisionProviderFirst and localCollisionProviderSecond build providers of two function-local types of one name in one package: String() spells both *container.Local and neither carries an import path of its own, so they are the pair the identity key cannot tell apart, and the collision guard is what refuses the second */
 func localCollisionProviderFirst() any {
     type Local struct{ A int }
 
@@ -361,7 +353,6 @@ func localCollisionProviderSecond() any {
     }
 }
 
-/* lazyRingHolder holds its partner through a Lazy handle, the handle that breaks a construction cycle */
 type lazyRingHolder struct {
     recorder      *closeOrderRecorder
     partner       *LazyService[*lazyRingPartner]
@@ -375,7 +366,6 @@ func (instance *lazyRingHolder) CloseWithContext(closeContext context.Context) e
     return nil
 }
 
-/* lazyRingPartner holds the holder directly, resolved while it was built */
 type lazyRingPartner struct {
     recorder     *closeOrderRecorder
     holder       *lazyRingHolder
@@ -389,7 +379,6 @@ func (instance *lazyRingPartner) CloseWithContext(closeContext context.Context) 
     return nil
 }
 
-/* registerLazyRing registers a holder whose Lazy handle names the partner and a partner whose provider resolves the holder; withPartnerDependency false leaves the partner without the holder, so the Lazy edge closes no ring. holderOptions join the holder's registration; partnerRegistersType files the partner under its type, the one a declaration by type expands onto. */
 func registerLazyRing(t *testing.T, serviceContainer *container, recorder *closeOrderRecorder, withPartnerDependency bool, partnerRegistersType bool, holderOptions containercontract.RegisterOptions) {
     t.Helper()
 
@@ -427,7 +416,6 @@ func registerLazyRing(t *testing.T, serviceContainer *container, recorder *close
     }
 }
 
-/* writeDependencyRingEdge writes a ring-closing edge straight into the container's graph, past the refusal every door applies, so the teardown's defensive cycle path stays proved for a ring no door can write */
 func writeDependencyRingEdge(t *testing.T, serviceContainer containercontract.Container, dependentName string, dependencyName string) {
     t.Helper()
 
@@ -439,19 +427,16 @@ func writeDependencyRingEdge(t *testing.T, serviceContainer containercontract.Co
     concrete.registerDependencyLocked(containerNameNodeKey(dependentName), containerNameNodeKey(dependencyName))
 }
 
-/* defaultTeardownWalk is the walk bound a ContainerConfig left out resolves to */
 func defaultTeardownWalk() teardownWalkLimits {
     return teardownWalkLimits{depth: TeardownWalkDepthRule().Default, elements: TeardownWalkElementsRule().Default, nodes: TeardownWalkNodesRule().Default}
 }
 
-/* walkHeldPointers walks under the default bound and drops the budget report */
 func walkHeldPointers(root any, opaqueIdentities map[pointerIdentity]any, opaqueTypes map[reflect.Type]struct{}) []heldPointer {
     found, _ := heldPointerIdentities(root, opaqueIdentities, opaqueTypes, defaultTeardownWalk())
 
     return found
 }
 
-/* defaultCloseFailureStackBytes is the cut a ContainerConfig left out resolves to */
 func defaultCloseFailureStackBytes() bound.Resolved[int] {
     return bound.Resolved[int]{Value: CloseFailureStackBytesRule().Default}
 }

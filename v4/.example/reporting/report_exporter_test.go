@@ -20,9 +20,6 @@ import (
     "github.com/precision-soft/melody/v4/httpclient"
 )
 
-/* recordingSink stands in for whatever an operator points the export at. It keeps the body it was given,
-   because the property under test is that the reading travels — a status alone would be satisfied by an
-   empty request. */
 type recordingSink struct {
     server   *httptest.Server
     requests atomic.Int64
@@ -47,9 +44,6 @@ func newRecordingSink(t *testing.T, status int) *recordingSink {
     return sink
 }
 
-/* exportRuntime carries the one service the exporter resolves, registered under the name the composition
-   root registers it under — by NAME and not by type, which is what the application does too, because two
-   clients of one concrete type cannot both hold the type. */
 func exportRuntime(t *testing.T) melodycontainercontract.Runtime {
     t.Helper()
 
@@ -59,7 +53,6 @@ func exportRuntime(t *testing.T) melodycontainercontract.Runtime {
         containerInstance,
         service.ServiceReportExportHttpClient,
         func(resolver melodycontainercontract.Resolver) (*httpclient.HttpClient, error) {
-            /* built the way the composition root builds it: a client that hands a redirect back rather than following it, which is what lets the exporter see the 3xx at all */
             return httpclient.NewHttpClient(httpclient.HttpClientConfig{Timeout: bound.Of(2 * time.Second), RedirectsDisabled: true})
         },
         melodycontainer.RegisterOptions{TypeRegistrationDisabled: true},
@@ -113,8 +106,6 @@ func TestCatalogReportExporterExport_SendsTheReadingToTheConfiguredSink(t *testi
     }
 }
 
-/* the sink refusing is an error and not a quiet false, because the whole point of an export is that someone
-   downstream received it — the command's exit code is the only way that reaches an operator */
 func TestCatalogReportExporterExport_FailsWhenTheSinkRefuses(t *testing.T) {
     sink := newRecordingSink(t, http.StatusServiceUnavailable)
 
@@ -133,8 +124,6 @@ func TestCatalogReportExporterExport_FailsWhenTheSinkRefuses(t *testing.T) {
     }
 }
 
-/* the pair is what makes the gate a measurement rather than a montage that could not have sent anything:
-   the arm above proves this runtime and this sink DO carry an export, so the nothing here is the gate's. */
 func TestCatalogReportExporterExport_SendsNothingWithNoEndpointConfigured(t *testing.T) {
     sink := newRecordingSink(t, http.StatusOK)
 
@@ -152,7 +141,6 @@ func TestCatalogReportExporterExport_SendsNothingWithNoEndpointConfigured(t *tes
     }
 }
 
-/* a sink that moved, or a proxy in front of it that sends the caller to a login page, answers the POST with a redirect. Followed, net/http re-sends the POST as a GET without its body, and the 200 of the page it lands on would read as the sink having received the reading. The export refuses the redirect by name, and the page is never asked. */
 func TestCatalogReportExporterExport_RefusesASinkThatRedirectsInsteadOfReceiving(t *testing.T) {
     sinkPosts := atomic.Int64{}
     pageGets := atomic.Int64{}
@@ -189,7 +177,6 @@ func TestCatalogReportExporterExport_RefusesASinkThatRedirectsInsteadOfReceiving
     }
 }
 
-/* the sink that is down is the common failure, not one that answers 503: the transport's refusal is the export's failure, not a quiet false that would report a report nobody received as nothing to send */
 func TestCatalogReportExporterExport_FailsWhenTheSinkCannotBeReached(t *testing.T) {
     server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {}))
     endpoint := server.URL + "/v1/report-sink"
@@ -201,8 +188,6 @@ func TestCatalogReportExporterExport_FailsWhenTheSinkCannotBeReached(t *testing.
     }
 }
 
-/* the body is a contract with an external party, so its field names are read off the wire, not through the struct
-   that writes them */
 func TestCatalogReportExporterExport_SendsTheFieldsUnderTheirContractNames(t *testing.T) {
     sink := newRecordingSink(t, http.StatusOK)
 

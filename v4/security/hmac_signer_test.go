@@ -52,7 +52,6 @@ func TestNewHmacEnvelopeSigner_RefusesASignerThatCanNotIdentifyItself(t *testing
     }, "hmac signer secrets provider is nil")
 }
 
-/* the verifier refuses an envelope whose key id is not bound to its claimed application, so a signer whose current key belongs to someone else would emit envelopes that are silently rejected on the other side, one request at a time, with nothing on this end to say why */
 func TestNewHmacEnvelopeSigner_RefusesACurrentKeyIssuedToAnotherApplication(t *testing.T) {
     testhelper.AssertPanicsWithError(t, func() {
         _ = NewHmacEnvelopeSigner(hmacTestRuntime(), hmacSignerProbeSecrets(), "crm", HmacEnvelopeSignerConfig{})
@@ -149,7 +148,6 @@ func TestHmacEnvelopeSigner_RefusesATtlUnderASecondAndUnlimited(t *testing.T) {
     }
 }
 
-/* the path argument may arrive with a query string attached; the envelope signs the two separately because the callee matches them against the request's path and its raw query, which are separate there too */
 func TestHmacEnvelopeSigner_SignSplitsTheQueryOffThePath(t *testing.T) {
     signer := NewHmacEnvelopeSigner(hmacTestRuntime(), hmacSignerProbeSecrets(), "billing", HmacEnvelopeSignerConfig{
         Audience: "warehouse",
@@ -187,7 +185,6 @@ func TestHmacEnvelopeSigner_SignSplitsTheQueryOffThePath(t *testing.T) {
     }
 }
 
-/* the nonce is what makes an envelope single-use, so two envelopes signed by the same signer at the same frozen instant must still differ */
 func TestHmacEnvelopeSigner_SignMintsAFreshNonceEachTime(t *testing.T) {
     signer := NewHmacEnvelopeSigner(hmacTestRuntime(), hmacSignerProbeSecrets(), "billing", HmacEnvelopeSignerConfig{
         Clock: clock.NewFrozenClock(time.Unix(1000, 0)),

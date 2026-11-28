@@ -16,8 +16,6 @@ func TestInMemoryCatalogReadingRepositoryRefusesASecondReadingAtTheSameInstant(t
         t.Fatalf("expected the first reading to be recorded, got %v", appendErr)
     }
 
-    /* the second carries a DIFFERENT payload on the same instant, so a repository that answered by
-       overwriting rather than refusing would be caught by the count as well as by the error */
     second := &CatalogReadingRecord{TakenAt: takenAt, Headline: "catalog", Payload: "products=99", ProductCount: 99, JournalCount: 0}
     appendErr := repositoryInstance.Append(context.Background(), second)
     if nil == appendErr {
@@ -53,7 +51,7 @@ func TestInMemoryCatalogReadingRepositoryRefusesOneInstantSpelledInAnotherZone(t
     }
 }
 
-/* one second apart is the smallest distance the archive can tell apart, because the service truncates the instant to the second before it gets here — so this is the pair that proves the identity is the instant and not the reading. */
+/* one second apart: the service truncates the instant to the second before it gets here */
 func TestInMemoryCatalogReadingRepositoryKeepsReadingsOneSecondApart(t *testing.T) {
     repositoryInstance := newInMemoryCatalogReadingRepository()
     takenAt := time.Date(2026, time.September, 7, 10, 0, 0, 0, time.UTC)
@@ -107,7 +105,6 @@ func TestInMemoryCatalogReadingRepositoryListsNewestFirstAndHonoursTheLimit(t *t
     }
 }
 
-/* a non-positive limit answers nothing rather than everything, which is the half that matters: the archive grows for the life of a volume, so a caller that asked for nothing must not receive all of it. */
 func TestInMemoryCatalogReadingRepositoryAnswersNothingForANonPositiveLimit(t *testing.T) {
     repositoryInstance := newInMemoryCatalogReadingRepository()
     _ = repositoryInstance.Append(context.Background(), &CatalogReadingRecord{
@@ -128,7 +125,6 @@ func TestInMemoryCatalogReadingRepositoryAnswersNothingForANonPositiveLimit(t *t
     }
 }
 
-/* the archive hands back COPIES: a caller that mutates what it read must not be rewriting the archive. */
 func TestInMemoryCatalogReadingRepositoryDoesNotHandBackItsOwnRecords(t *testing.T) {
     repositoryInstance := newInMemoryCatalogReadingRepository()
     takenAt := time.Date(2026, time.September, 7, 10, 0, 0, 0, time.UTC)
@@ -144,7 +140,6 @@ func TestInMemoryCatalogReadingRepositoryDoesNotHandBackItsOwnRecords(t *testing
     }
 }
 
-/* the archive keeps a copy of what it receives: a caller that mutates the record it appended must not be rewriting the archive behind it. It is the write-side sister of the read-side copy above, and both are needed: one keeps the caller out of the archive, the other keeps the archive out of the caller. */
 func TestInMemoryCatalogReadingRepositoryDoesNotKeepTheCallersRecord(t *testing.T) {
     repositoryInstance := newInMemoryCatalogReadingRepository()
     takenAt := time.Date(2026, time.September, 7, 10, 0, 0, 0, time.UTC)

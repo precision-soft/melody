@@ -41,7 +41,6 @@ func TestResolveOptionalLogger_ATypedNilIsRefusedNamingTheField(t *testing.T) {
     requireTypedNilLoggerRefusal(t, resolveErr, "component logger is a typed nil", "Config.Logger")
 }
 
-/* the default is held for the life of a component, so it must reach the emergency logger of the moment, the one recreated after CloseEmergencyLogger included */
 func TestResolveOptionalLogger_NilIsTheEmergencyLoggerEvenAfterItsClose(t *testing.T) {
     first, firstErr := logging.ResolveOptionalLogger(nil, "component", "Config.Logger")
     second, secondErr := logging.ResolveOptionalLogger(nil, "other", "Other.Logger")
@@ -64,7 +63,6 @@ func TestResolveOptionalLogger_NilIsTheEmergencyLoggerEvenAfterItsClose(t *testi
     }
 }
 
-/* one row per constructor of the sweep: an absent logger builds, a typed nil is refused with one text naming the field */
 func TestOptionalDependencies_NilIsTheDefaultAndATypedNilIsRefused(t *testing.T) {
     var typedNil *typedNilLogger
 
@@ -72,7 +70,6 @@ func TestOptionalDependencies_NilIsTheDefaultAndATypedNilIsRefused(t *testing.T)
         name    string
         message string
         field   string
-        /* what an absent logger must have written on the emergency logger, empty where building writes nothing */
         absentRecord string
         build        func(logger loggingcontract.Logger) error
     }{

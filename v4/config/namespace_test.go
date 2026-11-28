@@ -124,7 +124,6 @@ func runtimeOverConfiguration(t *testing.T, configuration configcontract.Configu
     return runtime.NewRun(context.Background(), serviceContainer.NewScope())
 }
 
-/* typedNilConfigurationScope stands for a foreign scope, the only resolver that can answer a typed-nil configuration: the framework's container refuses a nil value. */
 type typedNilConfigurationScope struct {
     containercontract.Scope
 }

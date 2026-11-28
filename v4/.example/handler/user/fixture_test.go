@@ -28,9 +28,6 @@ import (
     melodysecurity "github.com/precision-soft/melody/v4/security"
 )
 
-/* The shared test material of the package lives here, and only here: this is the one test file the layout rule exempts from having a source of its own. */
-
-/* recordingUserRepository is the directory the admin doors write into, kept in this process. The doors under test are asked what they STORE, so a double that only answers reads would let the test agree with itself about what an update wrote. */
 type recordingUserRepository struct {
     mutex        sync.Mutex
     users        map[string]*entity.User
@@ -95,8 +92,6 @@ func (instance *recordingUserRepository) FindByUsername(ctx context.Context, use
     return nil, false, nil
 }
 
-/* refuseWrites makes every Create and Update answer the error given, the way the unique index refuses a name
-   another caller wrote between the door's check and its write */
 func (instance *recordingUserRepository) refuseWrites(writeErr error) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
@@ -122,7 +117,6 @@ func (instance *recordingUserRepository) Create(ctx context.Context, user *entit
     return nil
 }
 
-/* Update holds the repository contract the doors rely on: the guard decides on the stored account, and only what the change names is written over it. */
 func (instance *recordingUserRepository) Update(ctx context.Context, id string, change repository.UserChange, guard repository.UserGuard) (*entity.User, *entity.User, error) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
@@ -202,7 +196,6 @@ func (instance *recordingUserRepository) DeleteById(ctx context.Context, id stri
     return stored, nil
 }
 
-/* storedRoles reads the roles the repository holds, which is the only reading that answers what an update actually wrote. */
 func (instance *recordingUserRepository) storedRoles(t *testing.T, id string) []string {
     t.Helper()
 
@@ -220,7 +213,6 @@ func (instance *recordingUserRepository) storedRoles(t *testing.T, id string) []
 
 var _ repository.UserRepository = (*recordingUserRepository)(nil)
 
-/* valueCache keeps the values it is given, as they are. The doors under test are not about serialization, and a cache that round-tripped through json would answer a map where the service asserts an entity — a failure of the double rather than of the door. */
 type valueCache struct {
     mutex  sync.Mutex
     values map[string]any
@@ -390,7 +382,6 @@ func assignCachedTestValues(keys []string, target any, values map[string]any) er
     return nil
 }
 
-/* silentEventDispatcher stands in for the wired dispatcher: the doors under test dispatch a domain event on the way out, and what the listeners then do belongs to their own tests. */
 type silentEventDispatcher struct{}
 
 func (instance *silentEventDispatcher) AddListener(eventName string, listener melodyeventcontract.EventListener, config melodyeventcontract.ListenerConfig) melodyeventcontract.ListenerRegistration {
@@ -430,14 +421,12 @@ func (instance *silentEventDispatcher) DispatchName(runtimeInstance melodycontai
 
 var _ melodyeventcontract.EventDispatcher = (*silentEventDispatcher)(nil)
 
-/* adminRuntime builds the runtime an admin door needs: a container carrying the user service, and a security context whose token holds the roles the caller is to be granted. The firewall under the context is the smallest compiled one that answers a role question, because the doors read nothing else off it. */
 func adminRuntime(t *testing.T, userRepository repository.UserRepository, actorId string, actorRoles []string) melodycontainercontract.Runtime {
     t.Helper()
 
     return adminRuntimeOverCache(t, userRepository, &valueCache{values: map[string]any{}}, actorId, actorRoles)
 }
 
-/* adminRuntimeOverCache is adminRuntime over a cache the test holds, so a test can plant the stale entry a raced or failed invalidation leaves behind; the dispatcher stays silent, which is that invalidation not happening */
 func adminRuntimeOverCache(t *testing.T, userRepository repository.UserRepository, cacheInstance *valueCache, actorId string, actorRoles []string) melodycontainercontract.Runtime {
     t.Helper()
 
@@ -471,7 +460,6 @@ func adminRuntimeOverCache(t *testing.T, userRepository repository.UserRepositor
     return runtimeInstance
 }
 
-/* callDoor drives one admin door with a json body and the route parameters it reads, and answers the status it decided on. */
 func callDoor(
     t *testing.T,
     runtimeInstance melodycontainercontract.Runtime,
@@ -486,7 +474,6 @@ func callDoor(
     return callDoorBoundedTo(t, runtimeInstance, door, method, path, routeParameters, body, 0)
 }
 
-/* callDoorBoundedTo runs a door over a body bounded as the kernel's MELODY_HTTP_MAX_REQUEST_BODY_BYTES bounds it; zero leaves it unbounded */
 func callDoorBoundedTo(
     t *testing.T,
     runtimeInstance melodycontainercontract.Runtime,
@@ -554,7 +541,6 @@ func editor(id string) *entity.User {
     return &entity.User{Id: id, Username: id, Password: "hash", Roles: []string{entity.RoleUser, entity.RoleEditor}}
 }
 
-/* stored answers the account the repository holds, the only reading that says what a door wrote */
 func (instance *recordingUserRepository) stored(t *testing.T, id string) *entity.User {
     t.Helper()
 

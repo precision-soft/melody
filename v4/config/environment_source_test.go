@@ -18,7 +18,6 @@ func TestEnvironmentContractIsUsed(t *testing.T) {
     var _ configcontract.EnvironmentSource = (*testEnvironmentSource)(nil)
 }
 
-/* godotenv understands a quoted value that spans lines, so the quote state of the comment stripper spans them too. */
 func TestPreprocessDotEnvContent_KeepsMultilineQuotedValues(t *testing.T) {
     content := "KEY=\"first\n# not a comment\n\nlast\"\nOTHER=plain # trailing comment\n"
 
@@ -48,7 +47,6 @@ func TestPreprocessDotEnvContent_KeepsMultilineQuotedValues(t *testing.T) {
     }
 }
 
-/* an editor that saves .env as UTF-8 with a byte order mark makes godotenv reject the first line, and U+FEFF is not whitespace, so no TrimSpace removes it. */
 func TestPreprocessDotEnvContent_StripsTheByteOrderMark(t *testing.T) {
     processed, err := preprocessDotEnvContent("\ufeffMELODY_ENV=prod\nFOO=bar\n")
     if nil != err {
@@ -63,7 +61,6 @@ func TestPreprocessDotEnvContent_StripsTheByteOrderMark(t *testing.T) {
     }
 }
 
-/* godotenv skips a backslash-escaped quote inside a value, so it does not terminate the string and must not toggle the stripper's quote state either. */
 func TestPreprocessDotEnvContent_KeepsBackslashEscapedQuotesInsideValues(t *testing.T) {
     content := `CONFIG="prefix \"section # note\" suffix"` + "\n"
 
@@ -78,7 +75,6 @@ func TestPreprocessDotEnvContent_KeepsBackslashEscapedQuotesInsideValues(t *test
     }
 }
 
-/* godotenv opens a quoted value only when the quote is the first character of the value; a stray quote in an unquoted value is literal. */
 func TestPreprocessDotEnvContent_LiteralQuoteInUnquotedValueDoesNotSpanLines(t *testing.T) {
     content := "NOTE=say \"hello\nB=\"line1\n# data line\nline2\"\n"
 
@@ -115,7 +111,6 @@ func TestLoadExistingDotEnvFile_PreservesQuotedWhitespace(t *testing.T) {
     }
 }
 
-/* a line without a separator is refused on the last line too, with or without a final newline, as on every other line, where it was read as the value of an empty key and vanished */
 func TestLoadExistingDotEnvFile_RefusesASeparatorlessLastLine(t *testing.T) {
     for _, content := range []string{"FIRST=1\nMELODY_ENV", "FIRST=1\nMELODY_ENV\n"} {
         directory := t.TempDir()
@@ -146,7 +141,6 @@ func TestPreprocessDotEnvContent_InlineHashWithoutLeadingSpaceIsKept(t *testing.
     }
 }
 
-/* the preprocessor does not cut the trailing comment of a NON-EMPTY value itself: godotenv performs its own countback on the produced line, and two cuts in a row read "hello # world # x" as "hello" where godotenv reads "hello # world". The whole-line comment, and the comment that opens before any value byte, are dropped here. */
 func TestPreprocessDotEnvContent_WhitespacePrecededHashIsComment(t *testing.T) {
     processed, err := preprocessDotEnvContent("KEY=value # trailing comment\n# full line comment\nOTHER=1")
     if nil != err {
@@ -171,7 +165,6 @@ func TestPreprocessDotEnvContent_WhitespacePrecededHashIsComment(t *testing.T) {
     }
 }
 
-/* a comment that opens before any value byte is the one cut godotenv's countback cannot make, so the value reads empty */
 func TestLoad_EmptyValueFollowedByAComment_ReadsEmpty(t *testing.T) {
     cases := []struct {
         line     string
@@ -199,7 +192,6 @@ func TestLoad_EmptyValueFollowedByAComment_ReadsEmpty(t *testing.T) {
     }
 }
 
-/* the dollar handling runs on everything after the separator, so a comment left in the produced line had its "$WORD" turned into a reference marker and the boot failed naming a key that was comment text */
 func TestLoad_DollarInsideTheCommentOfAnEmptyValueIsNotAReference(t *testing.T) {
     source := writeDotEnvFiles(t, map[string]string{
         ".env": "APP_SECRET=   # set to $SECRET_VALUE\n",
@@ -214,7 +206,6 @@ func TestLoad_DollarInsideTheCommentOfAnEmptyValueIsNotAReference(t *testing.T) 
     }
 }
 
-/* a hash glued to the separator opens no comment, for godotenv and for a shell alike: the cut of the empty value is under the same space-before rule as the whole-line comment */
 func TestPreprocessDotEnvContent_HashGluedToTheSeparatorIsData(t *testing.T) {
     processed, err := preprocessDotEnvContent("KEY=#glued\n")
     if nil != err {
@@ -237,7 +228,6 @@ func TestPreprocessDotEnvContent_HashGluedToTheSeparatorIsData(t *testing.T) {
     }
 }
 
-/* godotenv builds the unterminated-value failure from the raw first line of the value, so a credential containing " near " had its head copied into the log by the sanitizer that cut at those two words first */
 func TestLoad_UnterminatedQuotedValueContainingNearCarriesNoFileContent(t *testing.T) {
     source := writeDotEnvFiles(t, map[string]string{
         ".env": "PASSWORD=\"hunter2 near the door\n",
@@ -285,7 +275,6 @@ func TestLoad_PreservesNonUtf8BytesInQuotedValues(t *testing.T) {
     }
 }
 
-/* godotenv rewrites a byte that is not valid UTF-8 in an unquoted value to U+FFFD, so the parameter would hold another password than the file; the refusal names the key and the file and never the value, whatever godotenv's grammar put around it */
 func TestLoad_RefusesAnUnquotedValueThatIsNotUtf8(t *testing.T) {
     for _, testCase := range []struct {
         file    string
@@ -322,7 +311,6 @@ func TestLoad_RefusesAnUnquotedValueThatIsNotUtf8(t *testing.T) {
     }
 }
 
-/* a comment is no part of a value, a quoted value is kept as it is, and a U+FFFD the file spells is its own value, so none of them is judged */
 func TestLoad_AdmitsWhatGodotenvDoesNotRewrite(t *testing.T) {
     source := writeDotEnvFiles(t, map[string]string{
         ".env": "MELODY_ENV=dev\nAPP_NAME=shop # caf\xe9\n# caf\xe9\nDB_PASSWORD='caf\xe9' # caf\xe9\nAPP_MARK=\ufffd\n",
@@ -355,7 +343,6 @@ func findEnvironmentSourceError(err error, message string) *exception.Error {
     return nil
 }
 
-/* the name read from .env and .env.local selects the per-environment files; a rename inside them would run the production files as dev with the debug tooling on */
 func TestLoad_RefusesAnEnvironmentFileThatRenamesTheEnvironment(t *testing.T) {
     for _, file := range []string{".env.prod", ".env.prod.local"} {
         source := writeDotEnvFiles(t, map[string]string{
@@ -426,7 +413,6 @@ func TestLoad_ComparesTheTrimmedEnvironmentName(t *testing.T) {
     }
 }
 
-/* a name assembled from another key is reported by that key, so a referenced secret never reaches the exit record */
 func TestLoad_ReportsAReferencedRenameByItsKeys(t *testing.T) {
     source := writeDotEnvFiles(t, map[string]string{
         ".env":      "MELODY_ENV=prod\nDB_PASSWORD=hunter2\n",
@@ -500,7 +486,6 @@ func TestLoad_ParseFailureCarriesNoFileContent(t *testing.T) {
         t.Fatalf("expected the malformed variable name to fail the parse")
     }
 
-    /* the leak traveled through the cause chain the logger renders, never through Error() alone — so the assertion renders exactly what the logger renders */
     renderedLogContext := fmt.Sprintf("%v", exception.LogContext(loadErr, exception.LogContextOptions{}))
     if true == strings.Contains(renderedLogContext, "hunter2") {
         t.Fatalf("expected the neighboring credential to stay out of the rendered log context: %s", renderedLogContext)
@@ -540,7 +525,6 @@ func writeDotEnvFiles(t *testing.T, files map[string]string) *EnvironmentSource 
     return NewEnvironmentSource(EnvironmentSourceConfig{FileSystem: os.DirFS(directory)})
 }
 
-/* godotenv resolves ${KEY} against the keys of the one file being parsed, which is why a reference across melody's four-file layout has to be resolved here instead; CONFIG.md promises an undefined key fails the boot rather than degrade to empty. */
 func TestEnvironmentSource_ResolvesReferenceAcrossFiles(t *testing.T) {
     source := writeDotEnvFiles(t, map[string]string{
         ".env":       "DB_USER=app\nDB_PASS=secret\n",
@@ -712,7 +696,6 @@ func TestEnvironmentSource_ResolvesReferenceInsideTheEnvironmentName(t *testing.
     }
 }
 
-/* a key name is what godotenv says it is — upper case, digits, underscore — so a dollar followed by anything else is data: `pa$sword` and `$1.50` are values, not references. */
 func TestEnvironmentSource_KeepsALowerCaseDollarSequenceAsData(t *testing.T) {
     source := writeDotEnvFiles(t, map[string]string{
         ".env": "DB_PASSWORD=pa$sword\nPRICE=$1.50\nMIXED=pa$sWORD\n",
@@ -755,7 +738,6 @@ func TestEnvironmentSource_StillResolvesAnUpperCaseReference(t *testing.T) {
     }
 }
 
-/* the double stands in for the source this file mirrors, so it lives here; the other test files of the package reach it from the package. */
 type testEnvironmentSource struct {
     values map[string]string
     err    error

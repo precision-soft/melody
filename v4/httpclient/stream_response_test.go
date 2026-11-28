@@ -61,7 +61,6 @@ func TestStreamResponse_ConcurrentCloseAndBodyDoesNotRace(t *testing.T) {
             _ = streamResponse.Close()
         }()
 
-        /* consumer goroutine reads the body then closes it in a defer */
         go func() {
             defer waiter.Done()
 
@@ -107,7 +106,6 @@ func TestStreamResponse_HeadersCarryWhatTheServerSent(t *testing.T) {
     }
 }
 
-/* the body is the caller's own value through the public constructor, and a nil *http.Response.Body — the shape a caller forwards from a response it built itself — is an io.ReadCloser that is not nil: Body() answered it, and the ordinary consumer the GoDoc names, io.Copy(destination, response.Body()), dereferenced it. The promise is a reader that FAILS on the first read, which is what closedStreamBody is. */
 func TestStreamResponse_ATypedNilBodyAnswersTheFailingReaderRatherThanItself(t *testing.T) {
     var absentBody *os.File
 

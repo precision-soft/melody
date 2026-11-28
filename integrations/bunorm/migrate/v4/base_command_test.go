@@ -201,7 +201,6 @@ func (instance *recordingMigrationUnlocker) Unlock(ctx context.Context) error {
     return instance.unlockError
 }
 
-/* an interrupted migration cancels the command context; if the unlock rides it the delete never reaches the database and the migration lock row survives, refusing every later migration until someone runs the unlock command by hand */
 func TestUnlockMigrations_RunsOnACancelledCommandContext(t *testing.T) {
     cancelledContext, cancel := context.WithCancel(context.Background())
     cancel()
@@ -255,12 +254,10 @@ func TestUnlockMigrations_ReportsAFailedUnlock(t *testing.T) {
         t.Fatalf("expected the unlock failure to be reported, got %q", buffer.String())
     }
 
-    /* bun's bare error says nothing about a lock: the line names the surviving row's table and the command that clears it, or the operator reads a driver error and learns neither */
     if false == strings.Contains(buffer.String(), "stays held in bun_migration_locks") || false == strings.Contains(buffer.String(), "until db:unlock clears it") {
         t.Fatalf("expected the report to name the surviving lock and its remedy, got %q", buffer.String())
     }
 
-    /* the printed line alone is not enough: the failure must also reach the exit code, or a deploy script reads success over a lock row that refuses every later migration */
     if false == errors.Is(unlockErr, deleteRefused) {
         t.Fatalf("expected the unlock failure to be returned for the exit code, got %v", unlockErr)
     }
@@ -279,7 +276,6 @@ func (instance *migrationCapableDatabaseProvider) OpenForMigration(runtimeInstan
     return instance.migrationDatabase, nil
 }
 
-/* the commands prefer the dedicated migration connection and say so in the label, so a verbose run names the connection its DDL actually rides */
 func TestResolveDatabase_PrefersTheDedicatedMigrationConnection(t *testing.T) {
     ordinaryDatabase, _ := newFakeBunDatabase()
     migrationDatabase, _ := newFakeBunDatabase()
@@ -349,7 +345,6 @@ func TestResolveDatabase_PrefersTheDedicatedMigrationConnection(t *testing.T) {
     }
 }
 
-/* TestNewMigrator_SqlMigrationExecFailureReachesTheCaller pins the verdict of the SQL migration path against the bun version this module requires. The path is bun's — a *migrate.Migrations filled by Discover — but melody builds the migrator over it and is the layer that prints the result, so a swallowed failure here is a green deploy over a schema that never changed. Under bun v1.2.16 the deferred conn.Close overwrote the exec failure with its own nil return, so Migrate answered nil, the command printed [success], exited 0 and marked the migration applied forever, which made the failure unrepeatable. The pin drives a .up.sql whose exec the driver refuses and requires the refusal to reach the caller, so a bump that reintroduces the swallow fails here rather than at three in the morning. */
 func TestNewMigrator_SqlMigrationExecFailureReachesTheCaller(t *testing.T) {
     const migrationName = "20260101000001"
     const migrationStatement = "CREATE TABLE probe_three (id NOT_A_TYPE)"
@@ -393,7 +388,6 @@ func TestNewMigrator_SqlMigrationExecFailureReachesTheCaller(t *testing.T) {
         t.Fatalf("expected the migration name in the returned error, got %q", migrateErr.Error())
     }
 
-    /* the row is the other half of the defect: a migration marked applied over a statement that never ran can never be retried, and db:status reports it as done */
     for _, query := range recorder.recordedQueries() {
         if true == strings.HasPrefix(query, "INSERT") && true == mentionsMigrationsTable(query) {
             t.Fatalf("the failed migration was marked applied: %q", query)
@@ -401,7 +395,6 @@ func TestNewMigrator_SqlMigrationExecFailureReachesTheCaller(t *testing.T) {
     }
 }
 
-/* migrationCapableTestProvider hands out a SEPARATE database for the migration door, so a probe can tell the dedicated connection from the ordinary pool by identity rather than by trusting the flag beside it. */
 type migrationCapableTestProvider struct {
     ordinaryDatabase  *bun.DB
     migrationDatabase *bun.DB
@@ -420,7 +413,6 @@ func (instance *migrationCapableTestProvider) OpenForMigration(runtimeInstance c
 
 var _ bunorm.Provider = (*migrationCapableTestProvider)(nil)
 
-/* TestResolveDatabase_TheReleaseEndsTheDedicatedMigrationConnection pins the half of the door a command defers: the dedicated connection lifts the driver deadlines and recycles nothing, so it must not outlive the run in a process that goes on to serve requests. The proof is that the NEXT resolution dials again: counting the provider's migration opens shows the memo is gone, where the connection's own state could not, since the same pointer answers both times. */
 func TestResolveDatabase_TheReleaseEndsTheDedicatedMigrationConnection(t *testing.T) {
     ordinaryDatabase, _ := newFakeBunDatabase()
     migrationDatabase, _ := newFakeBunDatabase()
@@ -496,7 +488,6 @@ func TestResolveDatabase_TheReleaseEndsTheDedicatedMigrationConnection(t *testin
     }
 }
 
-/* a release that FAILS must reach a channel: the registry forgets the handle before it closes it and its own teardown snapshots the map, so nothing downstream covers what this close leaves behind. The record is a warning rather than the command's verdict, and it belongs in the json document as much as on the terminal. */
 func TestResolveDatabase_TheReleaseReportsAFailedClose(t *testing.T) {
     ordinaryDatabase, _ := newFakeBunDatabase()
     migrationDatabase, _ := newFakeBunDatabase()
@@ -545,7 +536,6 @@ func TestResolveDatabase_TheReleaseReportsAFailedClose(t *testing.T) {
                 return nil
             }
 
-            /* the registry goes down first, so the release meets a refusal it cannot retry — the shape of every close that fails after the handle is already forgotten */
             if closeErr := registry.CloseWithContext(t.Context()); nil != closeErr {
                 t.Errorf("unexpected registry close error: %s", closeErr.Error())
             }
@@ -586,7 +576,6 @@ func TestResolveDatabase_TheReleaseReportsAFailedClose(t *testing.T) {
     }
 }
 
-/* a release that succeeds says nothing: a warning on every migration run would teach the operator to ignore the one that matters. */
 func TestResolveDatabase_TheSuccessfulReleaseIsSilent(t *testing.T) {
     ordinaryDatabase, _ := newFakeBunDatabase()
     migrationDatabase, _ := newFakeBunDatabase()
@@ -649,7 +638,6 @@ func TestResolveDatabase_TheSuccessfulReleaseIsSilent(t *testing.T) {
     }
 }
 
-/* a provider whose migration door answers the very pool the registry holds runs the command on that POOL, which belongs to the application; the release must leave it alone, or a migration command would take the database away from everything else the process runs. */
 func TestResolveDatabase_TheReleaseLeavesTheSharedPoolAlone(t *testing.T) {
     database, _ := newFakeBunDatabase()
     runtimeInstance := newRuntimeWithDatabase(t, database)
@@ -680,7 +668,6 @@ func TestResolveDatabase_TheReleaseLeavesTheSharedPoolAlone(t *testing.T) {
 
             releaseDatabase()
 
-            /* the same pool is still the answer, and still usable: nothing was ended */
             secondResolved, _, _, secondErr := base.resolveDatabase(runtimeInstance, commandContext, resolveOutput)
             if nil != secondErr {
                 t.Errorf("unexpected resolve error on the second call: %s", secondErr.Error())
@@ -699,7 +686,6 @@ func TestResolveDatabase_TheReleaseLeavesTheSharedPoolAlone(t *testing.T) {
     }
 }
 
-/* under json the failed release is one warning string in the document, the same code as "no pending migrations": the text is what separates a surviving lock from a side remark, so it names the lock table and the unlock command there too, and the same failure, returned as the verdict, carries them in the error object */
 func TestUnlockMigrations_NamesTheSurvivingLockInTheJsonDocument(t *testing.T) {
     unlocker := &recordingMigrationUnlocker{unlockError: errors.New("context deadline exceeded")}
     buffer := &bytes.Buffer{}
@@ -765,7 +751,6 @@ func TestNewMigrateCommand_LeftOutOptionsTakeTheDefaults(t *testing.T) {
     }
 }
 
-/* the command hands its run's runtime to the migration door: a run whose context is already cancelled refuses before the dial */
 func TestResolveDatabase_ACancelledRunRefusesBeforeTheDial(t *testing.T) {
     migrationDatabase, _ := newFakeBunDatabase()
     provider := &migrationCapableTestProvider{migrationDatabase: migrationDatabase}

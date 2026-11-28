@@ -17,7 +17,6 @@ import (
     melodyhttp "github.com/precision-soft/melody/v4/http"
 )
 
-/* the liveness probe reports the version the build stamped, the one main hands Configure, beside its status */
 func TestHealthHandler_ReportsTheVersionItWasBuiltWith(t *testing.T) {
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })

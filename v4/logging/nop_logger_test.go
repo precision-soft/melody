@@ -6,7 +6,6 @@ import (
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
 
-/* the six methods of the no-op logger have empty bodies, so no test can move their coverage — a statement-free function reports 0.0% for ever. What can be pinned is the contract they exist for: every level must be swallowed, including a nil context, rather than panicking */
 func TestNopLogger_SwallowsEveryLevel(t *testing.T) {
     logger := NewNopLogger()
 
@@ -18,7 +17,6 @@ func TestNopLogger_SwallowsEveryLevel(t *testing.T) {
     logger.Emergency("message", nil)
 }
 
-/* the substitute must not claim it can be closed or that it is closed: the exit handler asks the question before trusting a logger with the final record, and a no-op answering "closed" would send that record to the emergency logger for no reason */
 func TestNopLogger_DoesNotAnswerTheClosedQuestion(t *testing.T) {
     logger := NewNopLogger()
 
@@ -27,7 +25,6 @@ func TestNopLogger_DoesNotAnswerTheClosedQuestion(t *testing.T) {
     }
 }
 
-/* the substitute reports nothing enabled, the whole of its answer, so a caller that builds its records eagerly builds none against it */
 func TestNopLogger_ReportsNoLevelEnabled(t *testing.T) {
     logger := NewNopLogger()
 

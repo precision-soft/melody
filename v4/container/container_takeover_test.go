@@ -18,7 +18,6 @@ import (
 
 type takeoverCallerKey struct{}
 
-/* takeoverProvider scripts one answer per run: a run listed in blocked waits on its channel first, a run listed in failures answers it, every other run builds the probe; the caller value of each run's runtime is recorded */
 type takeoverProvider struct {
     mutex    sync.Mutex
     runs     int
@@ -87,7 +86,6 @@ func takeoverCallerContext(parent context.Context, caller string) (context.Conte
     return context.WithCancel(context.WithValue(parent, takeoverCallerKey{}, caller))
 }
 
-/* the owner's departure is read off its context, whatever its provider answered, so a live waiter builds again under its own context rather than answer another caller's hang-up */
 func TestCreationGuard_ALiveWaiterBuildsAgainWhenTheOwnersContextEndedWhateverTheOwnersFailureCarries(t *testing.T) {
     for name, failure := range map[string]func(ctx context.Context) error{
         "the context's error":  func(ctx context.Context) error { return ctx.Err() },
@@ -144,7 +142,6 @@ func TestCreationGuard_ALiveWaiterBuildsAgainWhenTheOwnersContextEndedWhateverTh
     }
 }
 
-/* a waiter whose own context ended in the instant its owner left answers its own refusal and never becomes a creator */
 func TestCreationGuard_AWaiterWhoseOwnContextEndedAnswersItsOwnRefusal(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{}).(*container)
     provider := newTakeoverProvider()
@@ -189,7 +186,6 @@ func TestCreationGuard_AWaiterWhoseOwnContextEndedAnswersItsOwnRefusal(t *testin
     }
 }
 
-/* every live waiter is answered by one takeover: the first to re-take the lock builds, the others wait on it */
 func TestCreationGuard_EveryLiveWaiterIsAnsweredByOneTakeover(t *testing.T) {
     const waiterCount = 8
 
@@ -253,7 +249,6 @@ func TestCreationGuard_EveryLiveWaiterIsAnsweredByOneTakeover(t *testing.T) {
     }
 }
 
-/* a taker whose own context ends hands the creation over again */
 func TestCreationGuard_ATakeoverWhoseOwnContextEndsHandsOverAgain(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{}).(*container)
     provider := newTakeoverProvider()
@@ -314,7 +309,6 @@ func TestCreationGuard_ATakeoverWhoseOwnContextEndsHandsOverAgain(t *testing.T) 
     }
 }
 
-/* a creation that succeeded after its owner left is stored and answered: no takeover */
 func TestCreationGuard_ACreationThatSucceededUnderAnEndedContextIsAnswered(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{}).(*container)
     provider := newTakeoverProvider()
@@ -350,7 +344,6 @@ func TestCreationGuard_ACreationThatSucceededUnderAnEndedContextIsAnswered(t *te
     }
 }
 
-/* runtime.Goexit is not a context ending: the waiter inherits the exit even with the owner's context done */
 func TestCreationGuard_AnOwnerLeavingThroughGoexitIsNotTakenOver(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{}).(*container)
     provider := newTakeoverProvider()
@@ -392,7 +385,6 @@ func TestCreationGuard_AnOwnerLeavingThroughGoexitIsNotTakenOver(t *testing.T) {
     }
 }
 
-/* the type-keyed container creation takes over as the name-keyed one does */
 func TestCreationGuard_ATypeKeyedContainerCreationIsTakenOver(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{}).(*container)
     provider := newTakeoverProvider()
@@ -431,7 +423,6 @@ func TestCreationGuard_ATypeKeyedContainerCreationIsTakenOver(t *testing.T) {
     }
 }
 
-/* a scoped creation is taken over by a live waiter of the scope, and a waiter whose scope closed meanwhile refuses without building */
 func TestCreationGuard_AScopedCreationIsTakenOverAndAClosedScopeIsNot(t *testing.T) {
     for _, closeScope := range []bool{false, true} {
         serviceContainer := NewContainer(ContainerConfig{}).(*container)
@@ -459,7 +450,6 @@ func TestCreationGuard_AScopedCreationIsTakenOverAndAClosedScopeIsNot(t *testing
 
         awaitScopedCreationWaiter(t, serviceContainer, scopeInstance.(*scope), "app.scoped.takeover", 1)
 
-        /* the scope reads as closed without its done channel closing, so the waiter is released by the creation's end and meets the closed scope on the takeover path */
         restoreScope := func() {}
         if true == closeScope {
             restoreScope = markScopeClosedForTest(scopeInstance)
@@ -492,7 +482,6 @@ func TestCreationGuard_AScopedCreationIsTakenOverAndAClosedScopeIsNot(t *testing
     }
 }
 
-/* the windows no deterministic pin holds open: callers cancelled at random points, a provider failing only when its own context is done; one build at a time, one success, every live caller holds it, nothing left behind */
 func TestCreationGuard_TakeoverUnderConcurrentCancellationsKeepsOneBuildAtATime(t *testing.T) {
     const callerCount = 64
 

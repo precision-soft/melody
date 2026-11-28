@@ -52,7 +52,6 @@ func TestNewClientAcceptsCompleteCredentials(t *testing.T) {
     }
 }
 
-/* bucketRaceServer plays an s3 endpoint mid bucket-creation race: the existence probe answers absent until the creation was attempted, and the creation itself answers the conflict a losing replica sees. */
 type bucketRaceServer struct {
     makeAttempted atomic.Bool
     conflictCode  string
@@ -111,7 +110,6 @@ func TestEnsureBucketTreatsALostCreationRaceAsSuccessWhenTheBucketIsUsable(t *te
     }
 }
 
-/* aloneConflictServer answers the creation conflict but keeps reporting the bucket absent, the shape of BucketAlreadyExists on a name another account owns: the re-check must NOT excuse that refusal. */
 type aloneConflictServer struct{}
 
 func (instance aloneConflictServer) ServeHTTP(writer nethttp.ResponseWriter, request *nethttp.Request) {
@@ -186,7 +184,6 @@ func TestConfig_RedactsCredentialsOnEveryFmtVerb(t *testing.T) {
     }
 }
 
-/* recheckFailingConflictServer answers the creation conflict, the bucket absent at the first read of its location — the one the creation makes — and a server error at every read after it: the client's existence check is that read, so the re-check that would settle the conflict cannot answer */
 type recheckFailingConflictServer struct {
     mutex  sync.Mutex
     checks int
@@ -221,7 +218,6 @@ func (instance *recheckFailingConflictServer) ServeHTTP(writer nethttp.ResponseW
     writer.WriteHeader(nethttp.StatusInternalServerError)
 }
 
-/* a re-check that could not answer leaves the conflict unsettled rather than answered "taken elsewhere": the refusal says the re-check failed, so a network failure reads as one */
 func TestEnsureBucketNamesAReCheckThatCouldNotComplete(t *testing.T) {
     server := httptest.NewServer(&recheckFailingConflictServer{})
     defer server.Close()
@@ -263,7 +259,6 @@ func TestNewClient_ARefusalNamesTheField(t *testing.T) {
     }
 }
 
-/* regionRecordingServer answers a bucket that does not exist and records the creation request's body, where the region travels as the location constraint */
 type regionRecordingServer struct {
     mutex sync.Mutex
     body  string
@@ -321,7 +316,6 @@ func TestEnsureBucket_RefusesANilRuntime(t *testing.T) {
     }
 }
 
-/* phaseBlockingServer answers like bucketRaceServer but blocks the phase it is told to, until the test ends */
 type phaseBlockingServer struct {
     blockPhase    string
     makeAttempted atomic.Bool

@@ -38,7 +38,6 @@ func (instance *stubEnvironmentSource) Load(ctx context.Context) (map[string]str
     return instance.values, nil
 }
 
-/* containerRuntime keeps the container a fixture built the runtime over, so a test can register on it afterwards: a runtime reaches no container. */
 type containerRuntime struct {
     melodycontainercontract.Runtime
     serviceContainer melodycontainercontract.Container

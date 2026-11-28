@@ -18,7 +18,6 @@ func TestValidateTrustedProxyList_RefusesAnEntryThatIsNeitherPrefixNorAddress(t 
         t.Fatalf("expected the malformed prefix to be refused")
     }
 
-    /* the entry is named so the operator can find the typo without bisecting the configuration */
     if false == strings.Contains(validationErr.Error(), "neither a CIDR prefix nor an address") {
         t.Fatalf("unexpected refusal: %v", validationErr)
     }

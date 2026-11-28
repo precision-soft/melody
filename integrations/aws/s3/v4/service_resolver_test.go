@@ -26,7 +26,7 @@ func (instance *recordingRegistrar) RegisterService(serviceName string, provider
     instance.providers = append(instance.providers, provider)
 }
 
-/* newOfflineTestClient builds a client without dialing anything: minio.New only parses the endpoint. */
+/* builds a client without dialing anything: minio.New only parses the endpoint */
 func newOfflineTestClient(t *testing.T) *minio.Client {
     t.Helper()
 

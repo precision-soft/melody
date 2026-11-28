@@ -56,7 +56,7 @@ func TestNumericClaim_ReadsEveryTimeClaimDown(t *testing.T) {
     }
 }
 
-/* issuers write whole seconds, so a validator a few milliseconds behind the issuer across a second boundary reads a fresh token as issued in its future; the future checks of nbf and iat tolerate that one second on top of a zero leeway, and a fractional claim is accepted during its own first second */
+/* issuers write whole seconds, so the future checks of nbf and iat tolerate one second */
 func TestJwtTokenValidator_FutureChecksTolerateTheClaimsOneSecondResolution(t *testing.T) {
     secret := []byte("super-secret-value-padded-to-the-hs256-minimum")
 
@@ -355,7 +355,6 @@ func TestJwtTokenValidator_RejectsNoneAlgorithm(t *testing.T) {
     }
 }
 
-/* the algorithm a refused header names is chosen by the caller before any signature check, so the refusal carries it bounded: a 200 KiB alg does not reach the journal whole */
 func TestJwtTokenValidator_ARefusedAlgorithmIsBoundedInTheRefusal(t *testing.T) {
     secret := []byte("super-secret-value-padded-to-the-hs256-minimum")
     validator := newTestJwtValidator(secret, JwtConfig{})
@@ -373,7 +372,6 @@ func TestJwtTokenValidator_ARefusedAlgorithmIsBoundedInTheRefusal(t *testing.T) 
     }
 }
 
-/* the type a refused header names is bounded as the algorithm is */
 func TestJwtTokenValidator_ARefusedTypeIsBoundedInTheRefusal(t *testing.T) {
     secret := []byte("super-secret-value-padded-to-the-hs256-minimum")
     validator := newTestJwtValidator(secret, JwtConfig{})
@@ -852,7 +850,6 @@ func TestJwtTokenValidator_TheDefaultLeewayDoesNotWidenTheRevocationBoundary(t *
     }
 }
 
-/* domain separation: the internal-auth envelope signs under its own typ through the same HS256 primitive, so under a shared or reused secret it must be refused HERE by type, not merely by which claims it happens to carry. */
 func TestJwtTokenValidator_RefusesTheInternalAuthEnvelopeType(t *testing.T) {
     secret := []byte("shared-secret-padded-to-the-hs256-minimum")
     validator := newTestJwtValidator(secret, JwtConfig{SubjectClaim: "app", AllowWithoutExpiry: true})
@@ -894,7 +891,7 @@ func TestJwtTokenValidator_AcceptsAbsentAndLowerCaseJwtType(t *testing.T) {
     }
 }
 
-/* the frozen instant sits decades away from the real clock, so a token expiring shortly after it verifies ONLY if the validator reads the injected clock — and stops verifying when that clock alone advances. */
+/* decades from the real clock, so the token verifies only on the injected clock */
 func TestJwtTokenValidator_VerifiesTimeClaimsAgainstTheInjectedClock(t *testing.T) {
     secret := []byte("secret-padded-to-the-hs256-minimum")
     frozen := clock.NewFrozenClock(time.Unix(1000, 0))
@@ -935,7 +932,6 @@ func TestJwtTokenValidator_MarksAnEpochStoreFailureAsInfrastructure(t *testing.T
     }
 }
 
-/* the acceptance above is the only nbf case the suite had, so the whole not-before block could be deleted with it still green — a token that says it is not usable yet would have validated. This is the refusal half: no leeway, activation an hour out. */
 func TestJwtTokenValidator_RefusesANotBeforeBeyondTheLeeway(t *testing.T) {
     secret := []byte("super-secret-value-padded-to-the-hs256-minimum")
     validator := newTestJwtValidator(secret, JwtConfig{Leeway: strictLeeway})
@@ -956,7 +952,6 @@ func TestJwtTokenValidator_RefusesANotBeforeBeyondTheLeeway(t *testing.T) {
     }
 }
 
-/* the revocation boundary reads iat rounded down, so a fractional iat inside the revoked second is refused rather than lifted past the boundary. */
 func TestJwtTokenValidator_ReadsAFractionalIssuedAtDownAtTheRevocationBoundary(t *testing.T) {
     secret := []byte("secret-padded-to-the-hs256-minimum")
 
@@ -984,7 +979,6 @@ func TestJwtTokenValidator_ReadsAFractionalIssuedAtDownAtTheRevocationBoundary(t
     }
 }
 
-/* the refusal of a token stamped inside the skew after the epoch names the boundary it applied — the epoch and its skew — and carries the three values a reader needs to see why a token issued after the epoch was still refused. */
 func TestJwtTokenValidator_RevocationRefusalInsideTheSkewNamesTheBoundaryAndCarriesItsValues(t *testing.T) {
     secret := []byte("secret-padded-to-the-hs256-minimum")
 
@@ -1025,7 +1019,6 @@ func TestJwtTokenValidator_RevocationRefusalInsideTheSkewNamesTheBoundaryAndCarr
     }
 }
 
-/* the subject refusal answers an absent, a non-string and an empty claim alike, so its sentence says so and names the claim it read. */
 func TestJwtTokenValidator_SubjectRefusalNamesTheClaimAndItsThreeShapes(t *testing.T) {
     secret := []byte("super-secret-padded-to-the-hs256-minimum")
     validator := newTestJwtValidator(secret, JwtConfig{AllowWithoutExpiry: true, SubjectClaim: "user"})

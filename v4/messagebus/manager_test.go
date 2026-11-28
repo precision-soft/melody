@@ -52,7 +52,6 @@ func TestDispatch_WarnsWhenNothingSentOrHandledTheMessage(t *testing.T) {
 
     runtimeInstance, logger := newTestRuntimeWithRecordingLogger()
 
-    /* a send-only bus with no route for the type answers success, so this record is the one channel that tells "delivered somewhere" from "did nothing" */
     if _, dispatchErr := bus.Dispatch(runtimeInstance, taskCreated{TaskId: 1}, messagebuscontract.DispatchOptions{}); nil != dispatchErr {
         t.Fatalf("unexpected dispatch error: %v", dispatchErr)
     }
@@ -107,7 +106,6 @@ func TestDispatch_DoesNotWarnForAReceivedEnvelope(t *testing.T) {
 
     runtimeInstance, logger := newTestRuntimeWithRecordingLogger()
 
-    /* the consume path dispatches received envelopes, and the handle middleware owns the missing-handler verdict there — the untouched-dispatch record must not fire beside it */
     received := NewEnvelope(taskCreated{TaskId: 1}, nil).WithStamps([]messagebuscontract.Stamp{ReceivedStamp{TransportName: "async"}})
     if _, dispatchErr := bus.Dispatch(runtimeInstance, received, messagebuscontract.DispatchOptions{}); nil != dispatchErr {
         t.Fatalf("unexpected dispatch error: %v", dispatchErr)

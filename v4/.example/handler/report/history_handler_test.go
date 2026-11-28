@@ -28,7 +28,6 @@ import (
     melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
 
-/* the limit door reads nothing off the runtime, so the request is built without one: what it needs is the query bag, which NewRequest fills from the url at construction. */
 func historyRequest(t *testing.T, target string) melodyhttpcontract.Request {
     t.Helper()
 
@@ -70,7 +69,6 @@ func TestHistoryLimitOf_ReadsTheCallersLimit(t *testing.T) {
     }
 }
 
-/* every way of asking for a limit this door cannot serve is the same mistake and gets the same words, so the refusal is asserted on all three rather than on whichever one came to mind. */
 func TestHistoryLimitOf_RefusesALimitItCannotServe(t *testing.T) {
     for _, target := range []string{
         "/reports/api/history/?limit=abc",
@@ -89,7 +87,6 @@ func TestHistoryLimitOf_RefusesALimitItCannotServe(t *testing.T) {
     }
 }
 
-/* the ceiling is the door's own: the archive grows for the life of a volume, so a limit taken from the request without a cap is any signed-in caller choosing how much of it this process loads at once. */
 func TestHistoryLimitOf_CapsWhatACallerCanAskFor(t *testing.T) {
     limit, limitErr := historyLimitOf(historyRequest(t, "/reports/api/history/?limit=9999"), 500)
     if nil != limitErr {
@@ -101,7 +98,6 @@ func TestHistoryLimitOf_CapsWhatACallerCanAskFor(t *testing.T) {
     }
 }
 
-/* the shape of a query parameter is chosen by the client, so a repeated key at this door is answered rather than refused: the limit is the first value, as for a single key. */
 func TestHistoryLimitOf_TakesTheFirstValueOfARepeatedKey(t *testing.T) {
     limit, limitErr := historyLimitOf(historyRequest(t, "/reports/api/history/?limit=2&limit=3"), 25)
     if nil != limitErr {
@@ -113,10 +109,6 @@ func TestHistoryLimitOf_TakesTheFirstValueOfARepeatedKey(t *testing.T) {
     }
 }
 
-/* a failure of the archive is rendered through the presenter — the envelope every sibling read door answers
-   a repository failure in — as a Response, never returned for the kernel's exception listener to render in a
-   second shape: one client reads one envelope for one class of failure. A container without the report
-   service is the cheapest such failure. */
 func TestApiHistoryHandler_RendersAnArchiveFailureThroughThePresenter(t *testing.T) {
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
@@ -154,7 +146,6 @@ func TestApiHistoryHandler_RendersAnArchiveFailureThroughThePresenter(t *testing
     }
 }
 
-/* historyDoorOver serves the door over the in-process catalogue and archive and the cache it is handed */
 func historyDoorOver(t *testing.T, cacheInstance melodycachecontract.Cache) map[string]any {
     t.Helper()
 

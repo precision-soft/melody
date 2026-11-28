@@ -2055,7 +2055,6 @@ func TestAwaitHttpServerEnd_HandsAShutdownHookTheShutdownsContext(t *testing.T) 
     }
 }
 
-/* headersTestModule serves one session firewall over / with a json route, a failing route, a stream, a route that turns X-Frame-Options off, a route that sets its own cache and frame headers, and a write the csrf check refuses */
 type headersTestModule struct {
     csrfApplicationTestModule
 }
@@ -2355,7 +2354,6 @@ func TestApplication_UploadRouteCap_LeavesTheOtherRoutesAtTheApplicationCap(t *t
 
 type handlerTestContextKey struct{}
 
-/* bootHandlerTestApplication boots a production http application holding one plain route and one route that holds its request until release is closed */
 func bootHandlerTestApplication(t *testing.T, environmentLines string, prepare func(applicationInstance *Application)) (*Application, chan struct{}, chan struct{}) {
     t.Helper()
 
@@ -2401,7 +2399,6 @@ func mustHttpHandler(t *testing.T, applicationInstance *Application) nethttp.Han
     return handler
 }
 
-/* holdOpenRequestScope serves the held route on its own goroutine and returns once the request is inside the handler */
 func holdOpenRequestScope(t *testing.T, handler nethttp.Handler, entered chan struct{}) *sync.WaitGroup {
     t.Helper()
 
@@ -2864,7 +2861,6 @@ func TestApplicationBeginHttpShutdown_ConcurrentCalls_StartEachHookOnce(t *testi
     }
 }
 
-/* runServingTestApplication runs the application's own server on a loopback listener it bound and answers once that server answers its probe, with the door that stops it and the channel closed when Run returned */
 func runServingTestApplication(t *testing.T, prepare func(applicationInstance *Application)) (*Application, func(), chan struct{}) {
     t.Helper()
 
@@ -2884,7 +2880,6 @@ func runServingTestApplication(t *testing.T, prepare func(applicationInstance *A
     return applicationInstance, stopRun, runEnded
 }
 
-/* startServingRun runs the application on its own goroutine and answers once its server answers the probe on address, with the door that stops it and the channel closed when Run returned */
 func startServingRun(t *testing.T, applicationInstance *Application, address string) (func(), chan struct{}) {
     t.Helper()
 
@@ -2920,7 +2915,6 @@ func awaitRunEnded(t *testing.T, stopRun func(), runEnded chan struct{}) {
     }
 }
 
-/* the one serving test without the listener seam: the server listens on the configured address itself, so its port is taken free and may race another process */
 func TestApplicationRun_ServesOnTheConfiguredAddress(t *testing.T) {
     address := freeLoopbackAddress(t)
 
@@ -2944,7 +2938,6 @@ func TestApplicationRun_ServesOnTheConfiguredAddress(t *testing.T) {
     awaitRunEnded(t, stopRun, runEnded)
 }
 
-/* Run waits for a handler build in progress instead of judging its claim: a build that hands nothing out leaves Run to serve, one that hands the handler out refuses Run as handed out */
 func TestApplicationRun_DuringAHandlerBuild_WaitsForItsOutcome(t *testing.T) {
     for _, testCase := range []struct {
         name     string
@@ -3108,7 +3101,6 @@ func TestApplicationHttpHandler_HandingNothingOut_LeavesTheApplicationUnclaimed(
 /* the marker tells a re-executed test binary that it is the child whose boot dies inside HttpHandler */
 const httpHandlerBootFailureProbeMarker = "MELODY_TEST_HTTP_HANDLER_BOOT_FAILURE_PROBE"
 
-/* a boot that dies inside HttpHandler exits through the before-exit close, which must not wait on the build HttpHandler still holds: the exit comes well inside the teardown budget and the container's teardown ran */
 func TestApplicationHttpHandler_ABootFailureExitsPromptly_AndTearsTheContainerDown(t *testing.T) {
     projectDirectory := os.Getenv(httpHandlerBootFailureProbeMarker)
 
@@ -3263,7 +3255,6 @@ func TestApplicationClose_HandedOut_BoundsTheWindDownByTheShutdownTimeout(t *tes
     }
 }
 
-/* bootDeadlineCloseTestApplication hands out the handler of an application whose shutdown hook blocks until its context ends and whose one built service closes through closeProbe */
 func bootDeadlineCloseTestApplication(t *testing.T, shutdownTimeout string, closeProbe func(closeContext context.Context) error) *Application {
     t.Helper()
 

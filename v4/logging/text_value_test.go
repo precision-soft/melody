@@ -6,8 +6,7 @@ import (
     "testing"
 )
 
-/* a cyclic value that reached fmt would recurse until the goroutine stack is gone; the stack is bounded for the
-   length of a test, so a regression ends the test binary in milliseconds instead of growing a gigabyte of stack */
+/* the stack is bounded so a recursion regression ends the binary in milliseconds instead of growing a gigabyte */
 func boundTextValueStack() func() {
     previous := debug.SetMaxStack(64 << 20)
 

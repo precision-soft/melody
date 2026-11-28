@@ -142,7 +142,6 @@ func assertRefusedField(t *testing.T, err error, field string, message string) {
     }
 }
 
-/* ruleWalkRoots are the fourth major's module roots, relative to this package; a root absent from the tree is skipped */
 var ruleWalkRoots = []string{"..", "../../integrations"}
 
 func isBoundRuleLiteral(expression ast.Expr) bool {

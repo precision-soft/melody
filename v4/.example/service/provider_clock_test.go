@@ -21,8 +21,6 @@ func providerClockHeaders(date string, age string) nethttp.Header {
     return headers
 }
 
-/* a provider on a clock that agrees with this one to within the second its date is read to and the round trip
-   has no offset at all, so its stamps land on this clock exactly as they came */
 func TestReadProviderClock_AnOffsetInsideTheUncertaintyIsNoOffset(t *testing.T) {
     reading := readProviderClock(providerClockHeaders("Tue, 08 Sep 2026 09:00:00 GMT", ""), providerClockSentAt, providerClockSentAt.Add(200*time.Millisecond))
 
@@ -60,7 +58,6 @@ func TestReadProviderClock_MeasuresAClockBehind(t *testing.T) {
     }
 }
 
-/* the Age a cache adds is part of the provider's clock at the moment the answer is handed out */
 func TestReadProviderClock_AddsTheAgeOfACachedAnswer(t *testing.T) {
     reading := readProviderClock(providerClockHeaders("Tue, 08 Sep 2026 08:00:00 GMT", "3600"), providerClockSentAt, providerClockSentAt)
 
@@ -69,8 +66,6 @@ func TestReadProviderClock_AddsTheAgeOfACachedAnswer(t *testing.T) {
     }
 }
 
-/* an Age that is not delta-seconds — digits and nothing else — is ignored, as the caching rules say; a leading
-   sign is not a digit, so "+5" is ignored too rather than read as five seconds */
 func TestReadProviderClock_IgnoresAnAgeThatIsNotANonNegativeInteger(t *testing.T) {
     for _, age := range []string{"-5", "soon", "1.5", "+5"} {
         reading := readProviderClock(providerClockHeaders("Tue, 08 Sep 2026 09:00:00 GMT", age), providerClockSentAt, providerClockSentAt)
@@ -91,7 +86,6 @@ func TestReadProviderClock_AnAnswerWithoutAReadableDateIsUnmeasured(t *testing.T
     }
 }
 
-/* a round trip read backwards — a clock stepped between the two reads — is no round trip, not a negative one */
 func TestReadProviderClock_ARoundTripReadBackwardsCountsAsNone(t *testing.T) {
     reading := readProviderClock(providerClockHeaders("Tue, 08 Sep 2026 09:00:00 GMT", ""), providerClockSentAt, providerClockSentAt.Add(-time.Hour))
 
@@ -100,7 +94,6 @@ func TestReadProviderClock_ARoundTripReadBackwardsCountsAsNone(t *testing.T) {
     }
 }
 
-/* an Age is read to the second like the Date it is added to, so the two span two seconds: a provider that agrees with this clock, answering from a cache, has no offset, where a span of one second would read an offset of a whole second */
 func TestReadProviderClock_AnAgeWidensTheResolutionToTwoSeconds(t *testing.T) {
     arrived := providerClockSentAt.Add(2*time.Second + 500*time.Millisecond)
     reading := readProviderClock(providerClockHeaders("Tue, 08 Sep 2026 09:00:00 GMT", "1"), arrived, arrived)
@@ -114,10 +107,6 @@ func TestReadProviderClock_AnAgeWidensTheResolutionToTwoSeconds(t *testing.T) {
     }
 }
 
-/* an Age at the largest a cache may send or past it is no age any cache kept an answer for — 2^31 is what a cache
-   whose count overflowed is told to send, and a count past the integer it is read into is the same overflow:
-   the answer's clock is unreadable, one verdict for every length, rather than moved by decades — or wrapped,
-   or read as the Date alone — onto this one. The largest count below the ceiling is still an age. */
 func TestReadProviderClock_AnAgeAboveTheCeilingLeavesTheClockUnmeasured(t *testing.T) {
     for _, age := range []string{"2147483648", "2147483649", "9999999999", "9223372036854775807", "99999999999999999999"} {
         reading := readProviderClock(providerClockHeaders("Tue, 08 Sep 2026 09:00:00 GMT", age), providerClockSentAt, providerClockSentAt)
@@ -133,8 +122,6 @@ func TestReadProviderClock_AnAgeAboveTheCeilingLeavesTheClockUnmeasured(t *testi
     }
 }
 
-/* the bound is judged against the measurement: an offset past it by less than its own uncertainty is not known to
-   be past it */
 func TestProviderClockReading_ExceedsOnlyBeyondItsUncertainty(t *testing.T) {
     cases := []struct {
         reading providerClockReading
@@ -153,7 +140,6 @@ func TestProviderClockReading_ExceedsOnlyBeyondItsUncertainty(t *testing.T) {
     }
 }
 
-/* an unmeasured answer's stamp is taken on this clock as it came, and no later than the moment it arrived */
 func TestProviderClockReading_AnUnmeasuredStampIsTakenNoLaterThanItsArrival(t *testing.T) {
     reading := readProviderClock(providerClockHeaders("", ""), providerClockSentAt, providerClockSentAt)
 

@@ -20,7 +20,6 @@ import (
     melodysecurity "github.com/precision-soft/melody/v4/security"
 )
 
-/* paddingCategoryRepository answers a lookup the way MySQL's PAD SPACE collation does: trailing spaces of the identifier asked are ignored */
 type paddingCategoryRepository struct {
     repository.CategoryRepository
 }
@@ -45,7 +44,6 @@ func TestCategoryService_FindByIdAnswersAPaddedIdentifierAsAbsentAndCachesNothin
     }, "cat-1")
 }
 
-/* a category a product sits in is not deleted from under it, in memory as the foreign key holds it on the database; one no product names is */
 func TestCategoryService_RefusesToDeleteACategoryAProductSitsIn(t *testing.T) {
     _, dispatcher, runtimeInstance := currencyServiceUnderTest(t)
 
@@ -73,7 +71,6 @@ func TestCategoryService_RefusesToDeleteACategoryAProductSitsIn(t *testing.T) {
     }
 }
 
-/* the in-use read and the delete name the same identifier, so a padded one reaching the service is refused like the bare one */
 func TestCategoryService_RefusesToDeleteAPaddedIdentifierOfACategoryAProductSitsIn(t *testing.T) {
     _, dispatcher, runtimeInstance := currencyServiceUnderTest(t)
 
@@ -120,7 +117,6 @@ func TestCategoryService_AnswersTheCommittedRowWhenADispatchFails(t *testing.T) 
     catalogue.assertCommittedDispatchFailure(t, event.EventCategoryDeleted, "cat-committed", CacheKeyCategoryList, CacheKeyCategoryById("cat-committed"))
 }
 
-/* refusingUpdateCategoryRepository refuses every update after the change reached it, the way a write the database rejected leaves the caller's value changed */
 type refusingUpdateCategoryRepository struct {
     repository.CategoryRepository
 }
@@ -185,7 +181,6 @@ func TestCategoryService_TheReadDoorsEndOnTheCallersContext(t *testing.T) {
     })
 }
 
-/* actorRecordingCategoryRepository records the actor each write's context carries */
 type actorRecordingCategoryRepository struct {
     repository.CategoryRepository
     actorList []string

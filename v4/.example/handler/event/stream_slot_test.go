@@ -44,7 +44,6 @@ func TestStreamSlots_RefusesPastTheProcessCap(t *testing.T) {
     }
 }
 
-/* a release gives one slot back, once, however often it is called */
 func TestStreamSlots_AReleaseGivesTheSlotBackOnce(t *testing.T) {
     slots := NewStreamSlots(2, StreamCapPerProcess)
 
@@ -93,7 +92,6 @@ func TestStreamSlots_ConcurrentAcquisitionsKeepTheCap(t *testing.T) {
 
 const countedRouteName = "example.websocket"
 
-/* countedRequest is an authenticated reader's request matched to the route given */
 func countedRequest(t *testing.T, routeName string) (*melodyhttp.Request, melodycontainercontract.Runtime) {
     t.Helper()
 
@@ -103,7 +101,6 @@ func countedRequest(t *testing.T, routeName string) (*melodyhttp.Request, melody
     return request, runtimeInstance
 }
 
-/* the counted route holds its slot for as long as its handler runs, that is the connection's life, and gives it back when the handler returns */
 func TestStreamSlotMiddleware_HoldsTheSlotForTheConnectionsLife(t *testing.T) {
     slots := NewStreamSlots(1, StreamCapPerProcess)
     request, runtimeInstance := countedRequest(t, countedRouteName)
@@ -129,7 +126,6 @@ func TestStreamSlotMiddleware_HoldsTheSlotForTheConnectionsLife(t *testing.T) {
     }
 }
 
-/* past the account's cap the counted route is refused 429 before its handler accepts anything */
 func TestStreamSlotMiddleware_RefusesPastTheCapBeforeTheHandler(t *testing.T) {
     slots := NewStreamSlots(StreamCapPerUser, StreamCapPerProcess)
     for range StreamCapPerUser {
@@ -155,7 +151,6 @@ func TestStreamSlotMiddleware_RefusesPastTheCapBeforeTheHandler(t *testing.T) {
     }
 }
 
-/* every other route passes through, whatever the slots hold */
 func TestStreamSlotMiddleware_LeavesEveryOtherRouteAlone(t *testing.T) {
     slots := NewStreamSlots(1, 1)
     slots.Acquire("reader")
@@ -174,7 +169,6 @@ func TestStreamSlotMiddleware_LeavesEveryOtherRouteAlone(t *testing.T) {
     }
 }
 
-/* a release gives the process's place back as well as the account's */
 func TestStreamSlots_AReleaseGivesTheProcessPlaceBack(t *testing.T) {
     slots := NewStreamSlots(StreamCapPerUser, 1)
 

@@ -23,7 +23,6 @@ import (
     "github.com/precision-soft/melody/v4/security/totp"
 )
 
-/* the account is the token's, so a caller without a token has nothing to name and is refused before anything is written. The `user` query parameter is sent anyway, because the assertion that matters is that it is not read: a handler that fell back to it would answer something other than 401. The store is nil on purpose: a nil handle that would panic if reached asserts that the guard stands first. */
 func TestEnrollHandlerRefusesACallerWithoutAToken(t *testing.T) {
     request, runtimeInstance := twoFactorRequest(t, "/twofactor/enroll?user=admin")
 
@@ -54,7 +53,6 @@ func assertTwoFactorUnauthorized(t *testing.T, door string, response melodyhttpc
     }
 }
 
-/* the account the enrollment writes is the token's, whatever the request names: the row a second enrollment replaces is the caller's own only while no name the request carries reaches the store */
 func TestEnrollHandlerWritesTheTokensRowWhateverTheRequestNames(t *testing.T) {
     store, connector := enrolledStore(t, "", "")
     request, runtimeInstance := authenticatedTwoFactorRequest(t, "/twofactor/enroll?user=admin", "alice", nil)
@@ -91,7 +89,6 @@ func TestEnrollHandlerWritesTheTokensRowWhateverTheRequestNames(t *testing.T) {
     }
 }
 
-/* the verification reads the token's enrollment: only alice is enrolled here, so a door that read the account the request named would find none and refuse a code alice's own secret produces */
 func TestVerifyHandlerChecksTheTokensEnrollmentWhateverTheRequestNames(t *testing.T) {
     secret, secretErr := totp.GenerateSecret()
     if nil != secretErr {
@@ -123,7 +120,6 @@ func TestVerifyHandlerChecksTheTokensEnrollmentWhateverTheRequestNames(t *testin
     }
 }
 
-/* the recovery door redeems against the token's enrollment too */
 func TestVerifyHandlerRedeemsAgainstTheTokensEnrollmentWhateverTheRequestNames(t *testing.T) {
     store, connector := enrolledStore(t, "alice", "JBSWY3DPEHPK3PXP")
     request, runtimeInstance := authenticatedTwoFactorRequest(
@@ -147,8 +143,6 @@ func TestVerifyHandlerRedeemsAgainstTheTokensEnrollmentWhateverTheRequestNames(t
     }
 }
 
-/* healingStore answers the given refusal on its first call and the store on every later one: the source a
-   door meets while the store's migration is refused and after it heals, inside one process */
 func healingStore(store *store2fa.Store, refusal error) (store2fa.StoreSource, *int) {
     calls := 0
 
@@ -162,7 +156,6 @@ func healingStore(store *store2fa.Store, refusal error) (store2fa.StoreSource, *
     }, &calls
 }
 
-/* the store is resolved at each request, so a refusal is the request's and not the process's: the door that met it answers 503 without a statement reaching the database, and the next request in the same process, the cause gone, enrolls. */
 func TestEnrollHandlerAnswersAStoreRefusalWith503AndEnrollsOnceItHeals(t *testing.T) {
     store, connector := enrolledStore(t, "", "")
     storeSource, calls := healingStore(store, errors.New("the catalogue database refused the migration"))
@@ -189,8 +182,6 @@ func TestEnrollHandlerAnswersAStoreRefusalWith503AndEnrollsOnceItHeals(t *testin
     }
 }
 
-/* the verification door resolves the same way: 503 while the store is refused, and the code alice's own
-   secret produces verifies at the next request */
 func TestVerifyHandlerAnswersAStoreRefusalWith503AndVerifiesOnceItHeals(t *testing.T) {
     secret, secretErr := totp.GenerateSecret()
     if nil != secretErr {
@@ -221,7 +212,6 @@ func TestVerifyHandlerAnswersAStoreRefusalWith503AndVerifiesOnceItHeals(t *testi
     }
 }
 
-/* a code the sign-in already burned in the shared guard is refused here: the door writes the nonce the framework's second-factor authenticator writes, so the code is spent once across both doors */
 func TestVerifyHandlerRefusesACodeTheSignInAlreadyBurnedInTheSharedGuard(t *testing.T) {
     secret, secretErr := totp.GenerateSecret()
     if nil != secretErr {
@@ -252,7 +242,6 @@ func TestVerifyHandlerRefusesACodeTheSignInAlreadyBurnedInTheSharedGuard(t *test
     }
 }
 
-/* replacing an enrollment asks for a factor of the one it replaces: a session alone is answered with the challenge and the stored secret is not written, a wrong code is refused the same way, and neither spends what the replay guard holds */
 func TestEnrollHandlerRefusesToReplaceAnEnrollmentWithoutACurrentFactor(t *testing.T) {
     secret, secretErr := totp.GenerateSecret()
     if nil != secretErr {
@@ -285,7 +274,6 @@ func TestEnrollHandlerRefusesToReplaceAnEnrollmentWithoutACurrentFactor(t *testi
     }
 }
 
-/* a current TOTP code replaces the enrollment and is burned in the guard the sign-in and the verification door share: the same code is refused at the verification door afterwards */
 func TestEnrollHandlerReplacesWithACurrentCodeAndBurnsItAcrossTheDoors(t *testing.T) {
     secret, secretErr := totp.GenerateSecret()
     if nil != secretErr {
@@ -318,7 +306,6 @@ func TestEnrollHandlerReplacesWithACurrentCodeAndBurnsItAcrossTheDoors(t *testin
     }
 }
 
-/* a recovery code of the enrollment being replaced is redeemed before the replacement is written */
 func TestEnrollHandlerReplacesWithARecoveryCodeRedeemedFirst(t *testing.T) {
     store, connector := enrolledStore(t, "alice", "JBSWY3DPEHPK3PXP")
     request, runtimeInstance := authenticatedTwoFactorRequest(t, "/twofactor/enroll", "alice", map[string]string{melodysecurity.DefaultTotpRecoveryHeaderName: "recovery-one"})
@@ -345,7 +332,6 @@ func TestEnrollHandlerReplacesWithARecoveryCodeRedeemedFirst(t *testing.T) {
     }
 }
 
-/* recordingNonceGuard remembers nothing and records the ttl each accepted code is burned under */
 type recordingNonceGuard struct {
     ttlList []bound.Duration
 }
@@ -356,7 +342,6 @@ func (instance *recordingNonceGuard) Remember(runtimeInstance melodycontainercon
     return false, nil
 }
 
-/* a code stays acceptable for the whole skew window, a period on either side of its own, so it is burned for the whole of it: a burn of one period would let the code be replayed in the next */
 func TestVerifyHandler_BurnsTheCodeForTheWholeValidityWindow(t *testing.T) {
     secret, secretErr := totp.GenerateSecret()
     if nil != secretErr {
@@ -478,7 +463,6 @@ func confirmWith(t *testing.T, handler melodyhttpcontract.Handler, headers map[s
     return response
 }
 
-/* the enrollment door writes the pending table alone: a secret nobody proved the authenticator holds is no factor */
 func TestEnrollHandlerWritesThePendingEnrollmentOnly(t *testing.T) {
     store, connector := enrolledStore(t, "", "")
 
@@ -494,7 +478,6 @@ func TestEnrollHandlerWritesThePendingEnrollmentOnly(t *testing.T) {
     }
 }
 
-/* a code of the pending secret moves the pending enrollment into the active table and empties the pending one */
 func TestConfirmHandlerMovesThePendingEnrollmentOnItsCode(t *testing.T) {
     store, connector, secret := pendingFixture(t)
 
@@ -525,7 +508,6 @@ func TestConfirmHandlerMovesThePendingEnrollmentOnItsCode(t *testing.T) {
     }
 }
 
-/* a wrong code leaves the pending enrollment where it is and writes nothing */
 func TestConfirmHandlerRefusesAWrongCodeWritingNothing(t *testing.T) {
     store, connector, _ := pendingFixture(t)
 
@@ -541,7 +523,6 @@ func TestConfirmHandlerRefusesAWrongCodeWritingNothing(t *testing.T) {
     }
 }
 
-/* a code is spent once: the same code presented twice is refused the second time, as at the sign-in */
 func TestConfirmHandlerRefusesAReplayedCode(t *testing.T) {
     store, _, secret := pendingFixture(t)
     code, _ := totp.GenerateCodeAt(secret, time.Now(), totp.Options{})
@@ -573,7 +554,6 @@ func TestConfirmHandlerAsksForACode(t *testing.T) {
     }
 }
 
-/* the confirmation spends the account's budget like the sign-in, so a session cannot walk the codes of a secret it holds; an account past it is refused before its code is read */
 func TestConfirmHandlerSpendsTheFactorBudget(t *testing.T) {
     store, _, _ := pendingFixture(t)
     budget := &countingFactorBudget{allowance: 0}
@@ -622,7 +602,6 @@ func TestStatusHandlerAnswersBothStates(t *testing.T) {
 }
 
 
-/* a second enroll between the confirmation's read and its move replaces the pending secret: the move holds the row and refuses a secret other than the one the code was verified against, writing nothing */
 func TestConfirmEnrollmentRefusesAPendingSecretReplacedSinceTheCodeWasVerified(t *testing.T) {
     store, connector, _ := pendingFixture(t)
 
@@ -638,7 +617,6 @@ func TestConfirmEnrollmentRefusesAPendingSecretReplacedSinceTheCodeWasVerified(t
     }
 }
 
-/* a set-up started on the session alone replaces no factor: one that became active since is kept, and nothing is written */
 func TestConfirmHandlerKeepsAFactorThatBecameActiveSinceAnUngrantedSetUp(t *testing.T) {
     store, connector, secret := pendingFixture(t)
     connector.enrolledIdentifier = "alice"
@@ -657,7 +635,6 @@ func TestConfirmHandlerKeepsAFactorThatBecameActiveSinceAnUngrantedSetUp(t *test
     }
 }
 
-/* a set-up that presented the active factor replaces it */
 func TestConfirmHandlerReplacesTheFactorAGrantedSetUpPresented(t *testing.T) {
     store, connector, secret := pendingFixture(t)
     connector.enrolledIdentifier = "alice"
@@ -669,7 +646,6 @@ func TestConfirmHandlerReplacesTheFactorAGrantedSetUpPresented(t *testing.T) {
     }
 }
 
-/* the confirmation names its set-up: a later enroll in its place is answered 409, not 401 against a secret the sender never saw */
 func TestConfirmHandlerAnswersConflictForASetUpReplacedSince(t *testing.T) {
     store, _, secret := pendingFixture(t)
 
@@ -684,7 +660,6 @@ func TestConfirmHandlerAnswersConflictForASetUpReplacedSince(t *testing.T) {
     }
 }
 
-/* the enrollment records whether the caller presented the active factor, the grant the confirmation reads */
 func TestEnrollHandlerRecordsTheReplacementGrant(t *testing.T) {
     store, connector := enrolledStore(t, "", "")
 
@@ -700,7 +675,6 @@ func TestEnrollHandlerRecordsTheReplacementGrant(t *testing.T) {
 }
 
 
-/* a pending enrollment is confirmable for its lifetime alone: every read of the pending table, the confirmation's lock and the state included, asks for a row younger than PendingEnrollmentLifetime */
 func TestPendingReadsAskForARowWithinItsLifetime(t *testing.T) {
     store, connector, secret := pendingFixture(t)
 

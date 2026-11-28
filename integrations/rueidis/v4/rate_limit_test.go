@@ -267,7 +267,6 @@ func TestRateLimiter_ALimitersCountersSurviveAChangeOfItsLimitAndWindow(t *testi
     }
 }
 
-/* the runtime context the http kernel hands a request carries no deadline, so the call timeout must bound Allow itself; a 1ns timeout must fail closed instead of riding the unbounded context */
 func TestRateLimiter_ACallCutByTheCallTimeoutNamesTheBound(t *testing.T) {
     client := rateLimiterTestClient(t)
 
@@ -432,7 +431,6 @@ func TestRateLimiter_AnEmptyOrMalformedNameIsRefusedAtConstruction(t *testing.T)
     }
 }
 
-/* the caller's own cancellation is named apart from a store failure: labelled a store failure it read as a redis outage against a healthy store, and the operator chased an outage that was a client hanging up. */
 func TestRateLimiter_TheCallersCancellationIsNotAStoreFailureAndTakesTheFailureModeVerdict(t *testing.T) {
     client := rateLimiterTestClient(t)
 
@@ -458,7 +456,6 @@ func TestRateLimiter_TheCallersCancellationIsNotAStoreFailureAndTakesTheFailureM
     }
 }
 
-/* a request deadline tighter than the call timeout ends the round trip with DeadlineExceeded as the call timeout would; the caller's context says whose deadline it was, and it is named so, not as a store failure. */
 func TestRateLimiter_TheCallersDeadlineIsNotAStoreFailure(t *testing.T) {
     client := rateLimiterTestClient(t)
 

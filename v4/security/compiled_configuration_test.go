@@ -99,7 +99,6 @@ func (instance *compiledFirewallTokenlessLoginHandler) Login(
     return &securitycontract.LoginResult{Token: instance.token}, nil
 }
 
-/* a result without a token is refused as a nil result is, so security.login.success never carries a token its listeners cannot read */
 func TestCompiledFirewall_Login_AResultWithoutATokenFailsClosed(t *testing.T) {
     var typedNilToken *AuthenticatedToken
 
@@ -205,7 +204,6 @@ func (instance *compiledFirewallFailingLoginHandler) Login(
 
 var _ securitycontract.LoginHandler = (*compiledFirewallFailingLoginHandler)(nil)
 
-/* the dispatch failure travels as an error rather than as its own rendered text: the dispatcher answers a wrapper whose Error() is the bare "event listener returned error", while the listener's name, the event and the listener's own cause all live in that error's CONTEXT. Flattened into a context slot, the record would name neither the broken listener nor why it broke. */
 func TestCompiledFirewall_Login_ADispatchFailureNamesTheBrokenListener(t *testing.T) {
     firewall := NewCompiledFirewall(CompiledFirewallConfig{
         Name:               "main",
@@ -255,7 +253,6 @@ func (instance *compiledFirewallFailingLogoutHandler) Logout(
 
 var _ securitycontract.LogoutHandler = (*compiledFirewallFailingLogoutHandler)(nil)
 
-/* the logout door carries the same repair as its login twin two functions above, and a class repaired at one door and not asserted at the other is a door nobody proved */
 func TestCompiledFirewall_Logout_ADispatchFailureNamesTheBrokenListener(t *testing.T) {
     firewall := NewCompiledFirewall(CompiledFirewallConfig{
         Name:               "main",
@@ -297,7 +294,6 @@ func TestCompiledFirewall_Logout_ADispatchFailureNamesTheBrokenListener(t *testi
     }
 }
 
-/* the constructor has the firewall's name in hand, so its refusal names it beside the index, as the builder and Compile do */
 func TestNewCompiledFirewall_NamesTheFirewallOfANilRule(t *testing.T) {
     defer func() {
         refusal, isRefusal := recover().(*exception.Error)

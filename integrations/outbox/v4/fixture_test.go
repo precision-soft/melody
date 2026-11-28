@@ -42,7 +42,6 @@ func expectPanicNamingField(t *testing.T, field string, callback func()) {
     callback()
 }
 
-/* mustCreateLock answers the lock a test's CreateLock made, a refusal failing the test where it happened */
 func mustCreateLock(lock lockcontract.Lock, createErr error) lockcontract.Lock {
     if nil != createErr {
         panic(createErr)
@@ -51,7 +50,6 @@ func mustCreateLock(lock lockcontract.Lock, createErr error) lockcontract.Lock {
     return lock
 }
 
-/* outboxTestRuntime answers a run's runtime over ctx and an empty container's scope, the runtime a repository door takes */
 func outboxTestRuntime(ctx context.Context) containercontract.Runtime {
     return runtime.NewRun(ctx, container.NewContainer(container.ContainerConfig{}).NewScope())
 }
@@ -64,7 +62,6 @@ func (instance *namespaceEnvironmentSource) Load(ctx context.Context) (map[strin
     return map[string]string{config.NamespaceKey: instance.namespace}, nil
 }
 
-/* runtimeWithNamespace answers a runtime whose configuration service reads MELODY_NAMESPACE as the namespace given. */
 func runtimeWithNamespace(t *testing.T, namespace string) containercontract.Runtime {
     t.Helper()
 

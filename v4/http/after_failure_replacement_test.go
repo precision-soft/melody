@@ -25,7 +25,6 @@ import (
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
 
-/* afterFailureRecordingLogger keeps the warnings and the infos the kernel writes */
 type afterFailureRecordingLogger struct {
     errorContextRecordingLogger
 
@@ -57,7 +56,6 @@ func (instance *afterFailureRecordingLogger) warnings() ([]string, []loggingcont
     return append([]string(nil), instance.warningMessages...), append([]loggingcontract.Context(nil), instance.warningContexts...)
 }
 
-/* closeRecordingBody reports whether the kernel closed the body of a response it discarded */
 type closeRecordingBody struct {
     io.Reader
     closed int
@@ -332,7 +330,6 @@ func (instance unavailableRefusal) Error() string {
     return "the store is down"
 }
 
-/* dispatchSkippingARequiredListener answers the refusal of a kernel.request dispatch that a listener named listenerName ended ahead of a required one, by failing with listenerErr or, when it is nil, by a stop */
 func dispatchSkippingARequiredListener(t *testing.T, listenerName string, listenerErr error) error {
     t.Helper()
 
@@ -465,7 +462,6 @@ func TestKernel_AnExitAfterARefusedReplacementStillWarnsAndClosesIt(t *testing.T
     dispatcher.AddListener(kernelcontract.EventKernelResponse, func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
         return errors.New("the response listener failed")
     }, eventcontract.ListenerConfig{Priority: 10})
-    /* one-shot: the kernel's recovery dispatches kernel.response again for the page it renders after the exit */
     replaced := false
     dispatcher.AddListener(kernelcontract.EventKernelResponse, func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
         if false == replaced {

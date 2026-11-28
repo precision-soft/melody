@@ -96,7 +96,6 @@ func TestModule_RefusesADatabaseWithoutACipher(t *testing.T) {
     }
 }
 
-/* foreignDialect answers another name over the mysql dialect, since the module requires no second dialect */
 type foreignDialect struct {
     schema.Dialect
 }
@@ -256,7 +255,6 @@ func TestModule_AContextWithoutADatabaseInstallsItsCipherAndRegistersNoCommand(t
     }
 }
 
-/* a registration installs its whole state: a later application in the process keeps no cipher name and no marker of an earlier one, where a merge left the earlier compartment and binding readable through the later application's columns */
 func TestModule_ASecondRegistrationReplacesTheWholeCipherAndBindingTables(t *testing.T) {
     preserveRegistries(t)
 
@@ -372,7 +370,6 @@ func TestModule_RegisterCliCommandsPanicsOnInvalidContext(t *testing.T) {
     })
 }
 
-/* the development environment, the one the fake cipher is admitted in */
 func newFakeKernel() *fakeKernel {
     return &fakeKernel{serviceContainer: container.NewContainer(container.ContainerConfig{}), environment: melodyconfig.EnvironmentDevelopment}
 }
@@ -416,7 +413,6 @@ func (instance *fakeKernel) Clock() clockcontract.Clock {
 
 var _ kernelcontract.Kernel = (*fakeKernel)(nil)
 
-/* runEncryptCommand drives one command Run through a parsed cli context with the command's own flag defaults and returns the error the command's Run reported. */
 func runEncryptCommand(t *testing.T, command clicontract.Command, arguments []string) error {
     t.Helper()
 
@@ -694,7 +690,6 @@ func TestModule_TheFactoryResolvesUnderTheRunsContext(t *testing.T) {
     }
 }
 
-/* labelBinding carries its label as a field, the shape a marker may not have, since its column reads the zero value */
 type labelBinding struct {
     label string
 }
@@ -788,7 +783,6 @@ func newBindingModuleConfig(bindings ...SealBindingConfig) ModuleConfig {
     }
 }
 
-/* a declaration the module cannot hold is refused at registration naming the field and the index */
 func TestModule_RefusesASealBindingItCannotHold(t *testing.T) {
     preserveRegistries(t)
     valid := SealBindingConfig{Reference: crmIbanBinding{}}
@@ -855,7 +849,6 @@ func TestModule_RefusesASealBindingItCannotHold(t *testing.T) {
     }
 }
 
-/* a refused declaration installs nothing: no cipher and no binding */
 func TestModule_InstallsNothingWhenASealBindingIsRefused(t *testing.T) {
     preserveRegistries(t)
     previous := NewFakeCipher()
@@ -874,7 +867,6 @@ func TestModule_InstallsNothingWhenASealBindingIsRefused(t *testing.T) {
     }
 }
 
-/* a later registration replaces a binding, so the switch follows the last one */
 func TestModule_ALaterRegistrationReplacesABinding(t *testing.T) {
     preserveRegistries(t)
     installCipher(t, "test:crm", NewFakeCipher())
@@ -898,7 +890,6 @@ func TestSealBindingConfig_UnboundAdmittedIsTheDoorOfTheRefusal(t *testing.T) {
     }
 }
 
-/* the label grammar is <table>.<column>, each part [A-Za-z0-9_]{1,64}, one spelling per column */
 func TestSealBindingLabelPattern_AdmitsOneSpellingPerColumn(t *testing.T) {
     for _, label := range []string{"users.email", "melody_example_v4_two_factor.secret", strings.Repeat("a", 64) + "." + strings.Repeat("b", 64)} {
         if false == sealBindingLabelPattern.MatchString(label) {
@@ -913,7 +904,6 @@ func TestSealBindingLabelPattern_AdmitsOneSpellingPerColumn(t *testing.T) {
     }
 }
 
-/* one label under two compartments of their own ciphers is two bindings, not a collision */
 func TestModule_AdmitsOneLabelUnderTwoCiphers(t *testing.T) {
     preserveRegistries(t)
     config := newBindingModuleConfig(SealBindingConfig{Reference: crmIbanBinding{}}, SealBindingConfig{Reference: secondCompartmentIbanBinding{}})

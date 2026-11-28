@@ -61,7 +61,6 @@ func (instance *insecureCollectorEnvironmentSource) Load(ctx context.Context) (m
     return instance.values, nil
 }
 
-/* a runtime whose context is done, so the provider is refused before the dial, with a json journal and, for values, a configuration */
 func insecureCollectorRuntime(t *testing.T, values map[string]string) (containercontract.Runtime, *bytes.Buffer) {
     t.Helper()
 
@@ -93,7 +92,6 @@ func insecureCollectorRuntime(t *testing.T, values map[string]string) (container
     return runtime.NewRun(doneContext, serviceContainer.NewScope()), journal
 }
 
-/* a provider built by hand writes the warning in the runtime's journal, as the module writes it at boot; the module's own build writes it once, as the boot warning */
 func TestNewTracerProvider_JournalsAnInsecureExportOffThisMachine(t *testing.T) {
     for name, testCase := range map[string]struct {
         endpoint string

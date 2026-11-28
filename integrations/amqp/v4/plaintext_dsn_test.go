@@ -125,7 +125,6 @@ func TestPlaintextHostJudge_HonoursTheBootWarningIgnoreKey(t *testing.T) {
     }
 }
 
-/* the runtime's context is done, so the dial never leaves; the warning is written first all the same */
 func TestProviderOpen_WritesThePlaintextDsnWarning(t *testing.T) {
     cancelledContext, cancel := context.WithCancel(context.Background())
     cancel()
@@ -140,7 +139,6 @@ func TestProviderOpen_WritesThePlaintextDsnWarning(t *testing.T) {
     }
 }
 
-/* the once is the provider's: a second application's provider over the same broker writes its own line */
 func TestProvider_JudgesEachHostOncePerProvider(t *testing.T) {
     cancelledContext, cancel := context.WithCancel(context.Background())
     cancel()
@@ -157,7 +155,6 @@ func TestProvider_JudgesEachHostOncePerProvider(t *testing.T) {
     }
 }
 
-/* the dial context is done, so the dial never leaves; the dialer judges its dsn first through the journal the dial carries, once per host, and a dial with no journal leaves the host for the next */
 func TestProviderDialer_JudgesTheDsnAtTheDial(t *testing.T) {
     runtimeInstance, logger := newPlaintextDsnRuntime(t, t.Context(), nil)
     dialer := NewProvider("melody", ProviderConfig{}).Dialer("amqp://guest:secret@broker.example.com:5672/")
@@ -182,7 +179,6 @@ func TestProviderDialer_JudgesTheDsnAtTheDial(t *testing.T) {
     }
 }
 
-/* the transport hands its dial the journal of the runtime it served, so a dialer built by Provider.Dialer writes the warning at the transport's first dial */
 func TestTransport_HandsItsDialTheJournalOfTheRuntimeItServed(t *testing.T) {
     runtimeInstance, logger := newPlaintextDsnRuntime(t, t.Context(), nil)
 
@@ -206,7 +202,6 @@ func TestTransport_HandsItsDialTheJournalOfTheRuntimeItServed(t *testing.T) {
     }
 }
 
-/* the backplane's listener dials before any runtime reaches it, so its dials carry the backplane's own logger */
 func TestServerSentEventBackplane_HandsItsDialItsLogger(t *testing.T) {
     logger := &recordingLogger{}
     journals := make(chan *plaintextJournal, 1)

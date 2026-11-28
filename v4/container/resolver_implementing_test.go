@@ -25,7 +25,6 @@ func TestAllImplementing_CollectsOnlyTheServicesSatisfyingTheInterface(t *testin
         t.Fatalf("expected two handlers, got %d", len(handlers))
     }
 
-    /* the order is sorted by type name rather than by registration, so a collection does not reorder between runs on map iteration */
     if "audit" != handlers[0].Handle() || "invoice" != handlers[1].Handle() {
         t.Fatalf("expected a stable order, got %q and %q", handlers[0].Handle(), handlers[1].Handle())
     }
@@ -53,7 +52,6 @@ func TestAllImplementing_RejectsANonInterfaceType(t *testing.T) {
     }
 }
 
-/* a provider that fails must abort the collection: a caller handed a partial set would dispatch to some handlers and silently drop the rest */
 func TestAllImplementing_FailsWhenACollectedProviderFails(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -75,7 +73,6 @@ type handlerDispatcher struct {
     handlers []collectableHandler
 }
 
-/* the case the GoDoc promises: a component that dispatches to every handler collects them inside its own provider, so the resolver a provider receives must enumerate the registered types */
 func TestAllImplementing_CollectsFromInsideAProvider(t *testing.T) {
     serviceContainer := newCollectionContainer(t)
 
@@ -118,7 +115,6 @@ func TestAllImplementing_CollectsThroughAScope(t *testing.T) {
     }
 }
 
-/* a service registered under the interface type itself satisfies it trivially: AllImplementing holds every implementation of T, and the single-implementation pattern is one of them */
 func TestAllImplementing_CollectsTheServiceRegisteredUnderTheInterfaceItself(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -144,7 +140,6 @@ func (instance *namedHandler) Handle() string {
     return instance.name
 }
 
-/* a type registered non-strictly under several names is the multi-instance pattern; the collection resolves each name instead of failing on the ambiguity of the type alone */
 func TestAllImplementing_CollectsEveryInstanceOfAMultiNameType(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -170,7 +165,6 @@ func TestAllImplementing_CollectsEveryInstanceOfAMultiNameType(t *testing.T) {
     }
 }
 
-/* a higher priority is collected earlier, and services without one keep the stable type-and-name order */
 func TestAllImplementing_OrdersByCollectionPriority(t *testing.T) {
     serviceContainer := newCollectionContainer(t)
 
@@ -211,7 +205,6 @@ func (instance *compositeDispatcher) Handle() string {
     return "composite"
 }
 
-/* the composite pattern: the dispatcher is itself one of the handlers it dispatches to, and collecting from its own provider must yield the others instead of failing on the self-reference — the way a tagged iterator excludes its referencing service */
 func TestAllImplementing_ExcludesTheServiceBeingCreated(t *testing.T) {
     serviceContainer := newCollectionContainer(t)
 
@@ -235,7 +228,6 @@ func TestAllImplementing_ExcludesTheServiceBeingCreated(t *testing.T) {
         t.Fatalf("expected the dispatcher to collect the other handlers, got %d", len(dispatcher.handlers))
     }
 
-    /* collected from outside any provider, the dispatcher itself takes part */
     all, allErr := AllImplementing[collectableHandler](t.Context(), serviceContainer)
     if nil != allErr {
         t.Fatalf("expected the outer collection to succeed, got %v", allErr)
@@ -246,7 +238,6 @@ func TestAllImplementing_ExcludesTheServiceBeingCreated(t *testing.T) {
     }
 }
 
-/* a per-request override installed under a registered name takes the registration's place in a collection gathered on the scope, because the references resolve by name through the scope. The registration is made under the INTERFACE, which is what admits a different implementation as the override: an override must fit every type its name is registered under, so substituting an *auditHandler for a name registered under *invoiceHandler is refused before anything is written. */
 func TestAllImplementing_ScopeOverrideTakesPart(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -282,7 +273,6 @@ func TestAllImplementing_ScopeOverrideTakesPart(t *testing.T) {
     }
 }
 
-/* excluding anything but the collector itself would freeze a collection whose content depends on boot order; a deeper service on the same path must fail as the cycle it is */
 func TestAllImplementing_AncestorOnTheResolutionPathFailsLoudly(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -310,7 +300,6 @@ func TestAllImplementing_AncestorOnTheResolutionPathFailsLoudly(t *testing.T) {
     }
 }
 
-/* a closed scope's Get refuses for the request-outliving goroutine, and the collection must refuse the same way instead of handing that goroutine an empty set to dispatch to */
 func TestAllImplementing_RefusesAClosedScope(t *testing.T) {
     serviceContainer := newCollectionContainer(t)
 
@@ -331,7 +320,6 @@ func TestAllImplementing_RefusesAClosedScope(t *testing.T) {
     }
 }
 
-/* equal priorities keep the stable type-and-name order, and a negative one sorts after every service that declared nothing */
 func TestAllImplementing_EqualAndNegativePrioritiesKeepAStableOrder(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -369,7 +357,6 @@ func TestAllImplementing_EqualAndNegativePrioritiesKeepAStableOrder(t *testing.T
     }
 }
 
-/* the exclusion on a type node pins to the name this context holds in creation: a sibling name of the same type, registered while the collector's provider runs, stays collectable */
 func TestAllImplementing_SiblingNameOfTheCollectorTypeIsCollected(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -401,7 +388,6 @@ func TestAllImplementing_SiblingNameOfTheCollectorTypeIsCollected(t *testing.T) 
     }
 }
 
-/* the same pinning holds when the collector is resolved by type: its own reference is caught through the name-keyed creation entry, and the idle sibling stays collectable */
 func TestAllImplementing_SiblingNameIsCollectedWhenTheCollectorResolvesByType(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -435,7 +421,6 @@ func (instance *requestHandler) Handle() string {
     return "request"
 }
 
-/* A scoped registration absent from a collection is the quietest failure this feature can produce: the handler is simply never dispatched to, with no error anywhere to say a member is missing. The scope therefore merges its own registrations with the container's rather than delegating. */
 func TestAllImplementing_CollectsScopedRegistrationsOnAScope(t *testing.T) {
     serviceContainer := newCollectionContainer(t)
 
@@ -464,7 +449,6 @@ func TestAllImplementing_CollectsScopedRegistrationsOnAScope(t *testing.T) {
     }
 }
 
-/* The container's own collection must stay free of scoped members: a process-lifetime dispatcher holding a handler built for one request would hold that request for the life of the process. */
 func TestAllImplementing_AContainerCollectionExcludesScopedRegistrations(t *testing.T) {
     serviceContainer := newCollectionContainer(t)
 
@@ -483,13 +467,11 @@ func TestAllImplementing_AContainerCollectionExcludesScopedRegistrations(t *test
         }
     }
 
-    /* the loop above is satisfied by an empty collection, which is also what a collector that gathers NOTHING returns — the sibling below carries this same guard */
     if 0 == len(handlers) {
         t.Fatalf("expected the container collection to gather the container handlers")
     }
 }
 
-/* A container provider collecting through the resolver it receives must gather only container members, even while the resolution that reached it came through a scope: the dispatcher it is building is a process singleton, and a handler built for one request would be held by it for the life of the process. */
 func TestAllImplementing_AContainerProviderCollectingThroughAScopeExcludesScopedRegistrations(t *testing.T) {
     serviceContainer := newCollectionContainer(t)
 
@@ -537,7 +519,6 @@ func TestAllImplementing_AContainerProviderCollectingThroughAScopeExcludesScoped
     }
 }
 
-/* the resolver a provider receives is the one the AllImplementing godoc tells a dispatcher to collect with, so it has to refuse a closed scope exactly the way collecting with the scope itself does; otherwise the request-outliving goroutine the refusal exists for is handed an empty set and dispatches to nothing */
 func TestAllImplementing_RefusesAClosedScopeThroughAProvidersResolver(t *testing.T) {
     serviceContainer := newCollectionContainer(t)
 

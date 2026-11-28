@@ -1330,7 +1330,6 @@ func TestSessionStorageTimeoutDefaultsAgree(t *testing.T) {
     }
 }
 
-/* a boot step driven outside Boot reads the boot runtime Boot would have opened */
 func openBootRuntime(t *testing.T, applicationInstance *Application) {
     t.Helper()
 
@@ -1367,7 +1366,6 @@ func requestTypeTestHandler(runtimeInstance containercontract.Runtime, writer ne
     return http.EmptyResponse(nethttp.StatusNoContent), nil
 }
 
-/* requestTypeRefusal runs the boot's request-type verification and answers its refusal, nil when it passes. */
 func requestTypeRefusal(t *testing.T, applicationInstance *Application) (refusal *exception.Error) {
     t.Helper()
 

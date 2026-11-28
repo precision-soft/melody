@@ -186,8 +186,6 @@ func TestRegisterRequestListener_FallsThroughForAnOptionsRequestWithoutARequeste
     }
 }
 
-/* a preflight from an allowed origin that a listener ahead of this one already answered — the rate limiter's 429 among them — is decorated with the cross-origin headers rather than left opaque: the earlier listener's status stands, but a browser can now read the refusal as a rate limit instead of a bare cors failure. */
-/* a preflight an earlier kernel.request listener answered, the rate limiter's 429, never reaches the request listener; the response listener decorates it with the preflight headers, its status and body untouched */
 func TestRegisterResponseListener_DecoratesAPreflightAnEarlierListenerAnswered(t *testing.T) {
     dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
 
@@ -389,9 +387,6 @@ func TestRegisterListeners_WiresTheResponseDoorToo(t *testing.T) {
     }
 }
 
-/* The request is an application-implementable contract, so a nil pointer of a request type reaches this
-door as a non-nil interface and the read below dereferences it. The untyped literal a sibling probe passes
-is the only shape a bare comparison already catches. */
 func TestRegisterRequestListener_ATypedNilRequestIsLeftAlone(t *testing.T) {
     dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
 
@@ -493,7 +488,6 @@ func TestMiddleware_And_Listener_PassTheRequestOfTheCall(t *testing.T) {
     }
 }
 
-/* the preflight answer ends the kernel.request dispatch; it may skip the required listeners behind it, since a preflight runs no handler */
 func TestRegisterRequestListener_MaySkipTheRequiredListeners(t *testing.T) {
     dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
     RegisterRequestListener(dispatcher, NewService(Config{AllowOrigins: []string{AllowOriginAll}}))

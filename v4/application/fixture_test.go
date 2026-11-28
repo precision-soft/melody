@@ -40,14 +40,12 @@ func sessionRuntimeUnder(ctx context.Context) containercontract.Runtime {
 
 const servingTestStaticFile = "app.css"
 
-/* bootServingTestApplication answers an http application booted in the named environment from a directory of its own, a .env and one public file, under every build tag set */
 func bootServingTestApplication(t *testing.T, environmentName string, applicationConfig ApplicationConfig, prepare func(applicationInstance *Application)) *Application {
     t.Helper()
 
     return bootServingTestApplicationWithEnvironment(t, environmentName, "", applicationConfig, prepare)
 }
 
-/* bootServingTestApplicationWithEnvironment appends environmentLines, each ending in a newline, to the .env it boots with */
 func bootServingTestApplicationWithEnvironment(t *testing.T, environmentName string, environmentLines string, applicationConfig ApplicationConfig, prepare func(applicationInstance *Application)) *Application {
     t.Helper()
 
@@ -92,7 +90,6 @@ func bootServingTestApplicationWithEnvironment(t *testing.T, environmentName str
     return applicationInstance
 }
 
-/* serveTestRequest serves the request through the handler the application hands out */
 func serveTestRequest(t *testing.T, applicationInstance *Application, request *nethttp.Request) *httptest.ResponseRecorder {
     t.Helper()
 
@@ -107,7 +104,6 @@ func serveTestRequest(t *testing.T, applicationInstance *Application, request *n
     return recorder
 }
 
-/* sessionCookieOfAnIdentity saves a session holding an identity and answers its cookie */
 func sessionCookieOfAnIdentity(t *testing.T, kernelInstance kernelcontract.Kernel) *nethttp.Cookie {
     t.Helper()
 
@@ -121,7 +117,6 @@ func sessionCookieOfAnIdentity(t *testing.T, kernelInstance kernelcontract.Kerne
     return &nethttp.Cookie{Name: session.SessionCookieName, Value: sessionInstance.Id()}
 }
 
-/* registerLevelCapturingLogger replaces the application's logger with one that counts records by level */
 func registerLevelCapturingLogger(applicationInstance *Application) *levelCapturingLogger {
     logger := &levelCapturingLogger{}
 
@@ -176,7 +171,6 @@ func (instance *levelCapturingLogger) CauseChainDepth() int {
     return 8
 }
 
-/* countSince answers how many records at the level were filed after the first `from` records */
 func (instance *levelCapturingLogger) countSince(from int, level loggingcontract.Level) int {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
@@ -200,7 +194,6 @@ func (instance *levelCapturingLogger) recorded() int {
 
 const newApplicationRefusalProbeMarker = "MELODY_TEST_NEW_APPLICATION_REFUSAL_PROBE"
 
-/* expectNewApplicationRefused runs the test again in a child, which builds the application over applicationConfig: NewApplication owns the process boundary and exits on a refusal, so the child's exit and output are what is read */
 func expectNewApplicationRefused(t *testing.T, testName string, applicationConfig ApplicationConfig, expectedTexts ...string) {
     t.Helper()
 
@@ -229,7 +222,6 @@ func expectNewApplicationRefused(t *testing.T, testName string, applicationConfi
     }
 }
 
-/* freeLoopbackAddress answers a loopback address whose port the system just handed out, for a configuration whose server never serves; a test whose server serves binds through listenLoopback */
 func freeLoopbackAddress(t *testing.T) string {
     t.Helper()
 
@@ -249,7 +241,6 @@ func freeLoopbackAddress(t *testing.T) string {
 
 const servingProbePath = "/serving-probe"
 
-/* listenLoopback binds a loopback port the system hands out and keeps it bound for the server the test hands the listener to, so no other process takes the port in between */
 func listenLoopback(t *testing.T) (net.Listener, string) {
     t.Helper()
 
@@ -263,12 +254,10 @@ func listenLoopback(t *testing.T) (net.Listener, string) {
     return listener, listener.Addr().String()
 }
 
-/* servingProbeToken is what this test's own server answers on the probe route, unique to the test and the process */
 func servingProbeToken(t *testing.T) string {
     return t.Name() + "-" + strconv.Itoa(os.Getpid())
 }
 
-/* registerServingProbe answers the probe path with the test's token from an outer decorator, ahead of whatever the kernel under test would answer */
 func registerServingProbe(t *testing.T, applicationInstance *Application) {
     t.Helper()
 
@@ -287,7 +276,6 @@ func registerServingProbe(t *testing.T, applicationInstance *Application) {
     })
 }
 
-/* awaitServing asks the probe path until the test's own server answers its token, so a foreign listener on the port never passes for it */
 func awaitServing(t *testing.T, address string) {
     t.Helper()
 
@@ -320,7 +308,6 @@ func awaitServing(t *testing.T, address string) {
     t.Fatalf("the test's own server never answered on %s: %s", address, answered)
 }
 
-/* teardownWalkHolder is a service value whose teardown walk queues two items per level */
 type teardownWalkHolder struct {
     first  *teardownWalkHolder
     second *teardownWalkHolder

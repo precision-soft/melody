@@ -18,7 +18,6 @@ func manifestTestHandler(runtimeInstance containercontract.Runtime, writer netht
 func manifestTestRouter() *Router {
     router := NewRouter()
 
-    /* exposed + named + zoned */
     router.Handle(
         "/users/:id",
         manifestTestHandler,
@@ -30,14 +29,12 @@ func manifestTestRouter() *Router {
         },
     )
 
-    /* named but not exposed → excluded */
     router.Handle(
         "/internal/health",
         manifestTestHandler,
         RouteOptions{Name: "health", Methods: []string{nethttp.MethodGet}},
     )
 
-    /* exposed + named, different zone */
     router.Handle(
         "/account",
         manifestTestHandler,
@@ -54,7 +51,6 @@ func TestBuildRouteManifest_OnlyExposedNamedRoutes(t *testing.T) {
         t.Fatalf("expected only the two exposed named routes, got %d: %+v", len(manifest.Routes), manifest.Routes)
     }
 
-    /* sorted by name: account_show before user_show */
     if "account_show" != manifest.Routes[0].Name || "user_show" != manifest.Routes[1].Name {
         t.Fatalf("expected deterministic name order, got %+v", manifest.Routes)
     }
@@ -68,7 +64,6 @@ func TestBuildRouteManifest_OnlyExposedNamedRoutes(t *testing.T) {
         t.Fatalf("expected frontend zone, got %q", user.Zone)
     }
 
-    /* the manifest carries the pattern the caller DECLARED, not the anchored, non-capturing form the registration compiles: the wrapped spelling is not the developer's, it re-wraps on every round trip through NewRequirements, and it carries RE2-only syntax to consumers whose engine is not */
     if `\d+` != user.Requirements["id"] {
         t.Fatalf("expected the declared requirement to be carried, got %+v", user.Requirements)
     }
@@ -200,7 +195,6 @@ func TestFilterRouteManifestByZone_RefusesAZoneThatIsNotDeclared(t *testing.T) {
     }
 }
 
-/* the empty zone is no gate: the whole manifest, not the routes whose own zone is empty */
 func TestFilterRouteManifestByZone_ReadsAZoneWithSurroundingSpaceAsTheCommandDoes(t *testing.T) {
     manifest := BuildRouteManifest(manifestTestRouter().RouteDefinitions())
 
@@ -220,7 +214,6 @@ func TestFilterRouteManifestByZone_ReadsAZoneWithSurroundingSpaceAsTheCommandDoe
 
 }
 
-/* a zone made only of space is a zone nobody declared, not the absence of one: the trim ran before the emptiness test, so a configuration value that rendered to spaces collapsed to the empty zone and answered the manifest WHOLE — every zone, to a consumer that had asked for one. The written reason for the trim is that the door reads a zone the way the command reads its flag; a caller asking for no gate passes no zone. */
 func TestFilterRouteManifestByZone_AZoneMadeOnlyOfSpaceIsRefusedRatherThanReadAsNoGate(t *testing.T) {
     manifest := BuildRouteManifest(manifestTestRouter().RouteDefinitions())
 
@@ -239,9 +232,6 @@ func TestFilterRouteManifestByZone_AZoneMadeOnlyOfSpaceIsRefusedRatherThanReadAs
         t.Fatalf("expected the empty zone to stay the one spelling of no gate, got %d routes and %v", len(whole.Routes), wholeErr)
     }
 
-    /* the refusal names the zone AS GIVEN: trimmed first, a zone made of space is reported as the empty
-       one, which the sentence above this door says is no gate at all — the diagnostic contradicting
-       itself in the same record */
     var refusal *exception.Error
     if false == errors.As(filterErr, &refusal) {
         t.Fatalf("expected a melody error, got %T", filterErr)

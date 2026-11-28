@@ -498,7 +498,6 @@ func TestLoggerCauseChainDepth_ANilOrTypedNilLoggerAnswersTheDefault(t *testing.
     }
 }
 
-/* the nil-logger fallback writes through the raw standard logger, so keeping one record on one line is this branch's own duty; the default logger's twin is TestDefaultLogger_KeepsOneRecordOneLine */
 func TestLogError_NilLogger_KeepsOneRecordOneLine(t *testing.T) {
     var buffer bytes.Buffer
 
@@ -524,7 +523,6 @@ func TestLogError_NilLogger_KeepsOneRecordOneLine(t *testing.T) {
     }
 }
 
-/* the exception branch of the same fallback writes through the same raw standard logger, and a melody error's message is as capable of carrying a line break as a foreign error's. No suite on any major pins this half either. */
 func TestLogError_NilLogger_KeepsOneRecordOneLineForAnException(t *testing.T) {
     var buffer bytes.Buffer
 
@@ -546,7 +544,6 @@ func TestLogError_NilLogger_KeepsOneRecordOneLineForAnException(t *testing.T) {
     }
 }
 
-/* an errors.Join answers nothing at all to errors.Unwrap, so a record assembled from the single wrap link carried no cause, no chain, and the context of only whichever branch errors.As reached first — exactly where the failure had gathered what several replicas, several destinations or several rules had to say. */
 func TestLogError_AJoinedErrorCarriesEveryBranchIntoTheRecord(t *testing.T) {
     buffer := &bytes.Buffer{}
     logger := NewJsonLogger(buffer, JsonLoggerConfig{MinLevel: loggingcontract.LevelDebug})
@@ -565,7 +562,6 @@ func TestLogError_AJoinedErrorCarriesEveryBranchIntoTheRecord(t *testing.T) {
     }
 }
 
-/* LogError is reached from inside the recovery handlers, where the error is whatever a panic carried: an Error() that dereferences the very nil field that made it panic-worthy would take down the one record written to explain the failure. */
 func TestLogError_AnErrorWhoseMessagePanicsStillProducesARecord(t *testing.T) {
     buffer := &bytes.Buffer{}
     logger := NewJsonLogger(buffer, JsonLoggerConfig{MinLevel: loggingcontract.LevelDebug})
@@ -581,7 +577,6 @@ func TestLogError_AnErrorWhoseMessagePanicsStillProducesARecord(t *testing.T) {
     }
 }
 
-/* panickingMessageError is the shape the recovery handlers meet: an error whose own Error() raises */
 type panickingMessageError struct {
 }
 

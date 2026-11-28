@@ -701,12 +701,10 @@ func sessionRuntimeUnder(ctx context.Context) containercontract.Runtime {
     return runtime.NewRun(ctx, container.NewContainer(container.ContainerConfig{}).NewScope())
 }
 
-/* formTestRequestConfig carries the cap a request built without a runtime reads its form under */
 func formTestRequestConfig() RequestConfig {
     return RequestConfig{MaxBodyBytes: bound.Of(config.DefaultHttpMaxRequestBodyBytes)}
 }
 
-/* countingBody counts the reads a body answers, so a pin tells a body never touched from one read */
 type countingBody struct {
     reader io.Reader
     reads  atomic.Int64
@@ -726,7 +724,6 @@ func (instance *countingBody) Close() error {
     return nil
 }
 
-/* newFormRoutedKernel serves POST /form under the given options and POST /other under none, each handler answering the form read's error or the length of the field it read */
 func newFormRoutedKernel(t *testing.T, applicationMaxBodyBytes int, options RouteOptions, environment string) (nethttp.Handler, *recordsCaptureLogger) {
     t.Helper()
 

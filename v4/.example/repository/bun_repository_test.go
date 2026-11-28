@@ -30,8 +30,6 @@ func (instance stubResult) RowsAffected() (int64, error) {
 
 var _ sql.Result = stubResult{}
 
-/* the answer feeds a caller that has to tell a write which landed from one that found no row, so a driver that will not report a count must read as "nothing changed" rather than as a change nobody can confirm */
-
 func TestAffectedAtLeastOneRow(t *testing.T) {
     if true == affectedAtLeastOneRow(nil) {
         t.Fatalf("expected a missing result to report no change")
@@ -50,7 +48,6 @@ func TestAffectedAtLeastOneRow(t *testing.T) {
     }
 }
 
-/* identicalUpdateDatabase answers every by-id select with the row until the re-read, which finds it only when presentAtReRead holds, the uniqueness count with none, and every update with zero changed rows: what MySQL reports for an update writing the values the row already holds */
 func identicalUpdateDatabase(presentAtReRead bool) *bun.DB {
     database, recorder := newFakeBunDatabase()
     recorder.rowsAffected = func(query string) int64 {
@@ -129,7 +126,6 @@ func indexOfFirstQuery(queries []string, matcher func(query string) bool) int {
     return -1
 }
 
-/* two creates that read the identifier list before either inserted mint the same identifier; the lock is taken before the read and released after the insert, so the read of the next create sees the row of the one before */
 func TestInsertWithMintedIdentifier_ReadsAndInsertsUnderTheTablesAdvisoryLock(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = identifierMintLockAnswering(1)
@@ -200,7 +196,6 @@ func TestInsertWithMintedIdentifier_RefusesWhenTheLockIsNotTaken(t *testing.T) {
     }
 }
 
-/* a create waiting behind another create of this process holds no connection: it waits at the gate, where its context still ends it, and reaches GET_LOCK only once the gate is free */
 func TestInsertWithMintedIdentifier_WaitsAtTheProcessGateWithoutAConnection(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = identifierMintLockAnswering(1)
@@ -226,7 +221,6 @@ func TestInsertWithMintedIdentifier_WaitsAtTheProcessGateWithoutAConnection(t *t
     }
 }
 
-/* the read before the insert cannot stop a concurrent create of the same supplied identifier, so the primary key's refusal of it is answered as the read's would be */
 func TestInsertWithMintedIdentifier_AnswersThePrimaryKeysRefusalOfASuppliedIdentifierAsTaken(t *testing.T) {
     refusal := fmt.Errorf("Error 1062 (23000): Duplicate entry 'prod-supplied' for key 'melody_example_v4_product.PRIMARY'")
 
@@ -321,7 +315,6 @@ func TestSeedIfEmptyAudited_RollsBackAPartialSeed(t *testing.T) {
     }
 }
 
-/* a seed that lost to another process's seed rolls back, reads the count again and leaves the table the winner filled */
 func TestSeedIfEmptyAudited_LeavesATableAnotherProcessSeededFirst(t *testing.T) {
     database, recorder := newFakeBunDatabase()
 
@@ -366,7 +359,6 @@ func countEqual(queries []string, statement string) int {
     return count
 }
 
-/* the mint continues past the floor the sequence keeps, not past the highest identifier present, and the create raises the sequence to what it stored */
 func TestInsertWithMintedIdentifier_MintsPastTheSequenceAndRecordsWhatItStored(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = func(query string) ([]string, [][]driver.Value, error) {
@@ -410,7 +402,6 @@ func isCategoryInsert(query string) bool {
     return true == strings.HasPrefix(query, "INSERT INTO `melody_example_v4_category`")
 }
 
-/* the sequence is raised before the row is stored, on the minted path and on the supplied one: the insert commits on its own, so a raise after it could fail over a stored row */
 func TestInsertWithMintedIdentifier_RaisesTheSequenceBeforeTheInsert(t *testing.T) {
     for _, supplied := range []string{"", "cat-9"} {
         database, recorder := newFakeBunDatabase()
@@ -428,7 +419,6 @@ func TestInsertWithMintedIdentifier_RaisesTheSequenceBeforeTheInsert(t *testing.
     }
 }
 
-/* a raise that fails stores nothing, so no create answers an error over a row it stored */
 func TestInsertWithMintedIdentifier_AFailedRaiseStoresNothing(t *testing.T) {
     database, _ := newFakeBunDatabase()
     _ = database.DB.Close()
@@ -453,7 +443,6 @@ func TestInsertWithMintedIdentifier_AFailedRaiseStoresNothing(t *testing.T) {
     }
 }
 
-/* the seed raises the sequence to its highest identifier ahead of its rows, so the newest seeded entity's identifier is never minted again after its delete */
 func TestBunProductRepositorySeed_RaisesTheSequenceOverTheSeed(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = countingRows(0)
@@ -472,7 +461,6 @@ func TestBunProductRepositorySeed_RaisesTheSequenceOverTheSeed(t *testing.T) {
     }
 }
 
-/* a supplied create takes no lock, so it can store the identifier the mint chose between the read and the insert; it raised the floor before it stored, so the mint made again reads past it */
 func mintRacedBySuppliedIdentifiers(losses int) (*queryRecorder, *bun.DB) {
     database, recorder := newFakeBunDatabase()
 
@@ -594,7 +582,6 @@ func TestBunProductRepository_DeleteLocksTheRowAndRecordsInTheSameTransaction(t 
     }
 }
 
-/* the second of two concurrent deletes finds no row once the first committed: it answers false, deletes nothing and records nothing */
 func TestBunProductRepository_DeleteOfAnAbsentRowAnswersFalseAndWritesNothing(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = productRowAnswering(false)

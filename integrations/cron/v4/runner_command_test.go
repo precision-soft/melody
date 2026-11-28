@@ -33,7 +33,6 @@ type recordingCommand struct {
     commandName string
     runCount    int
     runErr      error
-    /* a service the run resolves from its scope before it answers */
     resolveName string
 }
 
@@ -228,7 +227,6 @@ type blockingCommand struct {
     commandName    string
     started        chan struct{}
     completedCount atomic.Int32
-    /* completionDelay holds the job inside Run after its context is cancelled, so a loop that returns without waiting for its in-flight jobs is observed returning FIRST rather than winning a race it usually loses */
     completionDelay time.Duration
 }
 
@@ -261,7 +259,6 @@ func (instance *blockingCommand) Run(runtimeInstance containercontract.Runtime, 
     return nil
 }
 
-/* failingCloseService is a scoped service whose close fails: the child scope that built it fails its own close with it */
 type failingCloseService struct {
     closeErr error
 }
@@ -272,7 +269,6 @@ func (instance *failingCloseService) CloseWithContext(closeContext context.Conte
 
 const failingCloseServiceName = "test.failing.close"
 
-/* newFailingChildScopeRuntime answers a run runtime whose every child scope fails its close once the command resolved failingCloseServiceName */
 func newFailingChildScopeRuntime(t *testing.T, closeErr error) containercontract.Runtime {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     serviceContainer.MustRegisterScoped(
@@ -520,7 +516,7 @@ func TestRunnerCommand_CommandContextArgsIsUsable(t *testing.T) {
     }
 }
 
-/* the fake clock returns an instant just before the targeted minute while the loop anchors the chain and arms the timer, then a stepped-back instant for every later read; only an evaluation pinned to the armed minute still fires the schedule, and the stepped-back reads may only influence the arming of later wakes. */
+/* just before the targeted minute while the loop arms, then a stepped-back instant for every later read */
 func TestRunnerCommand_LoopEvaluatesTheTimerTargetedMinute(t *testing.T) {
     ran := make(chan struct{}, 1)
     job := &signalingCommand{commandName: "job:targeted", ran: ran}
@@ -584,7 +580,6 @@ func TestRunnerCommand_RunDueRunsDueEntriesConcurrently(t *testing.T) {
     }
 }
 
-/* the job blocks until the runtime context is cancelled, so a second start signal while no run has completed proves the loop armed and fired the next minute without waiting on the running job — and that an entry may overlap itself. */
 func TestRunnerCommand_LoopTicksWhileAJobIsStillRunning(t *testing.T) {
     started := make(chan struct{}, 16)
     job := &blockingCommand{commandName: "job:blocking", started: started}
@@ -646,7 +641,6 @@ func TestRunnerCommand_LoopTicksWhileAJobIsStillRunning(t *testing.T) {
     }
 }
 
-/* the job holds itself inside Run for completionDelay after the cancellation reaches its child context, so the two events are ordered rather than raced: a loop that abandons its in-flight jobs returns while the job is still sleeping, and the assertion below sees completedCount==0 every time. Without that delay both goroutines wake on the same cancel() and the job wins by luck, so the test would pass with inFlight.Wait() removed. */
 func TestRunnerCommand_LoopWaitsForInFlightJobsOnCancellation(t *testing.T) {
     started := make(chan struct{}, 1)
     job := &blockingCommand{commandName: "job:blocking", started: started, completionDelay: 250 * time.Millisecond}
@@ -719,7 +713,6 @@ func TestRunnerCommand_InvokeReportsChildScopeCloseError(t *testing.T) {
         t.Fatal("expected the child scope close error to surface from invoke")
     }
 
-    /* the child scope reports its service's close failure in its context, not as a wrapped cause */
     if false == strings.Contains(fmt.Sprintf("%v", exception.LogContext(invokeErr, exception.LogContextOptions{})), scopeCloseErr.Error()) {
         t.Fatalf("expected the invoke error to carry the scope close error, got %v", exception.LogContext(invokeErr, exception.LogContextOptions{}))
     }
@@ -810,7 +803,7 @@ func TestRunnerCommand_UnknownDialectPanicsAtConstruction(t *testing.T) {
     NewRunnerCommand(configuration, RunnerConfig{Dialect: RunnerDialect("solaris"), Commands: []clicontract.Command{job}})
 }
 
-/* the schedule steps the day of month across the odd days and pins Monday; 2026-07-20 is an even-numbered Monday, so it is due only under the kubernetes dialect's or rule, proving the configured dialect reaches every entry's matcher on the runDue path the --once flag uses. The zero-value dialect is asserted against the named crontab constant through the same entries. */
+/* 2026-07-20 is an even-numbered Monday, due only under the kubernetes dialect's or rule */
 func TestRunnerCommand_DialectReachesTheEntryMatchers(t *testing.T) {
     at := time.Date(2026, time.July, 20, 0, 0, 0, 0, time.UTC)
     if time.Monday != at.Weekday() {
@@ -849,7 +842,6 @@ func TestRunnerCommand_DialectReachesTheEntryMatchers(t *testing.T) {
     }
 }
 
-/* drives reconcileWallClock through every absolute minute of one local span, the way the loop wakes, and counts how often each entry class fires; the fixed-time matcher pins 03:30 so daylight-saving days prove the once-and-only-once property. */
 func driveReconciledSpan(
     t *testing.T,
     spanStart time.Time,
@@ -1034,7 +1026,7 @@ func TestReconcileWallClock_LargeJumpReanchorsWithoutCatchUp(t *testing.T) {
     }
 }
 
-/* Europe/Bucharest 2026-03-29: 03:00 EET jumps to 04:00 EEST, so the 03:00-03:59 wall minutes never exist; the catch-up must still evaluate them once for fixed-time entries while wildcard entries fire once per absolute minute (a 23-hour day). */
+/* Europe/Bucharest 2026-03-29: 03:00 EET jumps to 04:00 EEST, so the 03:00-03:59 wall minutes never exist */
 func TestReconcileWallClock_SpringForwardRunsAFixedTimeEntryExactlyOnce(t *testing.T) {
     bucharest, locationErr := time.LoadLocation("Europe/Bucharest")
     if nil != locationErr {
@@ -1062,7 +1054,7 @@ func TestReconcileWallClock_SpringForwardRunsAFixedTimeEntryExactlyOnce(t *testi
     }
 }
 
-/* Europe/Bucharest 2026-10-25: 04:00 EEST falls back to 03:00 EET, so the 03:00-03:59 wall minutes repeat; fixed-time entries must stay suppressed on the repeat while wildcard entries fire once per absolute minute (a 25-hour day, so 60 wall doubles). */
+/* Europe/Bucharest 2026-10-25: 04:00 EEST falls back to 03:00 EET, so the 03:00-03:59 wall minutes repeat */
 func TestReconcileWallClock_FallBackRunsAFixedTimeEntryExactlyOnce(t *testing.T) {
     bucharest, locationErr := time.LoadLocation("Europe/Bucharest")
     if nil != locationErr {
@@ -1132,7 +1124,6 @@ func (instance *exitCoderCommand) Run(runtimeInstance containercontract.Runtime,
     return exception.NewExitError(3, exception.NewError("the job failed with an exit code", nil, nil))
 }
 
-/* the returned error carries an exit code, which the cli library's default handler turns into os.Exit; the runner must return it as a plain failure instead — a red run here does not merely fail, it kills the whole test process. */
 func TestRunnerCommand_ExitCoderErrorIsReturnedInsteadOfExitingTheScheduler(t *testing.T) {
     exiting := &exitCoderCommand{commandName: "job:exiting"}
     healthy := newRecordingCommand("job:healthy")
@@ -1186,7 +1177,6 @@ func TestRunnerCommand_DuplicateCommandNamePanicsAtConstruction(t *testing.T) {
     NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{newRecordingCommand("job:top"), newRecordingCommand("job:top")}})
 }
 
-/* an entry naming a system user admitted by RunnerConfig.EntryUserIgnored runs in-process as the process user */
 func TestRunnerCommand_AnAdmittedUserEntryRunsAsTheProcessUser(t *testing.T) {
     job := newRecordingCommand("job:user")
 
@@ -1205,7 +1195,7 @@ func TestRunnerCommand_AnAdmittedUserEntryRunsAsTheProcessUser(t *testing.T) {
     }
 }
 
-/* the fake clock returns an instant just before a minute boundary once, for both the chain anchor and the first arming; a second read after the boundary would manufacture a two-minute jump on which a wildcard entry pinned to the boundary minute never fires. */
+/* just before a minute boundary once: a second read past it would manufacture a two-minute jump */
 func TestRunnerCommand_LoopAnchorsAndArmsFromOneClockRead(t *testing.T) {
     ran := make(chan struct{}, 1)
     job := &signalingCommand{commandName: "job:boundary", ran: ran}
@@ -1278,7 +1268,6 @@ func (instance *countingCommand) Run(runtimeInstance containercontract.Runtime, 
     return nil
 }
 
-/* a backward wall step inside the armed window makes the loop arm a second time for the minute it just dispatched (the evaluation is pinned to the armed minute, so the step does not move it): the fake clock wakes for 10:00 from 09:59:59.900, steps back to 09:59:59.890, and the re-arm renders 10:00 again. The wildcard entry must run once for that minute, not twice seconds apart — the repeated wall minute of a fall-back is the other case, and a whole hour of other minutes runs in between there. */
 func TestRunnerCommand_LoopDoesNotRedispatchTheMinuteItJustDispatched(t *testing.T) {
     ran := make(chan struct{}, 8)
     job := &countingCommand{commandName: "job:every-minute", ran: ran}
@@ -1296,7 +1285,6 @@ func TestRunnerCommand_LoopDoesNotRedispatchTheMinuteItJustDispatched(t *testing
         case 1:
             return boundary.Add(-100 * time.Millisecond)
         case 2:
-            /* the wall clock stepped back inside the armed window, so the re-arm targets the same minute again */
             return boundary.Add(-110 * time.Millisecond)
         }
 
@@ -1336,7 +1324,6 @@ func TestRunnerCommand_LoopDoesNotRedispatchTheMinuteItJustDispatched(t *testing
     }
 }
 
-/* drives the real runner loop across the Europe/Bucharest 2026-10-25 fall-back: the first wake fires the 03:30 fixed-time entry on the first pass of the repeated hour, the second wake lands on the repeat (04:00 EEST renders as 03:00 EET, a backward jump), and the third wake re-reaches the pinned 03:30 on the repeat — the dispatch class filter must keep the fixed-time entry suppressed there while the wildcard entry follows every wake. */
 func TestRunnerCommand_LoopSuppressesAFixedTimeEntryAcrossTheFallBackRepeat(t *testing.T) {
     bucharest, locationErr := time.LoadLocation("Europe/Bucharest")
     if nil != locationErr {
@@ -1355,7 +1342,7 @@ func TestRunnerCommand_LoopSuppressesAFixedTimeEntryAcrossTheFallBackRepeat(t *t
 
     runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{fixedJob, wildcardJob}})
 
-    /* 03:30 EEST, then 30 absolute minutes later 04:00 EEST (which renders as 03:00 EET), then 30 more to the repeated 03:30 EET — each approached 10ms before the boundary; after the third wake the clock rests just past 03:30 EET so the fourth arming waits a full minute and cancellation wins. The instant is built from the unambiguous 02:30 EEST, since 03:30 renders twice on this day. */
+    /* 03:30 EEST, then 04:00 EEST (03:00 EET), then the repeated 03:30 EET, each approached 10ms before the boundary */
     firstPass := time.Date(2026, time.October, 25, 2, 30, 0, 0, bucharest).Add(time.Hour)
     if 3 != firstPass.Hour() || 30 != firstPass.Minute() {
         t.Fatalf("expected the first pass to render 03:30 EEST, got %v", firstPass)
@@ -1435,7 +1422,6 @@ func TestRunnerCommand_LoopStopsOnContextCancellation(t *testing.T) {
     }
 }
 
-/* contextWatchingCommand returns the moment its context is cancelled, the way a command written against the runtime context behaves when its deadline fires. */
 type contextWatchingCommand struct {
     commandName string
     started     chan struct{}
@@ -1458,7 +1444,6 @@ func (instance *contextWatchingCommand) Flags() []clicontract.Flag {
 }
 
 func (instance *contextWatchingCommand) Run(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
-    /* a non-blocking mark rather than a close, so the command survives being dispatched more than once */
     select {
     case instance.started <- struct{}{}:
     default:
@@ -1469,12 +1454,10 @@ func (instance *contextWatchingCommand) Run(runtimeInstance containercontract.Ru
     return runtimeInstance.Context().Err()
 }
 
-/* wedgedCommand never looks at its context, the way a command blocked on a deadline-less network read behaves; only the test lets it go. */
 type wedgedCommand struct {
     commandName string
     started     chan struct{}
     release     chan struct{}
-    /* a service the run resolves from its scope before it wedges */
     resolveName string
 }
 
@@ -1506,7 +1489,6 @@ func (instance *wedgedCommand) Run(runtimeInstance containercontract.Runtime, co
     return nil
 }
 
-/* sleepingCommand runs for a fixed span without watching its context, so an entry that opted out of the deadline can be shown to still run to completion. */
 type sleepingCommand struct {
     commandName string
     duration    time.Duration
@@ -1533,7 +1515,6 @@ func (instance *sleepingCommand) Run(runtimeInstance containercontract.Runtime, 
     return nil
 }
 
-/* closeCountingService is a scoped service counting its closes: the child scope that built it closes it once */
 type closeCountingService struct {
     closed *atomic.Int64
 }
@@ -1546,7 +1527,6 @@ func (instance *closeCountingService) CloseWithContext(closeContext context.Cont
 
 const closeCountingServiceName = "test.close.counting"
 
-/* newCloseCountingRuntime answers a run runtime whose child scopes count their closes once the command resolved closeCountingServiceName */
 func newCloseCountingRuntime(closed *atomic.Int64) containercontract.Runtime {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     serviceContainer.MustRegisterScoped(
@@ -1579,7 +1559,6 @@ func TestRunnerCommand_EntryTimeoutDefaultsAndOverrides(t *testing.T) {
     }
 }
 
-/* a command that watches its context is cancelled by the deadline and unwinds on its own; the failure must reach the caller naming the timeout rather than being reported as a plain command error. */
 func TestRunnerCommand_TimeoutCancelsACommandThatWatchesItsContext(t *testing.T) {
     job := newContextWatchingCommand("job:top")
 
@@ -1616,13 +1595,11 @@ func TestRunnerCommand_TimeoutCancelsACommandThatWatchesItsContext(t *testing.T)
         t.Fatal("expected the command to have run")
     }
 
-    /* the dispatch path must surface it too, rather than dropping a command nothing waited for */
     if runDueErr := runner.runDue(newRunnerTestRuntime(context.Background()), at); nil == runDueErr {
         t.Fatal("expected the aggregated dispatch to report the timed-out command")
     }
 }
 
-/* the deadline must also hold against a command that never looks at its context — that is the shape which leaks — and the child scope must be released on that path rather than held for a goroutine that may never return. */
 func TestRunnerCommand_WedgedCommandIsAbandonedAndItsScopeReleased(t *testing.T) {
     job := newWedgedCommand("job:top")
     defer close(job.release)
@@ -1667,7 +1644,6 @@ func TestRunnerCommand_WedgedCommandIsAbandonedAndItsScopeReleased(t *testing.T)
     <-job.started
 }
 
-/* an entry that opts out of the deadline is unbounded: the runner waits for the command however long it takes. */
 func TestRunnerCommand_UnlimitedTimeoutOptsOutOfTheDeadline(t *testing.T) {
     job := &sleepingCommand{commandName: "job:top", duration: 150 * time.Millisecond}
 
@@ -1686,7 +1662,6 @@ func TestRunnerCommand_UnlimitedTimeoutOptsOutOfTheDeadline(t *testing.T) {
     }
 }
 
-/* a command shorter than its deadline is unaffected: no timeout is reported and its own outcome stands. */
 func TestRunnerCommand_CommandInsideItsTimeoutIsUntouched(t *testing.T) {
     job := &sleepingCommand{commandName: "job:top", duration: 10 * time.Millisecond}
 
@@ -1742,7 +1717,6 @@ func TestResolveEntryTimeout_AnAbsentTimeoutTakesTheRunnersAndAPresentOneBeatsIt
     }
 }
 
-/* the unwind window is per entry, because how long an honest unwind takes is a property of the work rather than of the runner: a batch to flush is not a job that returns the moment its context is cancelled. An entry that names none falls to the runner's window. */
 func TestShutdownTimeoutOf_TakesTheEntrysOwnWindowAndFallsBackToTheRunnersWindow(t *testing.T) {
     runner := NewRunnerCommand(nil, RunnerConfig{ShutdownTimeout: bound.Of(7 * time.Minute)})
 
@@ -1766,7 +1740,6 @@ func TestShutdownTimeoutOf_TakesTheEntrysOwnWindowAndFallsBackToTheRunnersWindow
     }
 }
 
-/* the window an entry names governs the run end to end, not just the resolver: this drives the real invoke with a command that ignores its context and asserts the abandon lands after the entry's window rather than after the runner's much longer default. */
 func TestRunnerCommand_AnEntrysGracefulWindowGovernsWhenItIsAbandoned(t *testing.T) {
     job := newWedgedCommand("job:top")
     defer close(job.release)
@@ -1888,7 +1861,7 @@ func TestRunnerCommand_TheAbandonErrorNamesTheWindowTheRunWasActuallyGiven(t *te
     }
 }
 
-/* the outer select cannot be made to see both cases ready from outside the runner — the window is one scheduling instant — so the branch is driven directly, with the completion already in the channel, which is the state that window produces. */
+/* driven directly: the window where the outer select sees both cases ready is one scheduling instant */
 func TestResolveAbandonedRun_ACommandThatAlreadyAnsweredReportsItsOwnOutcome(t *testing.T) {
     runner := &RunnerCommand{shutdownTimeout: runnerShutdownTimeoutRule.Default}
     entry := &scheduledRunEntry{commandName: "job:top", timeout: time.Minute}
@@ -1937,7 +1910,6 @@ func TestResolveAbandonedRun_ACommandStillRunningIsReportedAbandoned(t *testing.
     }
 }
 
-/* a command that answered with its deadline already exceeded keeps its own error beside the timeout, the way the completion branch of the outer select reports it. */
 func TestResolveAbandonedRun_ADeadlineExceededAnswerCarriesBothFailures(t *testing.T) {
     runner := &RunnerCommand{shutdownTimeout: runnerShutdownTimeoutRule.Default}
     entry := &scheduledRunEntry{commandName: "job:top", timeout: time.Minute}
@@ -2072,7 +2044,6 @@ func (instance *capturingRunnerLogger) recordByContextValue(key string, value st
 
 func TestRunnerCommand_DispatchFailureRecordCarriesTheExceptionContext(t *testing.T) {
     panickingJob := &panickingCommand{commandName: "job:panicking"}
-    /* a plain error carries no exception context of its own, so the record's commandName can come only from the dispatch site — the panicking sibling's failure already names the command inside its exception context and cannot prove that half */
     plainJob := &recordingCommand{commandName: "job:plain", runErr: errors.New("plain failure")}
 
     configuration := NewConfiguration().
@@ -2159,7 +2130,6 @@ func TestRunnerCommand_DestinationFileEntryPanicsAtConstruction(t *testing.T) {
     NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
 }
 
-/* an entry naming a system user is refused by the in-process runner, naming the command, the user and the door; RunnerConfig.EntryUserIgnored admits it */
 func TestRunnerCommand_AnEntryUserIsRefusedAtConstructionUnlessEntryUserIgnored(t *testing.T) {
     configuration := NewConfiguration().
         Schedule("job:as-user", EntryConfig{
@@ -2219,7 +2189,6 @@ func (instance *identityProbeCommand) Run(runtimeInstance containercontract.Runt
     return nil
 }
 
-/* the child scope carries the console identity the cli entry point installs into its own: a fresh per-run ProcessContext and a logger that keeps the runner's processId while adding the run's cronRunId. */
 func TestRunnerCommand_InvokeInstallsThePerRunIdentity(t *testing.T) {
     job := &identityProbeCommand{commandName: "job:identity"}
 
@@ -2281,7 +2250,6 @@ func TestRunnerCommand_InvokeInstallsThePerRunIdentity(t *testing.T) {
     }
 }
 
-/* the runner accepts the standard flags every melody command carries, so the framework's -v rewrite parses, and it carries its own two beside them. Asserted by name rather than by count, since a count passes when a standard flag is swapped for another. */
 func TestRunnerCommand_CarriesTheStandardFlags(t *testing.T) {
     runner := NewRunnerCommand(NewConfiguration(), RunnerConfig{})
 
@@ -2304,12 +2272,10 @@ func TestRunnerCommand_CarriesTheStandardFlags(t *testing.T) {
     }
 }
 
-/* invokeUnderAFreshRunId mints the run id the dispatch would, for the tests that drive one run directly; the runId's presence on the records has its own test. */
 func invokeUnderAFreshRunId(runner *RunnerCommand, runtimeInstance containercontract.Runtime, entry *scheduledRunEntry) error {
     return runner.invokeRun(runtimeInstance, entry, logging.GenerateProcessId())
 }
 
-/* the classification that keeps a clean shutdown out of the failure aggregate: only the parent's cancellation qualifies, and a deadline the entry asked for stays a failure whatever the shutdown is doing. */
 func TestIsShutdownCancellation_OnlyTheParentsCancellationQualifies(t *testing.T) {
     cancelledContext, cancel := context.WithCancel(context.Background())
     cancel()
@@ -2328,7 +2294,6 @@ func TestIsShutdownCancellation_OnlyTheParentsCancellationQualifies(t *testing.T
         t.Fatal("expected the entry's own deadline to stay a failure under shutdown")
     }
 
-    /* the portant input for the deadline clause: a run both cancelled and deadline-cut answers a join carrying both flavors, and the deadline half must keep it a failure — on the bare DeadlineExceeded the clause is shadowed by the Canceled test above it */
     if true == isShutdownCancellation(cancelledRuntime, errors.Join(context.DeadlineExceeded, context.Canceled)) {
         t.Fatal("expected a deadline-cut run to stay a failure even when the shutdown's cancellation rides the same join")
     }
@@ -2338,7 +2303,6 @@ func TestIsShutdownCancellation_OnlyTheParentsCancellationQualifies(t *testing.T
     }
 }
 
-/* the runner's recovery boundary keeps what an operator needs: the panic value travels as the cause so errors.Is still reaches the failure underneath, and the stack is captured on the goroutine that raised it, so the record carries a file and a line. */
 func TestRunnerCommand_APanickingJobKeepsItsCauseAndItsStack(t *testing.T) {
     rootCause := errors.New("dial tcp 10.0.0.7:5432: connect: connection refused")
 
@@ -2394,7 +2358,6 @@ func TestRunnerCommand_APanickingJobKeepsItsCauseAndItsStack(t *testing.T) {
     }
 }
 
-/* a typed-nil panic value must not reach the cause slot: its Error() dereferences a nil receiver, and the render of the very record the boundary exists to write would take the scheduler down with it. */
 func TestRunnerCommand_ATypedNilPanicValueIsNotHandedOnAsACause(t *testing.T) {
     var typedNil *exception.Error
 
@@ -2423,7 +2386,6 @@ func TestRunnerCommand_ATypedNilPanicValueIsNotHandedOnAsACause(t *testing.T) {
         t.Fatal("expected the panicking job to fail the run")
     }
 
-    /* the record renders, which is what a cause holding the typed nil would have taken away */
     if _, found := captured.recordByContextValue("commandName", "job:panicking"); false == found {
         t.Fatal("expected the failure record to be written rather than lost to a second panic")
     }
@@ -2450,7 +2412,6 @@ func (instance *idiomaticPanickingCommand) Run(runtimeInstance containercontract
     panic(instance.panicValue)
 }
 
-/* outputRecordFor reads the one record carrying a job's own output, which the failure lookup beside it cannot answer: that one filters on the dispatch failure message, and a successful run files no failure at all */
 func (instance *capturingRunnerLogger) outputRecordFor(commandName string) (capturedRunnerRecord, bool) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
@@ -2499,7 +2460,6 @@ func (instance *outputWritingProbeCommand) Run(runtimeInstance containercontract
     return writeErr
 }
 
-/* a job's own output belongs in the journal rather than on the os.Stdout concurrent entries share, where several reports would interleave and none would reach the log file the operator reads; the runner writes nothing to the command output itself. */
 func TestRunnerCommand_ScheduledJobOutputIsCapturedIntoTheJournal(t *testing.T) {
     job := &outputWritingProbeCommand{commandName: "job:reporting", output: "SYNCED 42 ROWS\n"}
 
@@ -2533,12 +2493,10 @@ func TestRunnerCommand_ScheduledJobOutputIsCapturedIntoTheJournal(t *testing.T) 
         t.Fatalf("expected the job's own output in the record, got %#v", record.context["commandOutput"])
     }
 
-    /* the run id ties the output to the run that produced it, which is the whole point under overlapping runs of one entry */
     if runId, hasRunId := record.context["cronRunId"].(string); false == hasRunId || "" == runId {
         t.Fatalf("expected the record to name the run, got %#v", record.context["cronRunId"])
     }
 
-    /* a job that printed nothing files nothing: an empty record per entry per minute would bury the runner's own lines */
     silent := &outputWritingProbeCommand{commandName: "job:silent", output: ""}
     silentConfiguration := NewConfiguration().
         Schedule("job:silent", EntryConfig{Schedule: &Schedule{Minute: "0"}})
@@ -2565,7 +2523,6 @@ func TestRunnerCommand_ScheduledJobOutputIsCapturedIntoTheJournal(t *testing.T) 
     }
 }
 
-/* what one run may contribute to the journal is bounded: a job printing a row per record would write its whole result set into one log line, and the failure of the log would be caused by the reporting meant to make the run visible. What was cut is counted, so a truncated report never reads as a complete one — and the job must not discover the budget as a short write on its own report. */
 func TestRunnerCommand_ScheduledJobOutputIsBoundedAndSaysWhatItCut(t *testing.T) {
     oversized := strings.Repeat("x", runnerOutputCaptureLimitRule.Default+512)
     job := &outputWritingProbeCommand{commandName: "job:verbose", output: oversized}
@@ -2585,7 +2542,6 @@ func TestRunnerCommand_ScheduledJobOutputIsBoundedAndSaysWhatItCut(t *testing.T)
 
     at := time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
 
-    /* the run has to succeed: a short write answered to the job would come back as the job's own failure */
     if runErr := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}}).runDue(
         runtime.NewRun(context.Background(), serviceContainer.NewScope()),
         at,
@@ -2608,7 +2564,6 @@ func TestRunnerCommand_ScheduledJobOutputIsBoundedAndSaysWhatItCut(t *testing.T)
     }
 }
 
-/* the writer itself is where two of its rules live, and neither is observable through a job that writes once: the budget is counted against what is already held, so a second write has to see the first, and the full length is always reported because a short write is an io.Writer contract violation the standard library answers with an error the job would then return as its own failure. */
 func TestScheduledOutputCapture_ReportsTheFullLengthAndBoundsWhatItKeeps(t *testing.T) {
     capture := newScheduledOutputCapture(runnerOutputCaptureLimitRule.Default)
 
@@ -2634,7 +2589,6 @@ func TestScheduledOutputCapture_ReportsTheFullLengthAndBoundsWhatItKeeps(t *test
         t.Fatalf("expected the overrun to be counted, got %d", dropped)
     }
 
-    /* a write arriving after the budget is exhausted is still answered in full and still counted */
     thirdWritten, thirdErr := capture.Write([]byte("ccc"))
     if nil != thirdErr || 3 != thirdWritten {
         t.Fatalf("expected the write past the budget to be answered in full, got %d, %v", thirdWritten, thirdErr)
@@ -2646,7 +2600,6 @@ func TestScheduledOutputCapture_ReportsTheFullLengthAndBoundsWhatItKeeps(t *test
     }
 }
 
-/* an entry declares its own posture, because the runner has none to lend it: the dispatch hands the child the entry's arguments, so the job runs the command line the manifest generated from the same Configuration runs. */
 func TestRunnerCommand_EntryArgumentsReachTheScheduledCommand(t *testing.T) {
     job := &outputWritingProbeCommand{commandName: "job:posture", output: "done\n"}
 
@@ -2658,7 +2611,6 @@ func TestRunnerCommand_EntryArgumentsReachTheScheduledCommand(t *testing.T) {
             Arguments: entryArguments,
         })
 
-    /* the registrant keeps writing to its own slice: what was registered is what stays in force */
     entryArguments[0] = "--format=table"
 
     runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
@@ -2673,7 +2625,6 @@ func TestRunnerCommand_EntryArgumentsReachTheScheduledCommand(t *testing.T) {
     }
 }
 
-/* newCapturingRunnerRuntime is a runtime whose logger records every line, which is how the runner's own declarations and failure records are read back. */
 func newCapturingRunnerRuntime(ctx context.Context) (containercontract.Runtime, *capturingRunnerLogger) {
     captured := &capturingRunnerLogger{}
     serviceContainer := container.NewContainer(container.ContainerConfig{})
@@ -2688,7 +2639,6 @@ func newCapturingRunnerRuntime(ctx context.Context) (containercontract.Runtime, 
     return runtime.NewRun(ctx, serviceContainer.NewScope()), captured
 }
 
-/* TestRunnerCommand_OnceRendersTheMachineDocument pins the document a deploy step reads: `melody:cron:run --once --format=json | jq` must receive a document, since an empty stream is indistinguishable from a missing binary. */
 func TestRunnerCommand_OnceRendersTheMachineDocument(t *testing.T) {
     job := newRecordingCommand("job:top")
 
@@ -2759,7 +2709,6 @@ func TestRunnerCommand_OnceRendersTheMachineDocument(t *testing.T) {
     }
 }
 
-/* a failed run puts the failure inside the envelope's error, naming which command failed, so the document reports the same verdict as the exit code */
 func TestRunnerCommand_OnceRendersTheFailureInsideTheDocument(t *testing.T) {
     failing := newRecordingCommand("job:failing")
     failing.runErr = errors.New("boom")
@@ -2819,7 +2768,6 @@ func TestRunnerCommand_OnceRendersTheFailureInsideTheDocument(t *testing.T) {
     }
 }
 
-/* TestRunnerCommand_DeclaresWhatItDrives pins the declaration a scheduler writes before it drives anything, so a scheduler whose configuration was emptied or whose entries an environment gate filtered away is distinguishable from a healthy one. */
 func TestRunnerCommand_DeclaresWhatItDrives(t *testing.T) {
     job := newRecordingCommand("job:top")
 
@@ -2855,7 +2803,6 @@ func TestRunnerCommand_DeclaresWhatItDrives(t *testing.T) {
     }
 }
 
-/* a runner driving nothing says so at warning, mirroring the generator's own nothingToWrite: a configuration emptied by a refactor is exactly the case where silence reads as health */
 func TestRunnerCommand_DeclaresAnEmptyScheduleAsAWarning(t *testing.T) {
     runner := NewRunnerCommand(NewConfiguration(), RunnerConfig{})
 
@@ -2873,7 +2820,6 @@ func TestRunnerCommand_DeclaresAnEmptyScheduleAsAWarning(t *testing.T) {
     }
 }
 
-/* TestRunScheduledCommand_APanicKeepsItsCauseChain pins the record a panicking job produces: errors.Join answers an Unwrap of []error while exception.LogContext anchors cause and causeChain on the single-value form, so the boundary carries the panic down one chain and the record keeps the context naming the parameter and the chain naming what refused, as the same failure returned does. */
 func TestRunScheduledCommand_APanicKeepsItsCauseChain(t *testing.T) {
     dialErr := errors.New("dial tcp 10.0.0.9:5432: connect: connection refused")
 
@@ -2920,7 +2866,6 @@ func TestRunScheduledCommand_APanicKeepsItsCauseChain(t *testing.T) {
         t.Fatalf("expected the chain to reach what refused, got %v", causeChain)
     }
 
-    /* the context of the panic error travels under causeContextChain, where LogContext files the context of every link below the top one: the ledger and the endpoint are what tells an outage from a credential change from a wiring fault */
     causeContextChain, isContextChain := record.context["causeContextChain"].([]map[string]any)
     if false == isContextChain || 0 == len(causeContextChain) {
         t.Fatalf("expected the cause context chain in the record, got %v", record.context["causeContextChain"])
@@ -2935,7 +2880,6 @@ func TestRunScheduledCommand_APanicKeepsItsCauseChain(t *testing.T) {
     }
 }
 
-/* panicValueCommand panics with a value the test chooses, so the boundary's handling of a rich error-shaped panic is observable */
 type panicValueCommand struct {
     commandName string
     panicValue  any
@@ -2957,7 +2901,6 @@ func (instance *panicValueCommand) Run(runtimeInstance containercontract.Runtime
     panic(instance.panicValue)
 }
 
-/* a timeout carries the command's own failure down one chain: both stay reachable by identity, and the record built from that chain reaches the command's own context instead of stopping at the join */
 func TestTimeoutError_CarriesTheCommandFailureDownOneChain(t *testing.T) {
     runner := &RunnerCommand{shutdownTimeout: runnerShutdownTimeoutRule.Default}
     entry := &scheduledRunEntry{commandName: "job:top", timeout: time.Minute}
@@ -2990,7 +2933,6 @@ func TestTimeoutError_CarriesTheCommandFailureDownOneChain(t *testing.T) {
     }
 }
 
-/* a timeout with no command failure keeps the sentinel alone as its cause, so the shape a caller reads does not change with the presence of a second error */
 func TestTimeoutError_WithoutACommandFailureWrapsTheSentinelAlone(t *testing.T) {
     runner := &RunnerCommand{shutdownTimeout: runnerShutdownTimeoutRule.Default}
     entry := &scheduledRunEntry{commandName: "job:top", timeout: time.Minute}
@@ -3018,7 +2960,6 @@ func TestRunnerCommand_TheAbandonErrorsNameTheWindowUnderShutdownTimeout(t *test
     }
 }
 
-/* TestInvoke_ACommandFailureAndAScopeCloseFailureBothSurvive pins the scope-close boundary: the command's own failure stays the wrapped one, so its context and cause chain reach the record, and the close failure travels beside it in the context, since a join would empty both. */
 func TestInvoke_ACommandFailureAndAScopeCloseFailureBothSurvive(t *testing.T) {
     job := newRecordingCommand("job:top")
     job.runErr = exception.NewError(
@@ -3074,7 +3015,6 @@ func TestInvoke_ACommandFailureAndAScopeCloseFailureBothSurvive(t *testing.T) {
     }
 }
 
-/* TestRunLoop_IsSilentOnAMinuteThatDispatchedNothing pins the default posture of the scheduler loop's document. A per-minute document for an entry that runs once a night would be 1439 lines a day saying nothing, so a minute that dispatched nothing is silent unless --report-idle asks for it. */
 func TestRunLoop_IsSilentOnAMinuteThatDispatchedNothing(t *testing.T) {
     buffer, finished, cancel := driveOneIdleLoopMinute(t, false)
     defer cancel()
@@ -3086,7 +3026,6 @@ func TestRunLoop_IsSilentOnAMinuteThatDispatchedNothing(t *testing.T) {
     }
 }
 
-/* TestRunLoop_ReportsAnIdleMinuteWhenAsked pins the flag: without it a consumer cannot tell a live scheduler with nothing due from a dead one, since both write nothing at all. */
 func TestRunLoop_ReportsAnIdleMinuteWhenAsked(t *testing.T) {
     buffer, finished, cancel := driveOneIdleLoopMinute(t, true)
     defer cancel()
@@ -3116,7 +3055,6 @@ func TestRunLoop_ReportsAnIdleMinuteWhenAsked(t *testing.T) {
     }
 }
 
-/* driveOneIdleLoopMinute runs the scheduler loop across exactly one minute boundary on which no entry is due, and answers the loop's output buffer together with its completion. The clock trick is the one the loop's other tests use: the first reads sit just before the boundary, so the armed timer fires in milliseconds. */
 func driveOneIdleLoopMinute(t *testing.T, reportIdle bool) (*bytes.Buffer, chan error, context.CancelFunc) {
     t.Helper()
 
@@ -3163,9 +3101,7 @@ func driveOneIdleLoopMinute(t *testing.T, reportIdle bool) (*bytes.Buffer, chan 
     return buffer, finished, cancel
 }
 
-/* the arguments field is a list on every row, empty rather than null for the entry that declares none, which is most of them: `jq '.data.ran[].arguments | length'` must read every row, as it reads error, ran, failed and pruned. */
 func TestRunnerCommand_TheArgumentsFieldIsAListOnEveryRow(t *testing.T) {
-    /* the entry that declares an argument is given a command that DECLARES the flag it names: a scheduled child is parsed against its own flag set alone, so an entry naming a flag its command does not declare fails at parse and the row it produces is a failure rather than the ordinary row this asserts the shape of */
     withArguments := &outputWritingProbeCommand{commandName: "job:with"}
     withoutArguments := newRecordingCommand("job:without")
 
@@ -3219,7 +3155,6 @@ func TestRunnerCommand_TheArgumentsFieldIsAListOnEveryRow(t *testing.T) {
     }
 }
 
-/* the classification the row is built from is the classification the record is filed under, because reportRunOutcome takes it instead of computing a second one. It is driven here with a live runtime context and a cancellation error: recomputing would answer "not a shutdown" for both calls, so the run reported cancelled would be filed as a failure, the shape a SIGTERM landing between two reads would produce. */
 func TestRunnerCommand_ReportRunOutcomeTakesTheClassificationItIsGiven(t *testing.T) {
     runner := NewRunnerCommand(NewConfiguration(), RunnerConfig{})
     entry := &scheduledRunEntry{commandName: "job:probe"}
@@ -3271,7 +3206,6 @@ func TestRunnerCommand_ReportRunOutcomeTakesTheClassificationItIsGiven(t *testin
     }
 }
 
-/* a run that did not fail leaves no record and counts as nothing */
 func TestRunnerCommand_ReportRunOutcomeIsSilentForASuccessfulRun(t *testing.T) {
     runner := NewRunnerCommand(NewConfiguration(), RunnerConfig{})
     runtimeInstance, captured := newCapturingRunnerRuntime(context.Background())
@@ -3285,7 +3219,6 @@ func TestRunnerCommand_ReportRunOutcomeIsSilentForASuccessfulRun(t *testing.T) {
     }
 }
 
-/* the evaluated minute doubles as the document's timestamp, so the ordinary advance carries the real local instant, offset and all, agreeing with the --once mode; only the minutes a forward jump skipped, which have no local representation, stay utc-materialised. */
 func TestReconcileWallClockReportsTheCurrentMinuteAsRealLocalTime(t *testing.T) {
     zone := time.FixedZone("probe", 3*3600)
     previousTarget := time.Date(2026, time.August, 15, 3, 29, 0, 0, zone)
@@ -3310,7 +3243,7 @@ func TestReconcileWallClockReportsTheCurrentMinuteAsRealLocalTime(t *testing.T) 
     }
 }
 
-/* the fixed zone has no daylight-saving gap, so every minute a three-minute jump skips exists on its calendar and is reported as the real local instant; utc materialisation is for a spring-forward gap only. A skipped minute still never runs the wildcard class. */
+/* the fixed zone has no daylight-saving gap, so every minute a three-minute jump skips exists on its calendar */
 func TestReconcileWallClock_CatchUpMinutesTheZoneHasAreRealLocalTime(t *testing.T) {
     zone := time.FixedZone("probe", 3*3600)
     previousTarget := time.Date(2026, time.August, 15, 3, 0, 0, 0, zone)
@@ -3376,7 +3309,6 @@ func TestReconcileWallClockReportsTheRepeatedMinuteAsRealLocalTime(t *testing.T)
     }
 }
 
-/* two entries share the minute and run concurrently, so completion order is scheduling luck; the document orders its rows by command name, which is the property that lets two identical minutes be diffed. The pin is deterministic — it asserts the ORDER of both rows, not the effect of a sort a lucky iteration could reproduce — and neither frozen major carries it. */
 func TestDispatchDue_TheDocumentOrdersRunsByCommandName(t *testing.T) {
     first := newRecordingCommand("job:alpha")
     second := newRecordingCommand("job:beta")
@@ -3406,7 +3338,6 @@ func TestDispatchDue_TheDocumentOrdersRunsByCommandName(t *testing.T) {
     }
 }
 
-/* TestRunnerCommand_TheConfiguredZoneDecidesWhatIsDue is the guard the whole zone declaration exists for, and it is written so that the two zones DISAGREE about the same instant. 09:00 UTC is 18:00 in Tokyo, and the entry is scheduled for eighteen hundred: under the configured zone it is due, under the process zone it is not. A probe whose zones agreed at the chosen instant would pass with the zone never applied at all. */
 func TestRunnerCommand_TheConfiguredZoneDecidesWhatIsDue(t *testing.T) {
     job := newRecordingCommand("job:evening")
 
@@ -3430,7 +3361,6 @@ func TestRunnerCommand_TheConfiguredZoneDecidesWhatIsDue(t *testing.T) {
     }
 }
 
-/* the negative half of the pair: the SAME instant and the SAME schedule, with no zone declared, must NOT be due. Without it the test above would still pass on a runner that ran everything. */
 func TestRunnerCommand_WithoutAZoneTheSameInstantIsNotDue(t *testing.T) {
     job := newRecordingCommand("job:evening")
 
@@ -3453,7 +3383,6 @@ func TestRunnerCommand_WithoutAZoneTheSameInstantIsNotDue(t *testing.T) {
     }
 }
 
-/* the flag wins over the configuration: an operator running one invocation against another region's calendar says so at the invocation. The configuration names a zone under which the entry is NOT due, so only the flag can make it run. */
 func TestRunnerCommand_TheTimezoneFlagWinsOverTheConfiguration(t *testing.T) {
     job := newRecordingCommand("job:evening")
 
@@ -3477,7 +3406,6 @@ func TestRunnerCommand_TheTimezoneFlagWinsOverTheConfiguration(t *testing.T) {
     }
 }
 
-/* the flag's zone belongs to the invocation that named it: the registered command is the same object across invocations, so the next invocation without the flag must run the configured calendar. */
 func TestRunnerCommand_ATimezoneFlagDoesNotOutliveItsInvocation(t *testing.T) {
     job := newRecordingCommand("job:evening")
 
@@ -3503,7 +3431,6 @@ func TestRunnerCommand_ATimezoneFlagDoesNotOutliveItsInvocation(t *testing.T) {
     }
 }
 
-/* a zone the standard library cannot load is a wiring mistake and fails at CONSTRUCTION, beside the malformed schedules and the unknown command names: a scheduler that fell back to the process zone would run every job at the right clock time in the wrong place, which nobody notices until the reports are wrong. */
 func TestNewRunnerCommand_PanicsForAZoneItCannotLoad(t *testing.T) {
     configuration := NewConfiguration().
         InTimezone("Mars/Olympus_Mons").
@@ -3528,7 +3455,6 @@ func TestNewRunnerCommand_PanicsForAZoneItCannotLoad(t *testing.T) {
     _ = NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{newRecordingCommand("job:top")}})
 }
 
-/* a mistyped FLAG is what the caller typed, so it is refused by name and the command carries the refusal out — a stack trace would be the wrong answer to a typing mistake. */
 func TestRunnerCommand_RefusesATimezoneFlagItCannotLoad(t *testing.T) {
     job := newRecordingCommand("job:top")
 
@@ -3552,7 +3478,6 @@ func TestRunnerCommand_RefusesATimezoneFlagItCannotLoad(t *testing.T) {
     }
 }
 
-/* ignoringCommand blocks until released and never looks at its context: the shape of a job wedged on a deadline-less read. */
 type ignoringCommand struct {
     commandName string
     started     chan struct{}
@@ -3599,7 +3524,6 @@ func (instance *ignoringCommand) awaitStart(t *testing.T) {
     }
 }
 
-/* awaitWithin runs the given call on a goroutine and fails the test by name when it does not return inside the budget, so a bound the runner lost fails on the timer instead of hanging the suite. */
 func awaitWithin(t *testing.T, budget time.Duration, label string, run func()) {
     t.Helper()
 
@@ -3666,7 +3590,6 @@ func TestWallMinuteTime_AMinuteTheZoneHasIsItsLocalInstant(t *testing.T) {
     }
 }
 
-/* a suspend that spans the spring-forward walks through both kinds of minute in one catch-up: the ones inside the gap have no local instant and stay utc-materialized, the ones after it are real local time. */
 func TestReconcileWallClock_ACatchUpAcrossTheSpringForwardKeepsOnlyTheGapUtc(t *testing.T) {
     bucharest, locationErr := time.LoadLocation("Europe/Bucharest")
     if nil != locationErr {
@@ -3855,7 +3778,6 @@ func TestDispatchDue_AShutdownAbandonedRunIsFailedNotCancelled(t *testing.T) {
     }
 }
 
-/* a run that honours the shutdown is a clean stop: its row is cancelled and not failed, the same verdict the minute's aggregate gives it */
 func TestDispatchDue_ARunThatHonoursTheShutdownIsCancelledNotFailed(t *testing.T) {
     job := newContextWatchingCommand("job:watching")
 
@@ -3885,7 +3807,6 @@ func TestDispatchDue_ARunThatHonoursTheShutdownIsCancelledNotFailed(t *testing.T
     }
 }
 
-/* the graceful window is a wait, not a kill: a job that unwinds inside it after the shutdown reports its own outcome. */
 func TestRunnerCommand_ShutdownWaitsForAJobThatUnwindsInsideTheGracefulWindow(t *testing.T) {
     job := newIgnoringCommand("job:ignoring")
 
@@ -3950,7 +3871,6 @@ func TestResolveAbandonedRun_AShutdownAbandonNamesTheShutdownAndIsNotACancellati
     }
 }
 
-/* panicOnceLogger panics on its first record and keeps every later one: a sink that fails once and recovers, so the runner's record of the contained panic can be read. */
 type panicOnceLogger struct {
     capturingRunnerLogger
     panicked atomic.Bool
@@ -3992,7 +3912,6 @@ func (instance *panicOnceLogger) CauseChainDepth() int {
     return 8
 }
 
-/* panickingLogger panics on every record: the shape of an application logger whose sink is gone. */
 type panickingLogger struct{}
 
 func (instance *panickingLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
@@ -4027,7 +3946,6 @@ func (instance *panickingLogger) CauseChainDepth() int {
     return 8
 }
 
-/* errorWithPanickingText is a failure whose Error() panics, the shape the container's own teardown guards against. */
 type errorWithPanickingText struct{}
 
 func (instance errorWithPanickingText) Error() string {
@@ -4097,7 +4015,6 @@ func assertRunnerPanicFiled(t *testing.T, report dueReport, runErr error, health
         t.Fatalf("expected %q in the document, got %v", commandName, report.Ran)
     }
 
-    /* the aggregate wraps the join of the minute's failures; the filed one is the first exception error beneath it */
     if false == errors.As(errors.Unwrap(runErr), &filed) {
         t.Fatalf("expected the contained panic beneath the aggregate, got %v", runErr)
     }
@@ -4152,7 +4069,6 @@ func TestDispatchDue_AFailureWhoseTextPanicsKeepsTheCommandsErrorAndDoesNotHoldT
     }
 }
 
-/* an application that registers its logger under the concrete type of its provider refuses the runner's per-run logger override, as the cli entry point does, and that refusal fails the run, not the process. */
 func TestDispatchDue_ALoggerRegisteredUnderItsConcreteTypeFailsTheRunNotTheProcess(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     serviceContainer.MustRegister(
@@ -4181,7 +4097,7 @@ func TestDispatchDue_ALoggerRegisteredUnderItsConcreteTypeFailsTheRunNotTheProce
     }
 }
 
-/* the budget lands in the middle of a two-byte rune: what is kept must still be valid text, so the cut backs off to the rune's start and the whole rune counts as dropped. */
+/* the budget lands in the middle of a two-byte rune, so the cut backs off to the rune's start */
 func TestScheduledOutputCapture_CutsOnARuneBoundary(t *testing.T) {
     capture := newScheduledOutputCapture(runnerOutputCaptureLimitRule.Default)
 
@@ -4209,8 +4125,6 @@ func TestScheduledOutputCapture_CutsOnARuneBoundary(t *testing.T) {
     }
 }
 
-/* the contained panic is also recorded, when the logger is not the collaborator that panicked: the row and the aggregate carry it regardless, the record is the operator's line. */
-/* a sink that fails once and recovers: the run whose record panicked is contained, and the runner's record of that panic lands on the next write */
 func TestDispatchDue_AContainedPanicIsRecordedOnceTheLoggerWritesAgain(t *testing.T) {
     captured := &panicOnceLogger{}
     failing := newRecordingCommand("job:one")
@@ -4231,7 +4145,6 @@ func TestDispatchDue_AContainedPanicIsRecordedOnceTheLoggerWritesAgain(t *testin
     }
 }
 
-/* the nil guards of this package read a value through isNilInterface alone: it answers true for the nil interface itself, so no `nil ==` needs to stand beside it, and true for a typed nil, which `nil ==` cannot see */
 func TestIsNilInterface_AnswersTheNilInterfaceAndTheTypedNil(t *testing.T) {
     if false == isNilInterface(nil) {
         t.Fatalf("expected the nil interface to be read as nil")
@@ -4247,7 +4160,6 @@ func TestIsNilInterface_AnswersTheNilInterfaceAndTheTypedNil(t *testing.T) {
     }
 }
 
-/* two entries may schedule one command: ordered by the command alone their rows would keep the order the runs finished in */
 func TestDueRunSortsBefore_OrdersOneCommandsRunsByScheduleThenArguments(t *testing.T) {
     earlierSchedule := dueRun{Command: "report", Schedule: "*/5 * * * *"}
     laterSchedule := dueRun{Command: "report", Schedule: "0 * * * *"}
@@ -4266,7 +4178,6 @@ func TestDueRunSortsBefore_OrdersOneCommandsRunsByScheduleThenArguments(t *testi
     }
 }
 
-/* concurrentRunCommand is a command two entries of one minute may run at once, so its own state is the name alone */
 type concurrentRunCommand struct {
     commandName string
 }
@@ -4339,7 +4250,6 @@ func (instance *memoizedFlagsCommand) Run(runtimeInstance containercontract.Runt
     return nil
 }
 
-/* the cli dispatch hands the engine fresh instances of the flags, so a command handing the runner the same instances on every Flags() call is accepted at construction; the fresh state each dispatch reads is pinned in the cli package */
 func TestRunnerCommand_SharedFlagInstancesAreAcceptedAtConstruction(t *testing.T) {
     configuration := NewConfiguration().
         Schedule("job:memoized", EntryConfig{Schedule: &Schedule{Minute: "0"}})
@@ -4350,7 +4260,6 @@ func TestRunnerCommand_SharedFlagInstancesAreAcceptedAtConstruction(t *testing.T
     }
 }
 
-/* a nil flag would be refused by name at the first tick, inside the dispatch; the wiring mistake is reported at construction instead, whether the nil is typed or untyped */
 func TestRunnerCommand_ANilFlagIsRefusedAtConstruction(t *testing.T) {
     for _, flags := range [][]clicontract.Flag{
         {&clicontract.StringFlag{Name: "real"}, nil},
@@ -4382,7 +4291,6 @@ func TestRunnerCommand_ANilFlagIsRefusedAtConstruction(t *testing.T) {
     }
 }
 
-/* freshFlagsCommand declares the memoized command's flag, built anew on every Flags() call */
 type freshFlagsCommand struct {
     memoizedFlagsCommand
 }
@@ -4393,7 +4301,6 @@ func (instance *freshFlagsCommand) Flags() []clicontract.Flag {
     }
 }
 
-/* the control: the same flag built fresh on every Flags() call is accepted */
 func TestRunnerCommand_FreshFlagInstancesAreAcceptedAtConstruction(t *testing.T) {
     configuration := NewConfiguration().
         Schedule("job:fresh", EntryConfig{Schedule: &Schedule{Minute: "0"}})
@@ -4404,7 +4311,6 @@ func TestRunnerCommand_FreshFlagInstancesAreAcceptedAtConstruction(t *testing.T)
     }
 }
 
-/* the unknown-timezone refusal keeps the sentinel as its cause and carries the standard library's own reason, so an invalid name and a zone file found but unreadable are told apart in the context. */
 func TestLoadLocation_RefusalCarriesTheStandardLibrarysReason(t *testing.T) {
     _, loadErr := loadLocation("Not/AZone")
     if false == errors.Is(loadErr, ErrUnknownTimezone) {
@@ -4486,7 +4392,6 @@ func TestWithSiblingFailure_RendersEachLinkOfACyclicChainOnce(t *testing.T) {
     }
 }
 
-/* a run whose scope closed cannot open a child scope: the scheduled command fails naming itself and never runs */
 func TestInvoke_AClosedRunScopeFailsTheRunBeforeTheCommand(t *testing.T) {
     job := newRecordingCommand("job:top")
 

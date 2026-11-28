@@ -257,7 +257,6 @@ func (instance parsedContextValues) parse() *melodyclicontract.CommandContext {
     return commandContext
 }
 
-/* parseCommandFlags parses the arguments against the command's own flags and answers the engine's parse error, the refusal a flag's own parse or validator writes before the command runs */
 func parseCommandFlags(command melodyclicontract.Command, arguments []string, writer io.Writer) (*melodyclicontract.CommandContext, error) {
     commandContext := &melodyclicontract.CommandContext{
         Name:            "test",
@@ -275,7 +274,6 @@ func parseCommandFlags(command melodyclicontract.Command, arguments []string, wr
     return commandContext, runErr
 }
 
-/* renderCommandHelp answers the engine's --help of the command's flags, the lines an operator reads */
 func renderCommandHelp(t *testing.T, command melodyclicontract.Command) string {
     t.Helper()
 
@@ -515,7 +513,6 @@ func exampleTestRuntimeUnder(ctx context.Context) melodycontainercontract.Runtim
     return melodyruntime.NewRun(ctx, melodycontainer.NewContainer(melodycontainer.ContainerConfig{}).NewScope())
 }
 
-/* mustCreateLock answers the lock a test's CreateLock made, a refusal failing the test where it happened */
 func mustCreateLock(lock melodylockcontract.Lock, createErr error) melodylockcontract.Lock {
     if nil != createErr {
         panic(createErr)

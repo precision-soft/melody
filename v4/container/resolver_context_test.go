@@ -44,7 +44,6 @@ func TestResolverContext_GetSnapshotsProviderUnderTheLock(t *testing.T) {
             readersStarted <- struct{}{}
 
             for 0 == atomic.LoadInt32(&stop) {
-                /* resolving a never-registered service reaches the create closure, which reads providers[serviceName] with the mutex released. */
                 _, _ = serviceContainer.Get(t.Context(), missingServiceName)
             }
         }()
@@ -96,7 +95,6 @@ func TestResolverContext_GetByTypeSnapshotsTypeProviderUnderTheLock(t *testing.T
             readersStarted <- struct{}{}
 
             for 0 == atomic.LoadInt32(&stop) {
-                /* an unregistered target type reaches the type-branch create closure, which reads typeProviders[type] with the mutex released. */
                 _, _ = serviceContainer.GetByType(t.Context(), probeType)
             }
         }()
@@ -383,7 +381,6 @@ func TestResolverContext_MustGet_KeepsTheAlreadyLoggedMarkOfTheFailure(t *testin
     _ = serviceContainer.MustGet(t.Context(), "app.logged.failure")
 }
 
-/* contextValueInChain walks the wrap chain for the first melody error whose context carries key, because the original failure travels out whole and its coordinates live in its context, not in a wrapper's message. */
 func contextValueInChain(err error, key string) string {
     for current := err; nil != current; current = errors.Unwrap(current) {
         melodyErr, isMelodyErr := current.(*exception.Error)
@@ -441,7 +438,6 @@ type resolverContextGraphControlParent struct {
     dependency *resolverContextGraphDependency
 }
 
-/* the container's dependency graph keeps every edge a resolution acquired and its teardown walks only container-created representatives, so an edge recorded under a scoped parent would sit there unread for the life of the process — one permanent entry per distinct scoped name. The container-parent edge asserted beside it is the control that the filter removed only the scoped writes. */
 func TestResolverContext_AScopedParentWritesNoEdgeIntoTheContainerGraph(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{}).(*container)
 
@@ -461,7 +457,6 @@ func TestResolverContext_AScopedParentWritesNoEdgeIntoTheContainerGraph(t *testi
                 return nil, getErr
             }
 
-            /* the by-type door runs the same filter at its own site, so both writes are exercised by the one scoped parent */
             if _, getByTypeErr := resolver.GetByType(resolver.Runtime().Context(), reflect.TypeOf((*resolverContextGraphDependency)(nil))); nil != getByTypeErr {
                 return nil, getByTypeErr
             }
@@ -521,7 +516,6 @@ func TestResolverContext_AScopedParentWritesNoEdgeIntoTheContainerGraph(t *testi
     }
 }
 
-/* the resolution key is unique per type identity, not the type's String() which two same-named types from different packages share, so the creation guard and cycle detection cannot alias two distinct types onto one key */
 func TestTypeIdentityKey_DistinguishesSameStringTypesFromDifferentPackages(t *testing.T) {
     interfaceType := reflect.TypeOf((*collectableHandler)(nil)).Elem()
     pointerType := reflect.TypeOf(&invoiceHandler{})
@@ -534,7 +528,6 @@ func TestTypeIdentityKey_DistinguishesSameStringTypesFromDifferentPackages(t *te
         t.Fatalf("expected the same type to yield a stable key")
     }
 
-    /* the discriminator is the named type's import path, which differs even when String() would not: the key carries it ahead of the String() */
     if false == strings.HasPrefix(typeIdentityKey(pointerType), pointerType.Elem().PkgPath()) {
         t.Fatalf("expected the key to lead with the named type's package path, got %q", typeIdentityKey(pointerType))
     }
@@ -551,7 +544,6 @@ func (instance *lateViewOwner) CloseWithContext(closeContext context.Context) er
     return nil
 }
 
-/* a view kept by a provider that returned resolves on a chain of its own: resolved while the resolution that built its owner is still building another node, the dependency lands on the view's owner and not on the node the live chain is building, so the owner closes before what it resolved */
 func TestResolverContext_AViewWhoseProviderReturnedRecordsItsOwnersDependency(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -576,7 +568,6 @@ func TestResolverContext_AViewWhoseProviderReturnedRecordsItsOwnersDependency(t 
             return nil, ownerErr
         }
 
-        /* the owner's provider has returned and this provider is still running on the same chain */
         if _, lateErr := FromResolver[*closeOrderServiceA](resolver.Runtime().Context(), owner.resolver, "service.a"); nil != lateErr {
             return nil, lateErr
         }
@@ -595,7 +586,6 @@ func TestResolverContext_AViewWhoseProviderReturnedRecordsItsOwnersDependency(t 
     }
 }
 
-/* the same through the by-type door: resolved while the resolution that built its owner is still building another node, the dependency lands on the view's owner and not on the node the live chain is building, so the owner closes before what it resolved */
 func TestResolverContext_AViewWhoseProviderReturnedRecordsItsOwnersDependencyByType(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -620,7 +610,6 @@ func TestResolverContext_AViewWhoseProviderReturnedRecordsItsOwnersDependencyByT
             return nil, ownerErr
         }
 
-        /* the owner's provider has returned and this provider is still running on the same chain */
         if _, lateErr := FromResolverByType[*closeOrderServiceA](resolver.Runtime().Context(), owner.resolver); nil != lateErr {
             return nil, lateErr
         }
@@ -647,7 +636,6 @@ type lateLeafB struct {
 
 type lateLeafOwner struct{}
 
-/* a Lazy built over a provider's resolver is a handle any goroutine may use first: concurrent first uses resolve on chains of their own, so none reads another's pushed node as its own ancestor and answers a circular dependency */
 func TestResolverContext_ConcurrentFirstUsesOfALazyOverAProvidersResolverAllResolve(t *testing.T) {
     const workers = 8
 
@@ -708,7 +696,6 @@ func (instance *lateLeafA) leafName() string {
     return "a"
 }
 
-/* a collection read through a provider's resolver asks which reference that resolver is creating, the stack a resolution through the same resolver pushes on another goroutine while the provider runs, so the two alternate here under -race. A use before the provider returns may answer a circular dependency or leave out the reference another goroutine is creating, as the Lazy GoDoc says, so the answers are not held to anything: the proof is the race detector's, over the stack read under its lock. */
 func TestResolverContext_ACollectionAndAResolutionThroughARunningProvidersResolverRaceNothing(t *testing.T) {
     const workers = 8
 
@@ -768,7 +755,6 @@ type lateCycleLeaf struct{}
 
 type lateCycleOther struct{}
 
-/* the parent resolves the holder, whose provider keeps a Lazy over its resolver and returns; parentBody then uses what the holder kept while the parent is still being built, and the leaf resolves the parent back when leafNeedsParent */
 func newLateCycleContainer(parentBody func(holder *lateCycleHolder) error, leafNeedsParent bool) *container {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -888,7 +874,6 @@ func TestResolverContext_LateUsesInsideABuildingAncestorWithoutACycleResolveAndL
     assertResolverWaitGraphIsEmpty(t, serviceContainer)
 }
 
-/* another goroutine uses the kept handle while the parent is still being built, on a path that never reaches the parent */
 func TestResolverContext_ALateUseFromAnotherGoroutineOffTheAncestorsPathResolves(t *testing.T) {
     otherAnswer := make(chan error, 1)
     serviceContainer := newLateCycleContainer(func(holder *lateCycleHolder) error {
@@ -925,7 +910,6 @@ type lateScopedCycleHolder struct {
 
 type lateScopedCycleLeaf struct{}
 
-/* the same cycle among scoped services: the parent's creation is in flight in the scope's own maps, which the late resolution reads too */
 func TestResolverContext_ACycleClosedThroughALazyAmongScopedServicesIsRefusedAsCircular(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -972,7 +956,6 @@ func TestResolverContext_ACycleClosedThroughALazyAmongScopedServicesIsRefusedAsC
     }
 }
 
-/* MustGet keeps the service name a failure already carries, as FromResolver does */
 func TestResolverContext_MustGet_KeepsTheServiceNameANestedFailureCarries(t *testing.T) {
     nestedErr := exception.NewError(
         "service is not registered",
@@ -1015,7 +998,6 @@ func TestResolverContext_MustGet_KeepsTheServiceNameANestedFailureCarries(t *tes
     }
 }
 
-/* a nested failure that names its type under FromResolverByType's key, `serviceType` — as its wrap of a foreign failure does —, is kept through the outer MustGetByType, which writes no outer type under `type` beside it. */
 func TestResolverContext_MustGetByType_KeepsTheTypeANestedFailureNamesUnderTheOtherKey(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -1052,7 +1034,6 @@ func TestResolverContext_MustGetByType_KeepsTheTypeANestedFailureNamesUnderTheOt
     _ = serviceContainer.MustGetByType(t.Context(), reflect.TypeOf((*resolverContextMustDependent)(nil)))
 }
 
-/* a failure that already names a type — the nested resolution that failed — keeps that type through the outer MustGetByType, as MustGet keeps a nested name: the outer type would point the reader at a service that is registered. */
 func TestResolverContext_MustGetByType_KeepsTheTypeANestedFailureCarries(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 

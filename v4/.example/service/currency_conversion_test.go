@@ -10,9 +10,7 @@ import (
     melodyexception "github.com/precision-soft/melody/v4/exception"
 )
 
-/* the three rates the provider quotes, spelled here as the literals they are. The expected conversions below
-   are literals too rather than the same arithmetic written twice: derived from these, both sides of every
-   assertion would move together and a conversion that multiplied where it should divide would still pass. */
+/* literals on purpose: derived expectations would move together with the code under test */
 func conversionCurrency(id string, code string, rate float64) *entity.Currency {
     return entity.NewCurrency(id, code, code, rate, time.Date(2026, time.September, 7, 9, 0, 0, 0, time.UTC))
 }
@@ -32,8 +30,6 @@ func TestConvertAmount_RestatesAPriceQuotedInTheRateBase(t *testing.T) {
     }
 }
 
-/* neither currency is the base the rates are quoted against, which is the case that proves the base cancels:
-   an implementation that needed to know what the base was could not answer this at all. */
 func TestConvertAmount_CancelsTheRateBaseBetweenTwoCurrenciesThatAreNotIt(t *testing.T) {
     converted, err := ConvertAmount(
         100,
@@ -64,7 +60,6 @@ func TestConvertAmount_RestatesAPriceIntoTheRateBase(t *testing.T) {
     }
 }
 
-/* the source rate is the divisor, so a zero there is the one that would hand a reader an infinity */
 func TestConvertAmount_RefusesACurrencyWhoseStoredRateIsNotPositive(t *testing.T) {
     for _, testCase := range []struct {
         name string
@@ -135,9 +130,6 @@ func TestFindCurrencyByCode_AnswersNothingForACodeTheCatalogueDoesNotCarry(t *te
     }
 }
 
-/* the write doors bound the rates they admit, but a row this application did not write can hold a rate that
-   multiplies into an infinity; the read door refuses it instead of handing the serializer a value it
-   cannot render */
 func TestConvertAmount_RefusesAConvertedAmountThatIsNotFinite(t *testing.T) {
     from := entity.NewCurrency("cur-tiny", "TNY", "Tiny", 5e-324, time.Time{})
     to := entity.NewCurrency("cur-huge", "HGE", "Huge", 1e308, time.Time{})
@@ -151,7 +143,6 @@ func TestConvertAmount_RefusesAConvertedAmountThatIsNotFinite(t *testing.T) {
     }
 }
 
-/* the guard judges the rounded value: the rounding multiplies by a hundred first, so a finite product within a hundredth of the float ceiling becomes an infinity after a guard on the product would let it through */
 func TestConvertAmount_RefusesAConvertedAmountThatOnlyTheRoundingOverflows(t *testing.T) {
     from := entity.NewCurrency("cur-one", "ONE", "One", 1, time.Time{})
     to := entity.NewCurrency("cur-huge", "HGE", "Huge", 1e9, time.Time{})
@@ -164,8 +155,6 @@ func TestConvertAmount_RefusesAConvertedAmountThatOnlyTheRoundingOverflows(t *te
     }
 }
 
-/* the refusal of a converted amount that is not finite can carry an amount that is not finite either, and its
-   context still encodes: the json journal would otherwise render the whole context as one text */
 func TestConvertAmount_ARefusalOfANonFiniteAmountEncodes(t *testing.T) {
     one := conversionCurrency("cur-one", "ONE", 1)
 
@@ -184,7 +173,6 @@ func TestConvertAmount_ARefusalOfANonFiniteAmountEncodes(t *testing.T) {
     }
 }
 
-/* a code is three ASCII letters, so the fold upper-cases ASCII alone: the standard library's ToUpper maps U+017F LATIN SMALL LETTER LONG S onto S, which would make a provider's "uſd" name the catalogue's USD. A code carrying a control byte keeps it and so matches nothing the catalogue holds. */
 func TestFoldCurrencyCode_FoldsAsciiAlone(t *testing.T) {
     for code, expected := range map[string]string{
         " usd ":    "USD",

@@ -13,7 +13,6 @@ import (
     melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
 )
 
-/* the six constructors over the catalogue take the schema proof and send no statement: a database that would record every query sees none */
 func TestCatalogueConstructors_SendNoStatement(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     storage := persistence.NewCatalogStorage(database).WithAccountSeed()
@@ -38,7 +37,6 @@ func TestCatalogueConstructors_SendNoStatement(t *testing.T) {
     }
 }
 
-/* a constructor of the package holds no context of its own: the catalogue is prepared under the runtime of whoever resolves the schema */
 func TestCatalogueConstructors_HoldNoBackgroundContext(t *testing.T) {
     constructor := regexp.MustCompile(`(?s)\nfunc New\w+Repository\([^)]*\) \([^)]*\) \{\n(.*?)\n\}\n`)
     for _, name := range []string{"user", "product", "category", "currency", "catalog_journal", "user_session"} {
@@ -73,7 +71,6 @@ func TestPrepareCatalog_AStorageWithoutADatabaseIsReadyAsItIs(t *testing.T) {
     }
 }
 
-/* the migration set runs first and under the runtime's context: a runtime that ended refuses before any statement reaches the database */
 func TestPrepareCatalog_RunsUnderTheRuntimesContext(t *testing.T) {
     database, recorder := newFakeBunDatabase()
 

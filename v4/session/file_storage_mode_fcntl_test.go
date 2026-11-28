@@ -7,7 +7,6 @@ import (
     "testing"
 )
 
-/* a read-only handle loads sessions and then fails every Save for the life of the process; its descriptor's access mode is read at construction instead. */
 func TestNewFileStorage_RefusesAReadOnlyHandle(t *testing.T) {
     fileInstance := openSeededSessionFile(t, os.O_RDONLY)
 

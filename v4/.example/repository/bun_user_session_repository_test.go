@@ -10,12 +10,10 @@ import (
     "time"
 )
 
-/* heldSessionRows answers the account's locked row when the account exists, and its held sessions, oldest first and admitted long before the grace, to the index read */
 func heldSessionRows(accountExists bool, heldOldestFirst ...string) func(query string) ([]string, [][]driver.Value, error) {
     return heldSessionRowsAdmittedAt(accountExists, time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC), heldOldestFirst...)
 }
 
-/* heldSessionRowsAdmittedAt answers the held sessions as admitted at admittedAt */
 func heldSessionRowsAdmittedAt(accountExists bool, admittedAt time.Time, heldOldestFirst ...string) func(query string) ([]string, [][]driver.Value, error) {
     return func(query string) ([]string, [][]driver.Value, error) {
         if true == strings.Contains(query, "FOR UPDATE") {
@@ -45,7 +43,6 @@ func isSessionStatement(prefix string, sessionId string) func(query string) bool
     }
 }
 
-/* the admission past the cap locks the account first, releases the oldest session and drops its row, and writes the admitted one, all inside one transaction */
 func TestBunUserSessionRepositoryAdmit_ReleasesTheOldestPastTheCapUnderTheAccountsLock(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = heldSessionRows(true, "s1", "s2", "s3", "s4", "s5")
@@ -93,7 +90,6 @@ func TestBunUserSessionRepositoryAdmit_ReleasesTheOldestPastTheCapUnderTheAccoun
     }
 }
 
-/* a release that fails refuses the admission and rolls the transaction back, so the admitted session is recorded nowhere */
 func TestBunUserSessionRepositoryAdmit_AReleaseFailureRecordsNothing(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = heldSessionRows(true, "s1", "s2", "s3", "s4", "s5")
@@ -116,7 +112,6 @@ func TestBunUserSessionRepositoryAdmit_AReleaseFailureRecordsNothing(t *testing.
     }
 }
 
-/* an account the lock does not find is refused, and no session is recorded for it */
 func TestBunUserSessionRepositoryAdmit_RefusesAnAbsentAccount(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = heldSessionRows(false)
@@ -132,7 +127,6 @@ func TestBunUserSessionRepositoryAdmit_RefusesAnAbsentAccount(t *testing.T) {
     }
 }
 
-/* the release drops the session's row alone */
 func TestBunUserSessionRepositoryRelease_DropsTheSessionsRow(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     repositoryInstance := newBunUserSessionRepository(database)
@@ -146,7 +140,6 @@ func TestBunUserSessionRepositoryRelease_DropsTheSessionsRow(t *testing.T) {
     }
 }
 
-/* the rows of sessions that ended elsewhere are dropped inside the transaction before the cap is counted, so no live session is released for them */
 func TestBunUserSessionRepositoryAdmit_DropsTheRowsOfEndedSessionsBeforeTheCap(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = heldSessionRows(true, "s1", "s2", "s3", "s4", "s5")
@@ -172,7 +165,6 @@ func TestBunUserSessionRepositoryAdmit_DropsTheRowsOfEndedSessionsBeforeTheCap(t
     }
 }
 
-/* a liveness read that fails rolls the admission back */
 func TestBunUserSessionRepositoryAdmit_AFailedLivenessReadRecordsNothing(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = heldSessionRows(true, "s1")
@@ -189,7 +181,6 @@ func TestBunUserSessionRepositoryAdmit_AFailedLivenessReadRecordsNothing(t *test
     }
 }
 
-/* a held row admitted within the grace counts as live without the storage read, so a concurrent sign-in whose session is not stored yet keeps its place and the cap releases the oldest */
 func TestBunUserSessionRepositoryAdmit_ARowWithinTheGraceCountsWhateverTheStorageAnswers(t *testing.T) {
     now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
     database, recorder := newFakeBunDatabase()

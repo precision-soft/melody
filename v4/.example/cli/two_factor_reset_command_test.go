@@ -14,7 +14,6 @@ import (
     "github.com/uptrace/bun/dialect/mysqldialect"
 )
 
-/* the reset removes the enrollment of the account the name resolves to, by its identifier: the statement the store receives is the delete of that account's row and nothing else */
 func TestTwoFactorResetCommand_DeletesTheEnrollmentOfTheNamedAccount(t *testing.T) {
     fixture := newCommandFixture(t)
     connector := &recordingResetConnector{}
@@ -51,7 +50,6 @@ func TestTwoFactorResetCommand_DeletesTheEnrollmentOfTheNamedAccount(t *testing.
     }
 }
 
-/* an unknown name is refused before the store is asked */
 func TestTwoFactorResetCommand_RefusesAnUnknownAccountBeforeTheStore(t *testing.T) {
     fixture := newCommandFixture(t)
     command := NewTwoFactorResetCommand(fixture.lazyUserService(), func(runtimeInstance melodycontainercontract.Runtime) (*twofactor.Store, error) {
@@ -79,7 +77,6 @@ func TestTwoFactorResetCommandReadsThroughItsContext(t *testing.T) {
     }
 }
 
-/* the reset reads the directory past the cache: an account deleted behind a cached entry is answered as unknown, never reset under an identifier the directory does not hold */
 func TestTwoFactorResetCommand_ReadsTheDirectoryPastTheCache(t *testing.T) {
     fixture := newCommandFixture(t)
     connector := &recordingResetConnector{}

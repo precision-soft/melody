@@ -19,7 +19,6 @@ func TestRedactQueryValuesForDiagnostics_KeepsNamesAndRedactsValues(t *testing.T
     }
 }
 
-/* a query that does not parse cannot have its secret half told apart from its diagnosable half, so it is redacted whole rather than passed through */
 func TestRedactQueryValuesForDiagnostics_RedactsAnUnparseableQueryWhole(t *testing.T) {
     redacted := RedactQueryValuesForDiagnostics("%zz=secret-value")
 
@@ -38,7 +37,6 @@ func TestRedactQueryValuesForDiagnostics_LeavesAnEmptyQueryEmpty(t *testing.T) {
     }
 }
 
-/* the internal-auth refusal renders the signed and the request query side by side and fires only when they differ byte for byte, so a redaction that re-encodes through url.Values — sorted names, a repeated name collapsed — rendered the reordered, the duplicated and the differently repeated query as two identical strings */
 func TestRedactQueryValuesForDiagnostics_KeepsOrderAndMultiplicity(t *testing.T) {
     cases := []struct {
         signed  string
@@ -72,7 +70,6 @@ func TestRedactQueryValuesForDiagnostics_KeepsOrderAndMultiplicity(t *testing.T)
         t.Fatalf("expected every occurrence of a repeated name kept, got %q", RedactQueryValuesForDiagnostics("a=1&a=2"))
     }
 
-    /* a pair with no "=" is the shape of a capability token — "?9f8a7b3c" — so it is redacted whole rather than kept as a name that names no value */
     if "xxxxx&a=xxxxx" != RedactQueryValuesForDiagnostics("9f8a7b3c&a=1") {
         t.Fatalf("expected a pair with no equals redacted whole, got %q", RedactQueryValuesForDiagnostics("9f8a7b3c&a=1"))
     }
@@ -82,7 +79,6 @@ func TestRedactQueryValuesForDiagnostics_KeepsOrderAndMultiplicity(t *testing.T)
     }
 }
 
-/* an empty segment carries nothing to redact and nothing to diagnose: rendered as the marker it read as a value withheld where nothing was sent */
 func TestRedactQueryValuesForDiagnostics_LeavesAnEmptySegmentEmpty(t *testing.T) {
     if "a=xxxxx&" != RedactQueryValuesForDiagnostics("a=1&") {
         t.Fatalf("expected the trailing empty segment to stay empty, got %q", RedactQueryValuesForDiagnostics("a=1&"))

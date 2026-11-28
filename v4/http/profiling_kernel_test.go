@@ -16,7 +16,6 @@ import (
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
 )
 
-/* profiling listener must emit a profile even when Attributes() is nil, as long as RequestContext() is present */
 func TestKernelHttpProfilerListener_EmitsProfileWhenAttributesAreNil(t *testing.T) {
     clockInstance := clock.NewSystemClock()
     dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clockInstance})
@@ -97,9 +96,6 @@ func (instance *staticRequestContext) RequestId() string { return instance.reque
 
 func (instance *staticRequestContext) StartedAt() time.Time { return instance.startedAt }
 
-/* The request is the application's and Attributes() returns an interface, so a nil pointer of the
-application's own bag type arrives as a non-nil interface. Read with a bare comparison it would be taken for a
-live bag and Get would dereference the nil receiver inside a response listener, where no recover covers it. */
 func TestKernelHttpProfilerListener_EmitsProfileWhenAttributesAreATypedNil(t *testing.T) {
     clockInstance := clock.NewSystemClock()
     dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clockInstance})
@@ -146,8 +142,6 @@ func TestKernelHttpProfilerListener_EmitsProfileWhenAttributesAreATypedNil(t *te
     }
 }
 
-/* the same double as its embedded parent, except Attributes() hands back a typed nil rather than the
-untyped one a plain comparison already catches */
 type typedNilAttributesRequest struct {
     nilAttributesRequest
     attributes bagcontract.ParameterBag
@@ -157,9 +151,6 @@ func (instance *typedNilAttributesRequest) Attributes() bagcontract.ParameterBag
     return instance.attributes
 }
 
-/* The sibling of the typed nil attributes probe above, one level out: the request itself is the
-application's contract, and the request-context read below dereferences a nil pointer of a request type
-that a bare comparison carries through — in a response listener, where no recover covers it. */
 func TestKernelHttpProfilerListener_EmitsNoProfileForATypedNilRequest(t *testing.T) {
     dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
     runtimeInstance := newTestRuntime()

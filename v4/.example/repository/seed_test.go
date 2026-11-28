@@ -25,7 +25,6 @@ func TestSeedAll_RefusesAnAbsentRuntimeAsAnError(t *testing.T) {
     }
 }
 
-/* a handle without the account seed still seeds the three nomenclatures into an empty catalogue, and no account */
 func TestSeedAll_SeedsTheNomenclatureWithoutTheAccountSeed(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = countingRows(0)
@@ -43,7 +42,6 @@ func TestSeedAll_SeedsTheNomenclatureWithoutTheAccountSeed(t *testing.T) {
     }
 }
 
-/* a handle marked without the nomenclature seed leaves an empty catalogue empty, and touches no table to do so */
 func TestSeedAll_LeavesAnEmptyCatalogueEmptyWhenTheSeedIsOff(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = countingRows(0)
@@ -55,7 +53,6 @@ func TestSeedAll_LeavesAnEmptyCatalogueEmptyWhenTheSeedIsOff(t *testing.T) {
     }
 }
 
-/* the in-memory catalogue reads the same switch: off, the three nomenclatures start empty */
 func TestInMemoryRepositories_StartEmptyWhenTheSeedIsOff(t *testing.T) {
     for _, seedsNomenclature := range []bool{true, false} {
         storage := persistence.NewCatalogStorage(nil)

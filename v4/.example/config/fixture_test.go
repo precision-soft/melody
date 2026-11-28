@@ -24,10 +24,9 @@ import (
     "github.com/redis/rueidis"
 )
 
-/* the compose balancer as the shipped .env names it, already resolved: the tests below hand the list in resolved form because what they assert is what the resolver does with a peer and a chain, not what the name resolves to. */
+/* the compose balancer as the shipped .env names it, handed already resolved */
 const balancerAddress = "172.18.0.9"
 
-/* a request as a proxy delivers it: the peer is the given address and the client it forwarded is named in the header. */
 func requestForwardedBy(t *testing.T, peer string, forwardedFor string) melodyhttpcontract.Request {
     t.Helper()
 
@@ -40,7 +39,6 @@ func requestForwardedBy(t *testing.T, peer string, forwardedFor string) melodyht
     return melodyhttp.NewRequest(httpRequest, nil, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("budget-test", time.Now())})
 }
 
-/* resolvedBudgetKey reads the key the budget charges, over a resolver whose entries are the given list — addresses and prefixes taken as written, so no name is looked up here; what these tests assert is what the resolver does with a peer and a header, not how a name resolves */
 func resolvedBudgetKey(t *testing.T, trustedProxyList []string, peer string, forwardedFor string) string {
     t.Helper()
 
@@ -76,9 +74,6 @@ func (instance *stubEnvironmentSource) Load(ctx context.Context) (map[string]str
     return instance.values, nil
 }
 
-/* refusingConnector stands in for a driver that is never dialed. database/sql opens lazily, and nothing in
-   these tests issues a query, so a connector that refuses every connection is the cheapest handle that is a
-   real *bun.DB: it proves the tests measure the wiring rather than a server. */
 type refusingConnector struct{}
 
 func (instance *refusingConnector) Connect(ctx context.Context) (driver.Conn, error) {
@@ -93,9 +88,6 @@ func newUndialedDatabase() *bun.DB {
     return bun.NewDB(sql.OpenDB(&refusingConnector{}), mysqldialect.New())
 }
 
-/* containerRegistrar is the container under the name-based registrar the composition root is handed. The
-   application supplies this method by delegating to MustRegister; the container itself carries only the
-   Registrar half, so a test that drives a registration door needs the same one-line adapter. */
 type containerRegistrar struct {
     melodycontainercontract.Container
 }
@@ -108,7 +100,6 @@ func (instance containerRegistrar) RegisterService(
     instance.MustRegister(serviceName, provider, options)
 }
 
-/* recoveredRefusal runs a step that refuses by panicking with an error, as the boot refusals do, and answers that error, or nil when the step returned */
 func recoveredRefusal(t *testing.T, step func()) (refusal error) {
     t.Helper()
 
@@ -143,7 +134,6 @@ func allowedBy(limiter melodyhttpcontract.RateLimiter, key string) bool {
     return decision.Allowed
 }
 
-/* mustCreateLock answers the lock a test's CreateLock made, a refusal failing the test where it happened */
 func mustCreateLock(lock melodylockcontract.Lock, createErr error) melodylockcontract.Lock {
     if nil != createErr {
         panic(createErr)

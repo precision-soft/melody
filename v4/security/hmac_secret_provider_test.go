@@ -7,7 +7,6 @@ import (
     "github.com/precision-soft/melody/v4/internal/testhelper"
 )
 
-/* the key-id↔application binding is only sound when each application's secret material is distinct, so the provider refuses the same secret bytes under key ids belonging to different applications — otherwise a holder could sign under a sibling application's key id and defeat the binding. */
 func TestStaticHmacSecretProvider_RejectsSecretReusedAcrossApplications(t *testing.T) {
     defer func() {
         if recovered := recover(); nil == recovered {
@@ -25,7 +24,6 @@ func TestStaticHmacSecretProvider_RejectsSecretReusedAcrossApplications(t *testi
     })
 }
 
-/* positive control: the same application may legitimately own several key ids (rotation overlap), even reusing material is fine within one application — only cross-app reuse is rejected. */
 func TestStaticHmacSecretProvider_AllowsMultipleKeysForOneApplication(t *testing.T) {
     provider := NewStaticHmacSecretProvider(HmacKeyRing{
         CurrentKeyId: "key-current",
@@ -51,7 +49,6 @@ func TestNewStaticHmacSecretProvider_RefusesAConfigurationThatCanNotSign(t *test
         _ = NewStaticHmacSecretProvider(HmacKeyRing{CurrentKeyId: "key-a", Keys: nil})
     }, "hmac secrets are empty")
 
-    /* the current key is what every outgoing envelope is signed with: naming one that resolves to no secret builds a provider that cannot sign at all, and the failure would otherwise surface at the first request rather than at boot */
     testhelper.AssertPanicsWithError(t, func() {
         _ = NewStaticHmacSecretProvider(HmacKeyRing{CurrentKeyId: "key-absent", Keys: validKeys})
     }, "hmac current key id has no secret")
@@ -87,7 +84,6 @@ func TestStaticHmacSecretProvider_AnswersFalseForAnUnknownKeyId(t *testing.T) {
     }
 }
 
-/* the secret is the whole credential: a caller that kept the slice it handed in, or that mutates the slice handed back, rewrites what every envelope of that application verifies against */
 func TestStaticHmacSecretProvider_OwnsItsSecretBytes(t *testing.T) {
     callerSecret := []byte("secret-value-of-thirty-two-bytes")
     provider := NewStaticHmacSecretProvider(HmacKeyRing{CurrentKeyId: "key-a", Keys: map[string]HmacKey{"key-a": {Application: "app-a", Secret: callerSecret}}})

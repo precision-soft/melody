@@ -133,7 +133,6 @@ func TestProductService_ViewsReadsBothCountersAndCountsNothing(t *testing.T) {
     }
 }
 
-/* windowRefusingCache refuses every door on the window counter's keys, so the total's succeeds alone */
 type windowRefusingCache struct {
     melodycachecontract.Cache
 }
@@ -169,7 +168,6 @@ func TestProductService_AWindowCounterRefusedIsAnswered(t *testing.T) {
     }
 }
 
-/* a write naming a category or a currency that does not exist is refused before it is tried, read from the repositories, and nothing is stored */
 func TestProductService_RefusesAReferenceThatNamesNothing(t *testing.T) {
     currencyService, _, runtimeInstance := currencyServiceUnderTest(t)
 
@@ -206,7 +204,6 @@ func TestCurrencyService_RefusesToDeleteACurrencyAProductIsPricedIn(t *testing.T
     }
 }
 
-/* paddingProductRepository answers a lookup the way MySQL's PAD SPACE collation does: trailing spaces of the identifier asked are ignored */
 type paddingProductRepository struct {
     repository.ProductRepository
 }
@@ -226,7 +223,6 @@ func TestProductService_FindByIdAnswersAPaddedIdentifierAsAbsentAndCachesNothing
     }, "prod-1")
 }
 
-/* the row is stored before the event goes out, so a failed event is no refusal: the caller is answered with the row, the failure is journaled, and the entries a listener that never ran would have dropped are dropped */
 func TestProductService_AnswersTheCommittedRowWhenADispatchFails(t *testing.T) {
     catalogue := newCatalogueUnderTest(t, true)
     catalogue.prime(t, CacheKeyProductList, CacheKeyProductById("prod-committed"))
@@ -266,7 +262,6 @@ func TestProductService_JournalsNothingWhenTheDispatchSucceeds(t *testing.T) {
     }
 }
 
-/* refusingUpdateProductRepository refuses every update after the change reached it, the way a write the database rejected leaves the caller's value changed */
 type refusingUpdateProductRepository struct {
     repository.ProductRepository
 }
@@ -339,7 +334,6 @@ func TestTheCatalogueListIsAnsweredTypedFromACacheWrittenByAnotherProcess(t *tes
         t.Fatalf("set: %v", setErr)
     }
 
-    /* no repository: a read that reached it would panic, so the list can only come from the store */
     products, listErr := NewProductService(nil, nil, nil, reader, nil, nil, time.Hour).List(exampleTestRuntime())
     if nil != listErr || 1 != len(products) || *stored[0] != *products[0] {
         t.Fatalf("expected the stored list answered typed, got %#v (%v)", products, listErr)

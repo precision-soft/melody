@@ -21,7 +21,6 @@ import (
     melodyhttp "github.com/precision-soft/melody/v4/http"
 )
 
-/* stubJournalRepository records what it was asked to write and can be told to refuse, which is the only way to observe what the trail does with a batch that did not land. */
 type stubJournalRepository struct {
     batches   [][]*repository.CatalogJournalEntry
     appendErr error
@@ -67,8 +66,6 @@ func newTestTrail(journalRepository repository.CatalogJournalRepository, request
     return trail
 }
 
-/* nothing may reach the journal before the flush: the whole reason the trail exists is that the write happens once, at a point the request can still be failed at */
-
 func TestRequestReportTrailWritesNothingBeforeFlush(t *testing.T) {
     journalRepository := &stubJournalRepository{}
     trail := newTestTrail(journalRepository, "request-1")
@@ -84,8 +81,6 @@ func TestRequestReportTrailWritesNothingBeforeFlush(t *testing.T) {
         t.Fatalf("expected the trail to hold the two recorded changes, got %v", trail.Entries())
     }
 }
-
-/* one request's changes go out as ONE batch, and every entry carries the request that caused it — a per-entry write would cost a round trip per change and an entry without the request id could not be traced back to it */
 
 func TestRequestReportTrailFlushesOneBatchStampedWithTheRequest(t *testing.T) {
     journalRepository := &stubJournalRepository{}
@@ -118,8 +113,6 @@ func TestRequestReportTrailFlushesOneBatchStampedWithTheRequest(t *testing.T) {
     }
 }
 
-/* a second flush must not write the same changes again: the flush middleware and the scope's Close both call it on the ordinary path, and a trail that re-wrote what it already wrote would double every journal entry in the application */
-
 func TestRequestReportTrailFlushIsIdempotent(t *testing.T) {
     journalRepository := &stubJournalRepository{}
     trail := newTestTrail(journalRepository, "request-2")
@@ -141,8 +134,6 @@ func TestRequestReportTrailFlushIsIdempotent(t *testing.T) {
     }
 }
 
-/* a flush nobody made must not be reported as one either: a read-only request resolves the trail too, and it may not pay a query for having changed nothing */
-
 func TestRequestReportTrailFlushOfAnEmptyTrailTouchesNothing(t *testing.T) {
     journalRepository := &stubJournalRepository{}
     trail := newTestTrail(journalRepository, "request-3")
@@ -155,8 +146,6 @@ func TestRequestReportTrailFlushOfAnEmptyTrailTouchesNothing(t *testing.T) {
         t.Fatalf("expected an empty trail to write nothing, got %d batch(es)", len(journalRepository.batches))
     }
 }
-
-/* a failed flush keeps the entries staged so Close can try again. Dropping them would lose the record of a change that DID happen, and re-trying cannot duplicate anything because the batch is written in one statement and fails as a whole */
 
 func TestRequestReportTrailKeepsEntriesStagedWhenTheFlushFails(t *testing.T) {
     journalRepository := &stubJournalRepository{appendErr: fmt.Errorf("database is gone")}
@@ -183,8 +172,6 @@ func TestRequestReportTrailKeepsEntriesStagedWhenTheFlushFails(t *testing.T) {
     }
 }
 
-/* the trail reads BOTH container levels: the request context of its own scope and the formatter singleton. A summary that named no request would mean the scoped registration handed it the wrong one */
-
 func TestRequestReportTrailSummaryNamesItsOwnRequest(t *testing.T) {
     trail := newTestTrail(&stubJournalRepository{}, "request-5")
 
@@ -199,7 +186,6 @@ func TestRequestReportTrailSummaryNamesItsOwnRequest(t *testing.T) {
     }
 }
 
-/* readingCache keeps the values it is given, as they are: the reading is a string either way, and a double that round-tripped through a serializer would answer the same string for a reason that has nothing to do with what these probes ask. */
 type readingCache struct {
     values map[string]any
     ttls   map[string]melodybound.Duration
@@ -394,7 +380,6 @@ func newReportServiceUnderTest(t *testing.T, clockInstance *melodyclock.FrozenCl
     return reportService
 }
 
-/* the archive is not a constructor argument: the service resolves it when Archive or RecentReadings is called, from the container the runtime carries, so the fixture registers the double under the repository's own name and hands back a runtime over that container — the composition root's shape, which is what the resolution is pinned on */
 func newReportServiceWithArchive(
     t *testing.T,
     clockInstance *melodyclock.FrozenClock,
@@ -437,7 +422,6 @@ func newArchiveRuntime(readingRepository repository.CatalogReadingRepository) me
     return melodyruntime.NewRun(context.Background(), serviceContainer.NewScope())
 }
 
-/* recordingReadingRepository is the archive as a test can inspect it: what it receives, in order, and a refusal it can be told to answer. It keeps the identity rule the two real implementations keep, one reading per instant, because a double that accepted what they refuse would leave the service's handling of that refusal unproven. */
 func newRecordingReadingRepository() *recordingReadingRepository {
     return &recordingReadingRepository{}
 }
@@ -492,7 +476,6 @@ func (instance *recordingReadingRepository) Count(ctx context.Context) (int, err
 
 var _ repository.CatalogReadingRepository = (*recordingReadingRepository)(nil)
 
-/* the stamp is what a caller reads to find out how old the answer is, so a cached reading carries the instant the reading was taken, not the moment it is served. */
 func TestCatalogReadingFromTheCacheKeepsTheInstantItWasTakenAt(t *testing.T) {
     takenAt := time.Date(2026, time.September, 6, 10, 0, 0, 0, time.UTC)
     clockInstance := melodyclock.NewFrozenClock(takenAt)
@@ -520,7 +503,6 @@ func TestCatalogReadingFromTheCacheKeepsTheInstantItWasTakenAt(t *testing.T) {
     }
 }
 
-/* a payload this service cannot read the stamp back from is not served as a reading at all: it would have to be given an instant nobody took. */
 func TestCatalogReadingTakesAFreshReadingWhenTheCachedPayloadCarriesNoInstant(t *testing.T) {
     servedAt := time.Date(2026, time.September, 6, 11, 0, 0, 0, time.UTC)
     clockInstance := melodyclock.NewFrozenClock(servedAt)
@@ -542,7 +524,6 @@ func TestCatalogReadingTakesAFreshReadingWhenTheCachedPayloadCarriesNoInstant(t 
     }
 }
 
-/* the archive records what the reading SAYS, and the instant it is keyed on is the one the reading states about itself — truncated to the second, which is the resolution the payload's own recorded_at carries. A key kept finer would disagree with the value it keys. */
 func TestArchiveRecordsTheReadingUnderTheInstantItStatesAboutItself(t *testing.T) {
     takenAt := time.Date(2026, time.September, 7, 10, 0, 0, 987654321, time.UTC)
     clockInstance := melodyclock.NewFrozenClock(takenAt)
@@ -579,7 +560,6 @@ func TestArchiveRecordsTheReadingUnderTheInstantItStatesAboutItself(t *testing.T
     }
 }
 
-/* the truncation is what makes the duplicate reachable at all, so this is the pair that proves it: two archives of readings taken 300ms apart are the SAME reading, and the second is told it did not write rather than failing. */
 func TestArchiveTreatsAReadingAlreadyRecordedAsNotWrittenRatherThanAsAFailure(t *testing.T) {
     takenAt := time.Date(2026, time.September, 7, 10, 0, 0, 100000000, time.UTC)
     clockInstance := melodyclock.NewFrozenClock(takenAt)
@@ -613,7 +593,6 @@ func TestArchiveTreatsAReadingAlreadyRecordedAsNotWrittenRatherThanAsAFailure(t 
     }
 }
 
-/* every other failure of the archive IS a failure: an archive that could not be reached must not be reported as a reading that was already there. */
 func TestArchiveHandsBackAFailureThatIsNotADuplicate(t *testing.T) {
     clockInstance := melodyclock.NewFrozenClock(time.Date(2026, time.September, 7, 10, 0, 0, 0, time.UTC))
     cacheInstance := &readingCache{values: map[string]any{}}
@@ -634,7 +613,6 @@ func TestArchiveHandsBackAFailureThatIsNotADuplicate(t *testing.T) {
     }
 }
 
-/* ArchivedInstantOf is the identity itself, so it is pinned on values rather than only through the door: a fractional instant loses its fraction, a zone becomes UTC, and an instant already on the second is unchanged. */
 func TestArchivedInstantOfTruncatesToTheSecondInUtc(t *testing.T) {
     eastern := time.FixedZone("east", 3*60*60)
 
@@ -654,7 +632,6 @@ func TestArchivedInstantOfTruncatesToTheSecondInUtc(t *testing.T) {
     }
 }
 
-/* the listing is the read half, and it hands back what the archive holds newest first. */
 func TestRecentReadingsAnswersTheArchive(t *testing.T) {
     takenAt := time.Date(2026, time.September, 7, 10, 0, 0, 0, time.UTC)
     clockInstance := melodyclock.NewFrozenClock(takenAt)
@@ -685,7 +662,6 @@ func TestRecentReadingsAnswersTheArchive(t *testing.T) {
     }
 }
 
-/* the counts the row carries are the reading's own, read out of its payload: a product created and its cached list dropped between Refresh and Archive, as the http process's listener does on the shared cache, leaves the row's counts equal to the payload's, and the catalogue's database stays off an archive write that needs nothing from it. */
 func TestArchiveCarriesTheCountsTheReadingStatesRatherThanASecondObservation(t *testing.T) {
     takenAt := time.Date(2026, time.September, 7, 10, 0, 0, 0, time.UTC)
     clockInstance := melodyclock.NewFrozenClock(takenAt)
@@ -713,7 +689,6 @@ func TestArchiveCarriesTheCountsTheReadingStatesRatherThanASecondObservation(t *
     }
 }
 
-/* a payload without counts is a reading this service did not write, and a row with counts taken elsewhere would be a second observation by another name */
 func TestArchiveRefusesAPayloadThatCarriesNoCounts(t *testing.T) {
     clockInstance := melodyclock.NewFrozenClock(time.Date(2026, time.September, 7, 10, 0, 0, 0, time.UTC))
     archive := newRecordingReadingRepository()
@@ -730,7 +705,6 @@ func TestArchiveRefusesAPayloadThatCarriesNoCounts(t *testing.T) {
     }
 }
 
-/* the archive is resolved when it is asked for, from the container the runtime carries: a container without it fails the archive door alone, and constructing the service costs no archive at all — which is the whole point of the resolution being late. */
 func TestArchiveResolvesTheRepositoryAtTheCallAndNotAtConstruction(t *testing.T) {
     clockInstance := melodyclock.NewFrozenClock(time.Date(2026, time.September, 7, 10, 0, 0, 0, time.UTC))
     cacheInstance := &readingCache{values: map[string]any{}}
@@ -751,7 +725,6 @@ func TestArchiveResolvesTheRepositoryAtTheCallAndNotAtConstruction(t *testing.T)
     }
 }
 
-/* a stamp that is there and does not parse is no more an instant than an absent one: served, the reading would claim FromCache with a zero instant, the one thing a caller reads to know how old the answer is */
 func TestCatalogReadingTakesAFreshReadingWhenTheCachedInstantDoesNotParse(t *testing.T) {
     servedAt := time.Date(2026, time.September, 6, 11, 0, 0, 0, time.UTC)
     clockInstance := melodyclock.NewFrozenClock(servedAt)
@@ -790,7 +763,6 @@ func TestCatalogReadingTakesAFreshReadingOverAnEntryOfAnotherType(t *testing.T) 
     }
 }
 
-/* the cached reading outlives the hourly schedule by its margin whatever shorter interval is configured, so the door serves the schedule's reading until the next one replaces it */
 func TestCatalogRefreshCachesTheReadingPastTheHourlySchedule(t *testing.T) {
     clockInstance := melodyclock.NewFrozenClock(time.Date(2026, time.September, 6, 10, 0, 0, 0, time.UTC))
     cacheInstance := &readingCache{values: map[string]any{}}
@@ -889,7 +861,6 @@ func TestCatalogReportServiceRefresh_ListsTheProductsThroughItsContext(t *testin
     }
 }
 
-/* the headline counts what the reading counted, fresh and served from the cache alike, never the page size the service is configured with */
 func TestCatalogReadingHeadlineCountsTheProductsTheReadingCounted(t *testing.T) {
     clockInstance := melodyclock.NewFrozenClock(time.Date(2026, time.September, 6, 10, 0, 0, 0, time.UTC))
     cacheInstance := &readingCache{values: map[string]any{}}
@@ -924,7 +895,6 @@ func (instance *countedProductRepository) All(ctx context.Context) ([]*entity.Pr
     return products, nil
 }
 
-/* the headline counts the products, read back from the cached payload's products field, never the journal's count */
 func TestCatalogReadingHeadlineCountsTheProductsNotTheJournal(t *testing.T) {
     clockInstance := melodyclock.NewFrozenClock(time.Date(2026, time.September, 6, 10, 0, 0, 0, time.UTC))
     cacheInstance := &readingCache{values: map[string]any{}}

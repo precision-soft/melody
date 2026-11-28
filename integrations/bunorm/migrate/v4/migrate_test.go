@@ -227,7 +227,6 @@ func TestRunQueries_EmptySetWarnsInsteadOfReportingSuccess(t *testing.T) {
     }
 }
 
-/* the failure rendering hands the terminal three foreign strings — the query name, the driver's error text and the statement — so each is escaped visibly, and the statement alone keeps its real line breaks, which are the readability of the query block. */
 func TestMigrationPrinter_PrintFailedEscapesForeignTextButKeepsTheQueryLines(t *testing.T) {
     buffer := &bytes.Buffer{}
     printer := &migrationPrinter{writer: buffer, noColor: true}
@@ -262,7 +261,6 @@ func TestMigrationPrinter_PrintFailedEscapesForeignTextButKeepsTheQueryLines(t *
     }
 }
 
-/* the empty and the success lines of a run carry the migration name, which the runner did not write; they escape it in both colour modes, and the per-query lines, which carry it inside the prefix, are checked on a run of their own below */
 func TestMigrationPrinter_EscapesTheMigrationNameOnTheEmptyAndSuccessLines(t *testing.T) {
     for _, noColor := range []bool{true, false} {
         buffer := &bytes.Buffer{}
@@ -296,7 +294,6 @@ func TestRunQueries_ReadsTheOptionCarriedByTheContext(t *testing.T) {
     }
 }
 
-/* the prefix of every per-query line carries the migration name, the author's own text, so the executing, completed and failed lines escape it as they escape the query name beside it. The run's second query fails, so all three lines print, in both colour modes: the name is escaped on every line and no raw escape byte reaches the writer. */
 func TestRunQueries_EscapesTheMigrationNameInsideThePrefixOfEveryPerQueryLine(t *testing.T) {
     for _, noColor := range []bool{true, false} {
         database, recorder := newFakeBunDatabase()
@@ -321,7 +318,6 @@ func TestRunQueries_EscapesTheMigrationNameInsideThePrefixOfEveryPerQueryLine(t 
 
         rendered := buffer.String()
 
-        /* executing + completed for the first query, executing + FAILED for the second carry the prefix in both modes; the ERROR and QUERY lines carry it only without colour, where the colour is what sets them apart */
         prefixedLines := 4
         if true == noColor {
             prefixedLines = 6
@@ -356,13 +352,11 @@ func TestRunQueries_EscapesTheDirectionOnEveryLine(t *testing.T) {
     if true == strings.Contains(rendered, "\r") {
         t.Fatalf("expected no raw carriage return from the direction, got %q", rendered)
     }
-    /* executing and completed for the query, the success line, the empty line */
     if 4 != strings.Count(rendered, `[migration:up\rinjected]`) {
         t.Fatalf("expected the escaped direction on all four lines, got %q", rendered)
     }
 }
 
-/* an explicit option that names no writer prints under the command's posture, so a migration that passes one to set the colour alone does not print past the writer its command chose */
 func TestUp_AnOptionWithoutAWriterPrintsUnderTheCommandsPosture(t *testing.T) {
     var commandWriter bytes.Buffer
     ctx := withRunnerOptions(context.Background(), RunnerOptions{Writer: &commandWriter, NoColor: true})

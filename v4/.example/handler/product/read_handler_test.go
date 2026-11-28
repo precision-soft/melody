@@ -35,8 +35,6 @@ func conversionProduct() *entity.Product {
     return entity.NewProduct("prod-1", "probe", "probe", "cat-1", 149.99, "cur-eur", 1, conversionQuoteInstant, conversionQuoteInstant)
 }
 
-/* the door reads nothing off the runtime, so the request is built without one: what it needs is the query
-   bag, and NewRequest fills that from the url at construction. */
 func conversionRequest(t *testing.T, target string) melodyhttpcontract.Request {
     t.Helper()
 
@@ -122,8 +120,6 @@ func TestConvertedPriceFor_StampsTheOlderOfTheTwoQuotes(t *testing.T) {
     }
 }
 
-/* the SHAPE of a query parameter is the client's to choose, so ?currency=USD&currency=RON has to be answered
-   rather than refused: the first value wins, as it does at the framework's own Input door. */
 func TestConvertedPriceFor_TakesTheFirstValueOfARepeatedParameter(t *testing.T) {
     converted, err := convertedPriceFor(
         conversionRequest(t, "/products/api/read/prod-1/?currency=USD&currency=RON"),
@@ -157,15 +153,12 @@ func TestConvertedPriceFor_RefusesACurrencyTheCatalogueDoesNotCarry(t *testing.T
         t.Errorf("the refusal reads %q and does not name the code that was refused", err.Error())
     }
 
-    /* the caller's mistake, so the door answers it as the caller's 400 */
     var serverRefusal *conversionRefusal
     if true == errors.As(err, &serverRefusal) {
         t.Errorf("an unknown code was marked as the server's refusal")
     }
 }
 
-/* the product's own currency is looked up in the same list, so a catalogue that lost it refuses rather than
-   converting from a zero-valued currency it invented */
 func TestConvertedPriceFor_RefusesWhenTheProductsOwnCurrencyIsMissing(t *testing.T) {
     catalogue := []*entity.Currency{
         entity.NewCurrency("cur-usd", "USD", "US Dollar", 1.0842, conversionQuoteInstant),
@@ -180,15 +173,12 @@ func TestConvertedPriceFor_RefusesWhenTheProductsOwnCurrencyIsMissing(t *testing
         t.Fatalf("a product quoted in a missing currency was converted into %+v", converted)
     }
 
-    /* the catalogue's fault, not the caller's — the caller sent a code the catalogue carries — so the door
-       answers it as a 500 with the cause journaled, not as a 400 the caller cannot act on */
     var serverRefusal *conversionRefusal
     if false == errors.As(err, &serverRefusal) {
         t.Errorf("a product quoted in a missing currency was refused as the caller's mistake: %v", err)
     }
 }
 
-/* the same distinction for a stored rate that is not a usable price: the caller cannot fix the row */
 func TestConvertedPriceFor_MarksAnUnusableStoredRateAsTheServersRefusal(t *testing.T) {
     catalogue := []*entity.Currency{
         entity.NewCurrency("cur-eur", "EUR", "Euro", 0, conversionQuoteInstant),
@@ -262,7 +252,6 @@ func TestRecordedViews_LeavesBothOutWhenTheCacheRefused(t *testing.T) {
     }
 }
 
-/* a product priced in a currency the catalogue does not carry is the catalogue's fault: the door answers 500 without naming what the catalogue lost, and a code the catalogue does not carry stays the caller's 400 */
 func TestApiReadDoor_AnswersAMissingProductCurrencyAs500WithoutTheCause(t *testing.T) {
     fixture := newProductDoorFixture(t)
 
@@ -359,7 +348,6 @@ func TestApiReadDoorsEndWithTheRequest(t *testing.T) {
     })
 }
 
-/* the read door trims the path identifier as the delete door does, so one spelling names one product at every door */
 func TestApiReadDoor_FindsTheProductUnderAPaddedIdentifierAsTheDeleteDoorDoes(t *testing.T) {
     fixture := newProductDoorFixture(t)
 

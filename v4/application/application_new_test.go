@@ -106,7 +106,7 @@ func TestWorkingDirectoryHasEnvironmentFile_IgnoresDirectoryNamedDotEnv(t *testi
     }
 }
 
-/* stat-ing through a regular file yields ENOTDIR, which is how the non-not-exist stat error is produced here without permission tricks. */
+/* stat-ing through a regular file yields ENOTDIR, a non-not-exist stat error without permission tricks */
 func TestWorkingDirectoryHasEnvironmentFile_TreatsUnprovableStatErrorAsPresent(t *testing.T) {
     directory := t.TempDir()
 
@@ -149,7 +149,6 @@ func TestIsGoRunExecutableDirectory_MatchesOnlyTheToolsTemporaryDirectories(t *t
     }
 }
 
-/* the refusal of an executable path whose symlinks cannot be followed carries the path handed in, since the resolved one is empty on a failure. */
 func TestResolveExecutablePath_RefusalCarriesThePathAsHanded(t *testing.T) {
     missingPath := filepath.Join(t.TempDir(), "missing", "binary")
 
@@ -438,7 +437,6 @@ func TestNewApplication_HttpKernelSessionEmptyOnOutage_KeyOffWinsOverTheField(t 
     }
 }
 
-/* the key only hardens: true would serve an empty session where the Go field answers 503, so only the Go field loosens the outage answer */
 func TestNewApplication_HttpSessionEmptyOnOutageKey_TrueRefusedNamingTheKey(t *testing.T) {
     if value := os.Getenv(newApplicationRefusalProbeMarker); "" != value {
         bootServingTestApplicationWithEnvironment(t, config.EnvironmentProduction, config.HttpSessionEmptyOnOutageKey+"="+value+"\n", ApplicationConfig{HttpKernel: http.KernelConfig{SessionPolicy: httpcontract.SessionPolicy{EmptyOnOutage: true}}}, nil)
@@ -492,7 +490,6 @@ func TestNewApplication_HttpKernelSessionCookieSecure_KeyWinsOverTheField(t *tes
     }
 }
 
-/* the key only hardens: from-scheme would lower a Go always, so only the Go field lowers the policy */
 func TestNewApplication_HttpSessionCookieSecureKey_RefusedNamingTheKey(t *testing.T) {
     if value := os.Getenv(newApplicationRefusalProbeMarker); "" != value {
         bootServingTestApplicationWithEnvironment(t, config.EnvironmentProduction, config.HttpSessionCookieSecureKey+"="+value+"\n", ApplicationConfig{HttpKernel: http.KernelConfig{SessionCookiePolicy: httpcontract.SessionCookiePolicy{Secure: httpcontract.SessionCookieSecureAlways}}}, nil)

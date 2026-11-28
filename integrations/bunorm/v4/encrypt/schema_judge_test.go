@@ -19,7 +19,6 @@ import (
     "github.com/precision-soft/melody/v4/exception"
 )
 
-/* judgeTable scripts accounts(id, notes) with the given columns, indexes, charsets and sql_mode, and one sealed-free row */
 func judgeTable(columns [][]driver.Value, indexes [][]driver.Value, charsets [][]driver.Value, sqlMode string) []scriptedSqlResponse {
     return []scriptedSqlResponse{
         {fragment: "IS_NULLABLE", columns: []string{"COLUMN_NAME", "IS_NULLABLE"}, rows: columns},
@@ -93,7 +92,6 @@ func TestMigrate_ResolvesAColumnToTheSpellingTheTableStores(t *testing.T) {
     }
 }
 
-/* two binding keys naming one stored column are refused, as two columns are: kept, the binding map iteration picks would differ from one run to the next */
 func TestMigrate_RefusesAColumnBoundTwiceBeforeReadingTheTable(t *testing.T) {
     migrator, stub := newScriptedMigrator(t, judgeTable(accountsColumns, accountsPrimary, nil, "STRICT_TRANS_TABLES"))
 
@@ -290,7 +288,7 @@ func TestMigrateDecrypt_LiveAStrictSessionRefusesTheLossyWriteAndKeepsTheSeal(t 
     }
 
     rendered := fmt.Sprintf("%v %+v", runErr, exception.LogContext(runErr, exception.LogContextOptions{}))
-    /* MySQL 8.4 answers this write with 3988, a conversion impossible for the parameter, whose message names no value; a 1366 or a 1062, which do quote it, is withheld by the run */
+    /* MySQL 8.4 answers this write with 3988, whose message names no value */
     if true == strings.Contains(rendered, "secret") || true == strings.Contains(rendered, "\\xC5") {
         t.Fatalf("expected no plaintext in the refusal, got %s", rendered)
     }

@@ -63,7 +63,6 @@ func TestEnsureMigratedRunsOncePerHandle(t *testing.T) {
         t.Fatalf("expected the migration run to succeed, got %v", ensureErr)
     }
 
-    /* the first resolution must have DONE the work: without this the test cannot tell once-then-skipped apart from never-at-all, and a guard inverted to skip the first run answers both calls with silence */
     if createCount := recorder.countMatching(isExampleCreateTable); 10 != createCount {
         t.Fatalf("expected the first resolution to apply the set, got %d creates", createCount)
     }
@@ -110,7 +109,6 @@ func TestEnsureMigratedSkipsWhenTheLockIsHeldAndNothingIsPending(t *testing.T) {
         t.Fatal("expected the never-held lock to never be released")
     }
 
-    /* the observed competitor success is recorded like an own one: the next resolution asks nothing */
     recorder.reset()
     recorder.execHook = nil
     recorder.queryHook = nil
@@ -160,7 +158,6 @@ func TestEnsureMigratedRefusesAfterTheRetryWindowNamingTheRemedy(t *testing.T) {
         t.Fatal("expected the bun lock error to stay reachable as the cause")
     }
 
-    /* a refusal is not a success: the next resolution tries again */
     recorder.reset()
     recorder.execHook = nil
 
@@ -178,7 +175,6 @@ func TestEnsureMigratedReleasesTheLockOnACancelledContext(t *testing.T) {
     cancellableContext, cancel := context.WithCancel(context.Background())
     defer cancel()
 
-    /* the fake connection refuses a cancelled context before recording, so the unlock delete can appear below only by riding a context detached from the cancelled one */
     recorder.execHook = func(query string) error {
         if true == isExampleCreateTable(query) {
             cancel()
@@ -229,7 +225,6 @@ func TestEnsureMigratedSerializesConcurrentResolutions(t *testing.T) {
     }
 }
 
-/* the journal table is the one this major keeps in the same set instead of a context of its own, so the set applying without it would leave catalog:journal reading a table nothing creates */
 func TestEnsureMigratedCreatesTheJournalTableWithTheCatalogue(t *testing.T) {
     database, recorder := newFakeBunDatabase()
 
@@ -242,7 +237,6 @@ func TestEnsureMigratedCreatesTheJournalTableWithTheCatalogue(t *testing.T) {
     }
 }
 
-/* the released lock is the whole point of the deferred unlock, so a release that fails becomes the verdict rather than being dropped: a lock row that survives refuses every later migration on every process, and a resolution that answered success would leave the operator with a database nothing can migrate and no error saying why. */
 func TestEnsureMigratedReportsAFailedUnlockAsTheVerdict(t *testing.T) {
     database, recorder := newFakeBunDatabase()
 
@@ -274,12 +268,10 @@ func TestEnsureMigratedReportsAFailedUnlockAsTheVerdict(t *testing.T) {
         t.Fatal("expected the release failure to stay reachable as the cause")
     }
 
-    /* the migration ran: the failure is about the release, not about the set */
     if createCount := recorder.countMatching(isExampleCreateTable); 10 != createCount {
         t.Fatalf("expected the set to have been applied before the release failed, got %d creates", createCount)
     }
 
-    /* and it is not recorded as a success: the next resolution tries again */
     recorder.reset()
     recorder.execHook = nil
 
@@ -288,7 +280,6 @@ func TestEnsureMigratedReportsAFailedUnlockAsTheVerdict(t *testing.T) {
     }
 }
 
-/* the two-factor enrollment table is this major's own: neither frozen major carries it, and the set applying without it would leave the enrollment flow reading a table nothing creates */
 func TestEnsureMigratedCreatesTheTwoFactorTableWithTheCatalogue(t *testing.T) {
     database, recorder := newFakeBunDatabase()
 
@@ -301,7 +292,6 @@ func TestEnsureMigratedCreatesTheTwoFactorTableWithTheCatalogue(t *testing.T) {
     }
 }
 
-/* the wait is paid once, not once per resolution: the whole protocol runs under one process mutex, so without the memo a lock nobody releases would cost the window to every caller in turn. The refusal is the same value, handed back, so the assertion is on the cost and on the identity of what is returned, the two things that separate a remembered refusal from a repeated one. */
 func TestEnsureMigratedAnswersARememberedRefusalWithoutWaitingAgain(t *testing.T) {
     database, recorder := newFakeBunDatabase()
 
@@ -343,7 +333,6 @@ func TestEnsureMigratedAnswersARememberedRefusalWithoutWaitingAgain(t *testing.T
     }
 }
 
-/* the memory is not a verdict: once the window it is recorded for has passed, the next resolution asks the database again, so a released lock heals the process without a restart. */
 func TestEnsureMigratedForgetsTheRefusalOnceItsWindowHasPassed(t *testing.T) {
     database, recorder := newFakeBunDatabase()
 
@@ -378,11 +367,6 @@ func TestEnsureMigratedForgetsTheRefusalOnceItsWindowHasPassed(t *testing.T) {
     }
 }
 
-/* Reset is the door an operator reaches for when a volume was provisioned by an older build, so what it
-   has to do is more than re-run the set: it drops the schema, drops the BOOKKEEPING with it — which is
-   where an older set's rows live — and applies the schema again. The order is the assertion, because a
-   reset that dropped the bookkeeping before the schema would leave the tables standing with no record of
-   them. */
 func TestResetDropsTheSchemaAndTheBookkeepingThenAppliesTheSchemaAgain(t *testing.T) {
     database, recorder := newFakeBunDatabase()
 
@@ -415,8 +399,6 @@ func TestResetDropsTheSchemaAndTheBookkeepingThenAppliesTheSchemaAgain(t *testin
     }
 }
 
-/* the memo is what would otherwise answer for a state the reset has just taken away: a resolution later in
-   the same process reads "already migrated" and finds no tables. */
 func TestResetClearsTheMemoForTheHandle(t *testing.T) {
     database, _ := newFakeBunDatabase()
     memoizationKey := migratedSetKey{database: database, migrationSet: Migrations}
@@ -443,7 +425,6 @@ func TestResetClearsTheMemoForTheHandle(t *testing.T) {
     }
 }
 
-/* the memo key is the handle and the set together, so one handle asked for both sets runs both; keyed by the handle alone, the first set applied would answer for the second and the archive's table would never be created on an application that keeps both on one connection. It is driven through the funnel rather than by writing the map, because the key is computed inside the funnel and a test that built it would assert its own arithmetic. The two sets share one handle deliberately: over two handles the memo separates them under either key. */
 func TestTheMemoDoesNotLetOneSetAnswerForTheOther(t *testing.T) {
     database, recorder := newFakeBunDatabase()
 
@@ -464,9 +445,6 @@ func TestTheMemoDoesNotLetOneSetAnswerForTheOther(t *testing.T) {
         t.Fatalf("archive set: %v", archiveErr)
     }
 
-    /* the archive's own table is what says the second set RAN. With the memo keyed on the handle alone the
-       catalogue's entry answers for the archive, EnsureArchiveMigrated returns nil having done nothing,
-       and this statement never reaches the recorder. */
     sawArchiveTable := 0 < recorder.countMatching(func(query string) bool {
         return strings.Contains(query, CatalogReadingTableName)
     })
@@ -476,7 +454,6 @@ func TestTheMemoDoesNotLetOneSetAnswerForTheOther(t *testing.T) {
     }
 }
 
-/* a failure of the database on the archive's first resolution is handed back as this application's exception naming the set and the step, with the driver's error as the cause, so the headline says which database refused rather than the container's by-type relabelling "service not registered in resolver", and errors.Is still reaches the cause. */
 func TestEnsureArchiveMigratedNamesTheArchiveSetAndTheStepOverADatabaseThatRefuses(t *testing.T) {
     database, recorder := newFakeBunDatabase()
 
@@ -507,7 +484,6 @@ func TestEnsureArchiveMigratedNamesTheArchiveSetAndTheStepOverADatabaseThatRefus
     }
 }
 
-/* the lock refusal already names its remedy; wrapping it again would bury the remedy under a second headline, so an exception of this application's own is handed back as it is */
 func TestMigrationStepFailureLeavesAnOwnExceptionUntouched(t *testing.T) {
     own := exception.NewError("migration: the migration lock is held", nil, nil)
 
@@ -516,7 +492,6 @@ func TestMigrationStepFailureLeavesAnOwnExceptionUntouched(t *testing.T) {
     }
 }
 
-/* a lock wait that ends because the process is going away hands back the set's own exception, not a bare context.Canceled, which a by-type resolution would wrap under "service resolution failed in resolver". errors.Is still reaches the cancellation. */
 func TestEnsureMigratedNamesTheSetWhenTheLockWaitIsCancelled(t *testing.T) {
     database, recorder := newFakeBunDatabase()
 
@@ -749,7 +724,6 @@ func TestInitializeMigrationBookkeepingSurvivesConcurrentCreatorsOnPostgres(t *t
     }
 }
 
-/* only the primary key's duplicate entry means another process holds the lock; any other refusal of the lock INSERT — a missing grant here — is the database refusing this process, which no wait heals and which the unlock command would not clear */
 func TestEnsureMigratedRefusesALockInsertTheDatabaseDeniesAtOnce(t *testing.T) {
     database, recorder := newFakeBunDatabase()
 
@@ -893,7 +867,6 @@ func TestEnsureMigratedRefusesATransientLockRefusalThatOutlivesTheWindow(t *test
     }
 }
 
-/* the refusal is a plain error, which the fourth class refuses as the database's, so only the context class answers the context */
 func TestEnsureMigratedAnswersTheContextThatEndedDuringTheLockInsert(t *testing.T) {
     database, recorder := newFakeBunDatabase()
 

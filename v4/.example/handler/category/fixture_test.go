@@ -41,7 +41,6 @@ func (instance *stubEnvironmentSource) Load(ctx context.Context) (map[string]str
     return instance.values, nil
 }
 
-/* categoryDoorFixture carries what the four doors read: the configuration, the validator and the serializer the binding and the presenter reach, and the category service over the in-memory repositories a handleless catalog storage answers, seeded as the application seeds them, so a door is pinned on what it wrote and not only on what it refused */
 type categoryDoorFixture struct {
     container          melodycontainercontract.Container
     categoryRepository repository.CategoryRepository
@@ -135,7 +134,6 @@ func newCategoryDoorFixture(t *testing.T) *categoryDoorFixture {
     }
 }
 
-/* runtimeFor answers a runtime whose security context holds a token carrying the roles given */
 func (instance *categoryDoorFixture) runtimeFor(roles ...string) melodycontainercontract.Runtime {
     runtimeInstance := melodyruntime.NewRequest(context.Background(), instance.container.NewScope())
 
@@ -153,7 +151,6 @@ func (instance *categoryDoorFixture) runtimeFor(roles ...string) melodycontainer
     return runtimeInstance
 }
 
-/* call runs a door with the body and the route parameters given and answers the status and the body */
 func (instance *categoryDoorFixture) call(
     t *testing.T,
     handler melodyhttpcontract.Handler,

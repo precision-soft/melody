@@ -27,7 +27,6 @@ import (
     "github.com/precision-soft/melody/v4/logging"
 )
 
-/* the in-process cron runner dispatches overlapping executions of one command, so concurrent first runs must share one memoized migrator and run the database resolver exactly once — an unsynchronized memo races, and every loser opens a connection pool nothing ever closes. */
 func TestEncryptDatabaseCommand_ConcurrentRunsShareOneResolvedMigrator(t *testing.T) {
     var resolveCount atomic.Int32
 
@@ -94,7 +93,6 @@ func runEncryptDatabaseCommand(t *testing.T, command *EncryptDatabaseCommand, ex
     )
 }
 
-/* a negative batch silently became the default of 500, so the operator who believed they had throttled the run had not */
 func TestEncryptDatabaseCommand_RefusesANegativeBatch(t *testing.T) {
     command := NewEncryptDatabaseCommand(NewFakeCipher(), EncryptDatabaseCommandConfig{Database: newMysqlDatabase()})
 
@@ -112,7 +110,6 @@ func TestEncryptDatabaseCommand_RefusesANegativeBatch(t *testing.T) {
     }
 }
 
-/* a run without --table or --column, or with one of them present and empty, is refused by naming the three flags in the message itself, since a reason carried as the cause does not reach the terminal through the exit line */
 func TestEncryptDatabaseCommand_RefusesAMissingTableOrColumnByName(t *testing.T) {
     for _, arguments := range [][]string{
         {},
@@ -136,7 +133,6 @@ func TestEncryptDatabaseCommand_RefusesAMissingTableOrColumnByName(t *testing.T)
     }
 }
 
-/* a run that stops halfway leaves the column mixed; the rows already converted are the one number that says what a re-run costs */
 func TestEncryptDatabaseCommand_CarriesTheProcessedCountOnFailure(t *testing.T) {
     command := NewEncryptDatabaseCommand(NewFakeCipher(), EncryptDatabaseCommandConfig{Database: newMysqlDatabase()})
 
@@ -155,7 +151,6 @@ func TestEncryptDatabaseCommand_CarriesTheProcessedCountOnFailure(t *testing.T) 
     }
 }
 
-/* the reason of a refused run lives in its cause chain, which the exit line does not print, so the run writes the chain on the error stream, never where the command's document goes, escaped since a driver refusal echoes the values it is handed, and keeps the error's message for the journal */
 func TestEncryptDatabaseCommand_WritesTheCauseChainOfARefusedRun(t *testing.T) {
     command := NewEncryptDatabaseCommand(
         NewFakeCipher(),
@@ -200,7 +195,6 @@ func TestEncryptDatabaseCommand_WritesTheCauseChainOfARefusedRun(t *testing.T) {
     }
 }
 
-/* a typed nil set as the error writer is a stream left unset, as the engine reads it: the run falls back to standard error and answers its refusal rather than panicking on the write */
 func TestEncryptDatabaseCommand_ATypedNilErrorWriterFallsBackToStandardError(t *testing.T) {
     var nilBuffer *bytes.Buffer
 
@@ -229,7 +223,7 @@ func (instance refusingConnector) Driver() driver.Driver {
     return fakeDriver{}
 }
 
-/* the `--batch` flag parses in base ten, as the standard integer flags do: with the engine's inferred base --batch=010 would read as eight and --batch=08 would be refused */
+/* with the engine's inferred base --batch=010 would read as eight and --batch=08 would be refused */
 func TestEncryptDatabaseCommand_IntegerFlagsParseInBaseTen(t *testing.T) {
     for _, flagName := range []string{"batch"} {
         for spelling, expected := range map[string]int{"010": 10, "08": 8} {
@@ -395,7 +389,6 @@ func TestEncryptDatabaseCommand_RunsAnUndeclaredColumnUnbound(t *testing.T) {
     }
 }
 
-/* a physical table spelled otherwise than the label binds its column through the flag */
 func TestEncryptDatabaseCommand_SealBindingFlagNamesTheLabel(t *testing.T) {
     cipherInstance := newRotationCipher(t)
     command, stub := newScriptedNotesCommand(t, cipherInstance, [][]driver.Value{{"1", "plain"}}, SealBindingConfig{Reference: accountsNotesBinding{}})
@@ -438,7 +431,6 @@ func TestEncryptDatabaseCommand_RefusesASealBindingFlagItCannotResolve(t *testin
             }
 
             runErr := runCommandLine(t, command, logging.NewNopLogger(), arguments...)
-            /* the flag's refusal is read on the terminal, so its message is what says which part of the line is wrong */
             if nil == runErr || testCase.message != runErr.Error() {
                 t.Fatalf("expected %q, got %v", testCase.message, runErr)
             }
@@ -495,7 +487,6 @@ func TestEncryptDatabaseCommand_RefusesASealBindingWithoutAReference(t *testing.
     }
 }
 
-/* a run that bound nothing says so on its closing record, so step two of the roll-out is checkable */
 func TestEncryptDatabaseCommand_LogsAnUnboundRunAsBindingNothing(t *testing.T) {
     cipherInstance := newRotationCipher(t)
     command, _ := newScriptedNotesCommand(t, cipherInstance, [][]driver.Value{{"1", "plain"}})
@@ -566,7 +557,6 @@ func TestEncryptDatabaseCommand_RefusesAFlagItsModeDoesNotRead(t *testing.T) {
     }
 }
 
-/* a write the server refuses during a decrypt quotes the plaintext in its message; the error stream carries the refusal's number and never the value */
 func TestEncryptDatabaseCommand_TheErrorStreamOfARefusedDecryptWriteHoldsTheNumberNotTheValue(t *testing.T) {
     cipherInstance := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}}))
     sealed, sealErr := cipherInstance.Encrypt("secret plaintext", EncryptOptions{})
@@ -596,7 +586,6 @@ func TestEncryptDatabaseCommand_TheErrorStreamOfARefusedDecryptWriteHoldsTheNumb
     }
 }
 
-/* the closing record keys a bound column as the run resolved it against the schema, not the operator's spelling, in each of the three modes */
 func TestEncryptDatabaseCommand_LogsTheStoredSpelling(t *testing.T) {
     cipherInstance := newRotationCipher(t)
     sealed, _ := cipherInstance.Encrypt("sealed", EncryptOptions{})
@@ -634,7 +623,6 @@ func TestEncryptDatabaseCommand_LogsTheStoredSpelling(t *testing.T) {
     }
 }
 
-/* capitalisedNotesBinding declares the notes column's label in a spelling unlike the stored one, as an application whose model names its columns so may */
 type capitalisedNotesBinding struct {
     DefaultCipherReference
 }

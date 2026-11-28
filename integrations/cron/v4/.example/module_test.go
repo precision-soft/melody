@@ -16,7 +16,6 @@ import (
     "github.com/precision-soft/melody/v4/container/runtime"
 )
 
-/* moduleTestApplicationName is the cli name the test configuration answers, the name the playbook's ownership line carries */
 const moduleTestApplicationName = "billing"
 
 type moduleTestCliConfiguration struct{}
@@ -29,7 +28,6 @@ func (instance *moduleTestCliConfiguration) Description() string {
     return "billing"
 }
 
-/* moduleTestConfiguration answers the cli name and no parameter, so the generator reads its flags */
 type moduleTestConfiguration struct{}
 
 func (instance *moduleTestConfiguration) Get(name string) configcontract.Parameter {
@@ -68,7 +66,6 @@ func (instance *moduleTestConfiguration) Names() []string {
     return nil
 }
 
-/* the generator the module registers renders the ansible-cron dialect the module installs: the playbook opens with the dialect's own ownership line for the application, which only the template handed through ModuleConfig.Templates writes */
 func TestNewCronModule_TheGeneratorRendersTheAnsibleCronDialectTheModuleInstalls(t *testing.T) {
     commands := NewCronModule().RegisterCliCommands(nil)
     if 1 != len(commands) || "melody:cron:generate" != commands[0].Name() {

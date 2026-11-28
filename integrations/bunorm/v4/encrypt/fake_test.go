@@ -18,7 +18,6 @@ func TestFakeCipher_IsIdentity(t *testing.T) {
     }
 }
 
-/* the fake carries the binding door as the identity, so a bound column over it reads back what it stores */
 func TestFakeCipher_ServesABoundColumnAsIdentity(t *testing.T) {
     installCipher(t, crmCipherReference{}.CipherName(), NewFakeCipher())
     installSealBinding(t, crmIbanBinding{}, true)

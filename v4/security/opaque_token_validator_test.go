@@ -43,7 +43,6 @@ func TestOpaqueTokenValidator_ValidateRefusesATokenTheStoreDoesNotHold(t *testin
     }
 }
 
-/* a stored record with no subject would authenticate a principal nobody can name: the roles would still be granted, and every audit line downstream would carry an empty identifier */
 func TestOpaqueTokenValidator_ValidateRefusesAStoredRecordWithoutASubject(t *testing.T) {
     store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{})
     store.Put(newTestRuntime(), "opaque-empty", securitycontract.Claims{UserIdentifier: "", Roles: []string{"ROLE_USER"}}, bound.UnlimitedDuration())
@@ -54,7 +53,6 @@ func TestOpaqueTokenValidator_ValidateRefusesAStoredRecordWithoutASubject(t *tes
     }
 }
 
-/* a store that cannot answer is the platform's failure, not the token's: the mark is what lets the bearer source file it as the incident it is — every opaque-token caller degrading to anonymous at once — instead of the routine Info a bad token earns */
 func TestOpaqueTokenValidator_ValidateMarksAStoreFailureAsInfrastructure(t *testing.T) {
     lookupFailure := errors.New("redis is down")
 

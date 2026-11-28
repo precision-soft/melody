@@ -18,7 +18,6 @@ import (
     "github.com/redis/rueidis"
 )
 
-/* the namespace root is what the three example applications keep apart; the layout token inside it is what keeps two BUILDS of this one apart, so a build reads only what a build of the same layout wrote */
 func TestCacheKeyPrefix_CarriesTheLayoutTokenInsideTheNamespace(t *testing.T) {
     prefix := cacheKeyPrefix("melody-example-v4")
 
@@ -31,9 +30,6 @@ func TestCacheKeyPrefix_CarriesTheLayoutTokenInsideTheNamespace(t *testing.T) {
     }
 }
 
-/* the write allowance is thirty catalogue writes a minute per address: a person editing the nomenclature
-   never meets it and a script does. The limiter it is handed to is redis's and exposes neither number, so the
-   two constants are what is pinned; the call site reads them. */
 func TestCatalogWriteThrottle_AllowsThirtyWritesAMinute(t *testing.T) {
     if 30 != catalogWriteAllowance || time.Minute != catalogWriteWindow {
         t.Fatalf("expected thirty writes a minute, got %d per %s", catalogWriteAllowance, catalogWriteWindow)
@@ -56,7 +52,6 @@ func TestRedisInfrastructure_ProvidesTheTokenStoreAndTheCacheModules(t *testing.
     }
 }
 
-/* two applications on one redis differ by their namespace alone: every name their components derive opens with it, so neither reads or spends what the other wrote */
 func TestRedis_TwoNamespacesOverOneClientWriteDisjointKeys(t *testing.T) {
     address := os.Getenv("REDIS_ADDRESS")
     if "" == address {

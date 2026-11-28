@@ -82,7 +82,6 @@ func TestHttpMiddlewareAll_BuildsWithAHealthyFactory(t *testing.T) {
     }
 }
 
-/* describing the pipeline runs no factory and leaves the serving path's report alone while naming the function captured at registration, so the console listing has no side effect in a process that will never serve; the name is captured on the middleware door too, since a middleware handed in as a value has no factory whose name could stand in for it */
 func TestHttpMiddlewareDescribe_NamesAMiddlewareRegisteredAsAValue(t *testing.T) {
     applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
@@ -107,7 +106,6 @@ func TestHttpMiddlewareDescribe_NamesAMiddlewareRegisteredAsAValue(t *testing.T)
     }
 }
 
-/* namedProbeMiddleware exists as a declared function precisely so the description has a name to report: an anonymous literal would carry the enclosing test's name and could not tell the two registration doors apart. */
 func namedProbeMiddleware(next httpcontract.Handler) httpcontract.Handler {
     return next
 }
@@ -317,7 +315,6 @@ func moduleNameTestFailingFactory(kernelInstance kernelcontract.Kernel) (httpcon
     return nil, errModuleNameTestFactory
 }
 
-/* buildRefusalOf answers the "could not build middleware" link of a refusal's chain */
 func buildRefusalOf(t *testing.T, err error) *exception.Error {
     t.Helper()
 
@@ -343,7 +340,6 @@ func (instance *failingFactoryModule) RegisterHttpMiddlewares(kernelInstance ker
     })
 }
 
-/* a cli boot runs the module hooks and builds no pipeline, so the build the http boot would run is asked for afterwards, where its refusal can be read rather than exiting the process */
 func TestBoot_AModulesFailingMiddlewareFactoryIsRefusedNamingTheModule(t *testing.T) {
     applicationInstance := newEnvironmentKeyBootApplication(t, nil)
     applicationInstance.runtimeFlags = NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeCli})

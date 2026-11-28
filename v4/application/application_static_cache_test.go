@@ -27,7 +27,6 @@ func staticCacheMaxAgeWarningsOf(t *testing.T, mode string, values map[string]st
     return warnings
 }
 
-/* a layered .env switches the cache off over a base that sets the max age: the switch wins and the max age is named once as ignored, a blank line or the default value included, since the line is what the operator wrote */
 func TestBoot_TheDisabledStaticCacheWinsOverAMaxAgeSetBesideItWithABootWarning(t *testing.T) {
     for _, maxAge := range []string{"60", "3600", ""} {
         warnings := staticCacheMaxAgeWarningsOf(t, config.ModeHttp, map[string]string{config.StaticCacheDisabledKey: "true", config.StaticCacheMaxAgeKey: maxAge}, nil)

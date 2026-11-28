@@ -5,7 +5,6 @@ import (
     "testing"
 )
 
-/* the grammar both cache backends refuse on: a key with a space or a newline in it is an error, not a miss */
 func assertUsableAsCacheKey(t *testing.T, key string) {
     t.Helper()
 
@@ -22,7 +21,6 @@ func assertUsableAsCacheKey(t *testing.T, key string) {
     }
 }
 
-/* every one of these keys is built from something a client chose, a username typed into the login form or an identifier lifted from a path segment the router has already decoded, and the cache refuses a key that breaks its grammar with an error the doors would answer as a 500 where they answer 401 and 404. */
 func TestCacheKeysStayUsableForAValueTheClientChose(t *testing.T) {
     for _, value := range []string{"ad min", "a\nb", "a b c", " leading", "trailing "} {
         assertUsableAsCacheKey(t, CacheKeyUserByUsername(value))
@@ -33,7 +31,6 @@ func TestCacheKeysStayUsableForAValueTheClientChose(t *testing.T) {
     }
 }
 
-/* the escape has to be reversible, or two accounts would share one entry and one of them would be served the other's answer. */
 func TestCacheKeysSeparateValuesThatDifferOnlyInWhitespace(t *testing.T) {
     first := CacheKeyUserById("a b")
     second := CacheKeyUserById("a+b")
@@ -44,7 +41,6 @@ func TestCacheKeysSeparateValuesThatDifferOnlyInWhitespace(t *testing.T) {
     }
 }
 
-/* the ordinary identifier is left as it reads, so a cache dump stays legible and existing keys keep their shape. */
 func TestCacheKeysLeaveAnOrdinaryIdentifierAlone(t *testing.T) {
     if "example-user-by-id-user-3" != CacheKeyUserById("user-3") {
         t.Fatalf("expected an ordinary identifier to be spliced as it reads, got %q", CacheKeyUserById("user-3"))
@@ -55,7 +51,6 @@ func TestCacheKeysLeaveAnOrdinaryIdentifierAlone(t *testing.T) {
     }
 }
 
-/* the bound is the widest column a caller-chosen identifier is stored in, so a longer one names a row no write door admits; the empty spelling is refused with it */
 func TestCacheSafeIdentifierBoundsTheLengthOfACallerChosenIdentifier(t *testing.T) {
     if false == CacheSafeIdentifier(strings.Repeat("a", 255)) || false == CacheSafeIdentifier("ad min") {
         t.Fatal("expected an identifier within the bound to be admitted, spaces included, since the key part escapes them")

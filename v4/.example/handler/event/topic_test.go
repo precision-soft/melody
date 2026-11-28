@@ -9,7 +9,6 @@ import (
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
 )
 
-/* the user directory topic carries the account writes made behind the administrator's role, so an editor, who reads the catalogue topic, does not read it */
 func TestTopicIsReadableBy_TheUserDirectoryTopicRequiresTheAdministrator(t *testing.T) {
     _, editorRuntime := streamRequestAs(t, "/events/stream/", []string{entity.RoleUser, entity.RoleEditor})
     if true == topicIsReadableBy(editorRuntime, UserDirectoryTopic) {
@@ -26,7 +25,6 @@ func TestTopicIsReadableBy_TheUserDirectoryTopicRequiresTheAdministrator(t *test
     }
 }
 
-/* the one reading of the topic: the query's value, the catalogue's when the query names none or names it empty */
 func TestTopicOf_ReadsTheQueryAndFallsBackOnTheCatalogueTopic(t *testing.T) {
     for target, expected := range map[string]string{
         "/ws?topic=user-directory": UserDirectoryTopic,
@@ -48,7 +46,6 @@ func gatedHandler(handlerRan *bool) melodyhttpcontract.Handler {
     }
 }
 
-/* an editor asking the websocket route for the user directory topic is refused 403 before the integration's handler would accept the upgrade */
 func TestStreamTopicGateMiddleware_RefusesTheUserDirectoryTopicToAnEditor(t *testing.T) {
     request, runtimeInstance := routedRequestAs(t, countedRouteName, "/ws?topic=user-directory", []string{entity.RoleUser, entity.RoleEditor})
 
@@ -72,7 +69,6 @@ func TestStreamTopicGateMiddleware_AdmitsAnAdministrator(t *testing.T) {
     }
 }
 
-/* the gate reads the topic of the route named alone: another route naming a topic in its query is not this gate's to refuse */
 func TestStreamTopicGateMiddleware_PassesEveryOtherRouteUntouched(t *testing.T) {
     request, runtimeInstance := routedRequestAs(t, "example.products.list", "/products/?topic=user-directory", []string{entity.RoleUser})
 

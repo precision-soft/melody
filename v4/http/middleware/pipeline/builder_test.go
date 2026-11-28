@@ -16,7 +16,6 @@ import (
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
 )
 
-/* Two definitions may legitimately share a name — that is what allowDuplicates is for, and how one middleware runs both before and after another. The Kahn traversal emits every duplicate, so counting emitted definitions against the node map (which is keyed by unique name) reports a cycle where the graph has none, and Build turns that into an error the application panics on. */
 func TestOrderDefinitions_DuplicateNamesAreNotACycle(t *testing.T) {
     first := HttpMiddlewareDefinition{Name: "audit", AllowDuplicates: true}
     second := HttpMiddlewareDefinition{Name: "audit", AllowDuplicates: true}
@@ -34,7 +33,6 @@ func TestOrderDefinitions_DuplicateNamesAreNotACycle(t *testing.T) {
     }
 }
 
-/* The sentinel must still catch a real cycle: a depends-on-b and b depends-on-a. */
 func TestOrderDefinitions_RealCycleIsDetected(t *testing.T) {
     first := HttpMiddlewareDefinition{Name: "a", Before: []string{"b"}}
     second := HttpMiddlewareDefinition{Name: "b", Before: []string{"a"}}
@@ -144,7 +142,6 @@ func buildIn(environment string, definitions ...HttpMiddlewareDefinition) ([]htt
     return NewBuilder(definitions).Build(&gatingTestKernel{environment: environment}, "http")
 }
 
-/* A middleware active in every environment that orders itself against a dev-only one boots in dev and refuses to boot in prod: selection drops the dev-only definition, ordering reports the surviving reference as missing, and the application panics. The mistake has to be refused where it is made, so the declared sets are compared and the refusal fires in dev too. */
 func TestBuild_RefusesAlwaysOnMiddlewareReferencingEnvironmentGatedOne(t *testing.T) {
     audit := HttpMiddlewareDefinition{Name: "audit", Before: []string{"profiler"}, Groups: []string{"http"}, Factory: passthroughFactory()}
     profiler := HttpMiddlewareDefinition{Name: "profiler", Groups: []string{"http"}, EnabledEnvironments: []string{"dev"}, Factory: passthroughFactory()}
@@ -163,7 +160,6 @@ func TestBuild_RefusesAlwaysOnMiddlewareReferencingEnvironmentGatedOne(t *testin
     }
 }
 
-/* The refusal is a property of the declarations, not of the environment being booted, so dev and prod must report the same thing. */
 func TestBuild_RefusesTheSameReferenceInEveryEnvironment(t *testing.T) {
     audit := HttpMiddlewareDefinition{Name: "audit", Before: []string{"profiler"}, Groups: []string{"http"}, Factory: passthroughFactory()}
     profiler := HttpMiddlewareDefinition{Name: "profiler", Groups: []string{"http"}, EnabledEnvironments: []string{"dev"}, Factory: passthroughFactory()}
@@ -179,7 +175,6 @@ func TestBuild_RefusesTheSameReferenceInEveryEnvironment(t *testing.T) {
     }
 }
 
-/* A dev-only middleware referencing another dev-only one is satisfiable everywhere: wherever the referrer is selected, so is the target. */
 func TestBuild_AllowsReferenceWithinTheSameEnvironmentSet(t *testing.T) {
     audit := HttpMiddlewareDefinition{Name: "audit", Before: []string{"profiler"}, Groups: []string{"http"}, EnabledEnvironments: []string{"dev"}, Factory: passthroughFactory()}
     profiler := HttpMiddlewareDefinition{Name: "profiler", Groups: []string{"http"}, EnabledEnvironments: []string{"dev"}, Factory: passthroughFactory()}
@@ -200,7 +195,6 @@ func TestBuild_AllowsReferenceWithinTheSameEnvironmentSet(t *testing.T) {
     }
 }
 
-/* A narrower referrer may reference a broader target: the target is present everywhere the referrer is. */
 func TestBuild_AllowsReferenceToBroaderEnvironmentSet(t *testing.T) {
     audit := HttpMiddlewareDefinition{Name: "audit", Before: []string{"profiler"}, Groups: []string{"http"}, EnabledEnvironments: []string{"dev"}, Factory: passthroughFactory()}
     profiler := HttpMiddlewareDefinition{Name: "profiler", Groups: []string{"http"}, EnabledEnvironments: []string{"dev", "prod"}, Factory: passthroughFactory()}
@@ -213,7 +207,6 @@ func TestBuild_AllowsReferenceToBroaderEnvironmentSet(t *testing.T) {
     }
 }
 
-/* An empty environment set means every environment, so it covers any referrer. */
 func TestBuild_AllowsReferenceToUngatedMiddleware(t *testing.T) {
     audit := HttpMiddlewareDefinition{Name: "audit", Before: []string{"profiler"}, Groups: []string{"http"}, EnabledEnvironments: []string{"dev"}, Factory: passthroughFactory()}
     profiler := HttpMiddlewareDefinition{Name: "profiler", Groups: []string{"http"}, Factory: passthroughFactory()}
@@ -223,7 +216,6 @@ func TestBuild_AllowsReferenceToUngatedMiddleware(t *testing.T) {
     }
 }
 
-/* The after edge reaches the same ordering pass as the before edge, so it is gated the same way. */
 func TestBuild_RefusesGatedReferenceExpressedAsAfter(t *testing.T) {
     audit := HttpMiddlewareDefinition{Name: "audit", After: []string{"profiler"}, Groups: []string{"http"}, Factory: passthroughFactory()}
     profiler := HttpMiddlewareDefinition{Name: "profiler", Groups: []string{"http"}, EnabledEnvironments: []string{"dev"}, Factory: passthroughFactory()}
@@ -233,7 +225,6 @@ func TestBuild_RefusesGatedReferenceExpressedAsAfter(t *testing.T) {
     }
 }
 
-/* The group a build is asked for decides what that build carries, and several groups are built in one process, so a reference unsatisfiable in some other group says nothing about this one. The selection has already dropped what this group does not carry; a target missing from it is an ordinary missing reference. */
 func TestBuild_AllowsReferenceAcrossGroupsTheBuildDoesNotAskFor(t *testing.T) {
     audit := HttpMiddlewareDefinition{Name: "audit", Before: []string{"profiler"}, Groups: []string{"http", "admin"}, Factory: passthroughFactory()}
     profiler := HttpMiddlewareDefinition{Name: "profiler", Groups: []string{"http"}, Factory: passthroughFactory()}
@@ -257,7 +248,6 @@ func TestBuild_AllowsReferenceToBroaderGroupSet(t *testing.T) {
     }
 }
 
-/* A name no definition carries is an ordinary missing reference; the ordering pass collects every one of them, so that diagnosis must survive untouched. */
 func TestBuild_KeepsMissingReferenceErrorForUnknownName(t *testing.T) {
     audit := HttpMiddlewareDefinition{Name: "audit", Before: []string{"nowhere"}, Groups: []string{"http"}, Factory: passthroughFactory()}
 
@@ -273,7 +263,6 @@ func TestBuild_KeepsMissingReferenceErrorForUnknownName(t *testing.T) {
     }
 }
 
-/* Duplicates registered under one name are each a candidate: one of them covering the referrer is enough, because that one is selected wherever the referrer is. */
 func TestBuild_AllowsReferenceWhenOneDuplicateCoversTheReferrer(t *testing.T) {
     audit := HttpMiddlewareDefinition{Name: "audit", Before: []string{"profiler"}, Groups: []string{"http"}, Factory: passthroughFactory()}
     devProfiler := HttpMiddlewareDefinition{Name: "profiler", Groups: []string{"http"}, EnabledEnvironments: []string{"dev"}, Factory: passthroughFactory(), AllowDuplicates: true}
@@ -284,7 +273,6 @@ func TestBuild_AllowsReferenceWhenOneDuplicateCoversTheReferrer(t *testing.T) {
     }
 }
 
-/* A pipeline with no gating at all — the shape every application registers through Use — must be untouched by the check. */
 func TestBuild_LeavesUngatedPipelinesAlone(t *testing.T) {
     first := HttpMiddlewareDefinition{Name: "middleware.1.0", Before: []string{}, After: []string{"middleware.2.0"}, Groups: []string{"http"}, Factory: passthroughFactory()}
     second := HttpMiddlewareDefinition{Name: "middleware.2.0", Groups: []string{"http"}, Factory: passthroughFactory()}
@@ -298,7 +286,6 @@ func TestBuild_LeavesUngatedPipelinesAlone(t *testing.T) {
     }
 }
 
-/* Splitting one middleware across environments is how a configuration that differs per environment is ordinarily written: an `auth` wired for development beside an `auth` wired for production, both registered under the one name the rest of the pipeline orders against. What has to be present wherever the referrer runs is A middleware called `auth`, not one particular registration of it — so the union of the registrations is what answers the reference. Weighing them one at a time refused this in dev AND in prod, for a configuration that boots correctly in both. */
 func TestBuild_AcceptsAReferenceCoveredByTheUnionOfSameNamedDefinitions(t *testing.T) {
     developmentAuth := HttpMiddlewareDefinition{Name: "auth", Groups: []string{"http"}, EnabledEnvironments: []string{"dev"}, Factory: passthroughFactory(), AllowDuplicates: true}
     productionAuth := HttpMiddlewareDefinition{Name: "auth", Groups: []string{"http"}, EnabledEnvironments: []string{"prod"}, Factory: passthroughFactory(), AllowDuplicates: true}
@@ -311,7 +298,6 @@ func TestBuild_AcceptsAReferenceCoveredByTheUnionOfSameNamedDefinitions(t *testi
     }
 }
 
-/* the control: a union that still leaves a gap is still refused. Two registrations covering dev and staging do not answer an always-on referrer, which runs in production too, and that is the mistake the check exists to catch. */
 func TestBuild_StillRefusesAReferenceTheUnionDoesNotCover(t *testing.T) {
     developmentAuth := HttpMiddlewareDefinition{Name: "auth", Groups: []string{"http"}, EnabledEnvironments: []string{"dev"}, Factory: passthroughFactory(), AllowDuplicates: true}
     stagingAuth := HttpMiddlewareDefinition{Name: "auth", Groups: []string{"http"}, EnabledEnvironments: []string{"staging"}, Factory: passthroughFactory(), AllowDuplicates: true}
@@ -323,7 +309,7 @@ func TestBuild_StillRefusesAReferenceTheUnionDoesNotCover(t *testing.T) {
     }
 }
 
-/* supportedEnvironments is a copy of what config.validateEnvironment admits, and the union of same-named definitions is only universal because of it: a name registered for every supported environment is registered everywhere. If config ever admits a third environment and this list does not learn about it, the union silently stops covering an always-on referrer and a configuration that boots everywhere starts being refused. The comment above the copy promises this guard; here it is. */
+/* a copy of what config.validateEnvironment admits: a third environment missing here would refuse a configuration that boots everywhere */
 func TestSupportedEnvironments_MatchesTheConfigurationPackage(t *testing.T) {
     fromConfiguration := []string{config.EnvironmentDevelopment, config.EnvironmentProduction}
 
@@ -345,7 +331,6 @@ func TestSupportedEnvironments_MatchesTheConfigurationPackage(t *testing.T) {
     }
 }
 
-/* a pair of definitions confined to `api` does not refuse the `web` build, which assembles neither; the check still fires for the group that carries the pair */
 func TestBuild_GatingOfAnotherGroupDoesNotRefuseThisOne(t *testing.T) {
     profiler := HttpMiddlewareDefinition{Name: "profiler", Groups: []string{"api"}, EnabledEnvironments: []string{"dev"}, Factory: passthroughFactory()}
     audit := HttpMiddlewareDefinition{Name: "audit", Before: []string{"profiler"}, Groups: []string{"api"}, Factory: passthroughFactory()}
@@ -360,7 +345,6 @@ func TestBuild_GatingOfAnotherGroupDoesNotRefuseThisOne(t *testing.T) {
     }
 }
 
-/* Describe answers what Build would run, so it mirrors Build's own third refusal: without it the listing reports as healthy a definition the serving boot refuses. */
 func TestBuilderDescribe_MirrorsTheNilFactoryRefusalOfBuild(t *testing.T) {
     builder := NewBuilder([]HttpMiddlewareDefinition{{Name: "broken"}})
 
@@ -386,7 +370,6 @@ func TestBuilder_KeepsTheReportWhenAFactoryFails(t *testing.T) {
         t.Fatalf("expected the factory failure to surface")
     }
 
-    /* the report travels with the refusal, so the caller reporting the failure has the selection, the gating and the cycle detection around the offending middleware, as Describe — the same selection without the factories — returns them */
     if nil == report {
         t.Fatalf("expected the report to travel with the refusal")
     }
@@ -412,7 +395,6 @@ func TestBuilder_RecordsAMiddlewareItsFactoryDeclinedToBuildAsInactive(t *testin
         t.Fatalf("expected no middleware in the chain, got %d", len(middlewares))
     }
 
-    /* requested, selected and ordered, then vanished from the chain without appearing in the selected names OR in the inactive list — the operator reading the report saw a pipeline that simply never mentioned it */
     found := false
     for _, inactive := range report.Inactive() {
         if "declined" == inactive.Name() {
@@ -489,7 +471,6 @@ func TestBuilder_AddedDefinitionReachesTheBuiltPipeline(t *testing.T) {
     }
 }
 
-/* the builder copies the constraint lists when it takes a definition: a registrant reusing its slice across definitions — or mutating it after registration — would otherwise rewrite the ordering constraints the pipeline was registered under. */
 func TestBuilder_CopiesTheListsWhenItTakesADefinition(t *testing.T) {
     before := []string{"cors"}
     after := []string{"session"}

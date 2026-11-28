@@ -39,7 +39,6 @@ func TestHandlerLocator_ConcurrentRegisterAndLookup(t *testing.T) {
 
 type locatorNilPinMessage struct{}
 
-/* a nil message is refused by the function handler as an unexpected type, the actual type spelled "<nil>", where reflect.TypeOf(nil).String() panicked. */
 func TestFunctionHandler_RefusesANilMessageWithoutPanicking(t *testing.T) {
     handler := &functionHandler[locatorNilPinMessage]{
         handle: func(runtimeInstance containercontract.Runtime, message locatorNilPinMessage, envelope messagebuscontract.Envelope) error { return nil },

@@ -7,12 +7,10 @@ import (
     "testing"
 )
 
-/* fingerprintAnswering answers the read of the row a set recorded with the fingerprint given, sealed, or with no row */
 func fingerprintAnswering(heldFingerprint string) func(query string) ([]string, [][]driver.Value, error) {
     return recordAnswering(heldFingerprint, schemaSetBuilt)
 }
 
-/* recordAnswering answers the read of the row a set recorded with the fingerprint and state given, or with no row */
 func recordAnswering(heldFingerprint string, heldState string) func(query string) ([]string, [][]driver.Value, error) {
     return func(query string) ([]string, [][]driver.Value, error) {
         if false == strings.HasPrefix(query, "SELECT fingerprint, state FROM ") {
@@ -27,8 +25,6 @@ func recordAnswering(heldFingerprint string, heldState string) func(query string
     }
 }
 
-/* interruptedVolumeAnswering answers the read of the tables a set finds with the ones given and the read of its row as
-   recordAnswering does, which is a volume a run left behind */
 func interruptedVolumeAnswering(heldFingerprint string, heldState string, tableNameList ...string) func(query string) ([]string, [][]driver.Value, error) {
     tables := tablesAnswering(tableNameList...)
     record := recordAnswering(heldFingerprint, heldState)
@@ -42,9 +38,6 @@ func interruptedVolumeAnswering(heldFingerprint string, heldState string, tableN
     }
 }
 
-/* the columns of a volume built from other statements can be the same ones — a type, a collation, a key or a
-   constraint changed under the same names — and the set, recorded as applied by name, passes it untouched; the
-   fingerprint it recorded when it built the volume says so, and the refusal is not remembered */
 func TestEnsureMigratedRefusesAVolumeBuiltFromAnotherSchemaAndIsNotRememberedForIt(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = fingerprintAnswering("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
@@ -67,7 +60,6 @@ func TestEnsureMigratedRefusesAVolumeBuiltFromAnotherSchemaAndIsNotRememberedFor
     }
 }
 
-/* a volume built before the set recorded a fingerprint holds none, and is refused the same way */
 func TestEnsureMigratedRefusesAVolumeWithoutAFingerprint(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = fingerprintAnswering("")
@@ -88,8 +80,6 @@ func TestEnsureArchiveMigratedRefusesAnArchiveBuiltFromAnotherSchema(t *testing.
     }
 }
 
-/* the fingerprint moves with any statement, with their order, and with the constraint the catalogue adds outside
-   its list of tables */
 func TestSchemaFingerprintOf_MovesWithEveryStatement(t *testing.T) {
     original := schemaFingerprintOf("CREATE TABLE a (x INT)", "CREATE TABLE b (y INT)")
 
@@ -108,7 +98,6 @@ func TestSchemaFingerprintOf_MovesWithEveryStatement(t *testing.T) {
     }
 }
 
-/* tablesAnswering answers the read of which of its tables a set finds with the ones given */
 func tablesAnswering(presentList ...string) func(query string) ([]string, [][]driver.Value, error) {
     return func(query string) ([]string, [][]driver.Value, error) {
         if false == strings.Contains(query, "information_schema.tables") {
@@ -124,7 +113,6 @@ func tablesAnswering(presentList ...string) func(query string) ([]string, [][]dr
     }
 }
 
-/* a set runs only on a volume that does not record it, and on one that already holds its tables every CREATE ... IF NOT EXISTS is a no-op, so writing this code's fingerprint over them would vouch for statements that never ran. The set refuses before it writes anything, naming the tables it found and the reset; asked of the catalogue's own database, in its own dialect */
 func TestUpSchemaRefusesToAdoptTablesItDidNotBuild(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = tablesAnswering("melody_example_v4_user", "melody_example_v4_currency")
@@ -140,7 +128,6 @@ func TestUpSchemaRefusesToAdoptTablesItDidNotBuild(t *testing.T) {
     }
 }
 
-/* the archive set refuses the same way, before it writes anything */
 func TestUpArchiveSchemaRefusesToAdoptTablesItDidNotBuild(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = tablesAnswering(CatalogReadingTableName)
@@ -155,9 +142,6 @@ func TestUpArchiveSchemaRefusesToAdoptTablesItDidNotBuild(t *testing.T) {
     }
 }
 
-/* a run the set began and did not finish left its tables and its own row, still building under this code's
-   fingerprint: the next run finishes it — the statements are IF NOT EXISTS — without writing the row again, and
-   seals it */
 func TestUpSchemaFinishesARunItBeganAndDidNotFinish(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = interruptedVolumeAnswering(catalogueSchemaFingerprint, schemaSetBuilding, SchemaFingerprintTableName, "melody_example_v4_category", "melody_example_v4_currency")
@@ -178,8 +162,6 @@ func TestUpSchemaFinishesARunItBeganAndDidNotFinish(t *testing.T) {
     }
 }
 
-/* a row still building under ANOTHER fingerprint is a build of other statements: finishing it would seal this
-   code's fingerprint over tables other statements began, so it is refused by name before anything is written */
 func TestUpSchemaRefusesAnUnfinishedBuildOfOtherStatements(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = interruptedVolumeAnswering("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", schemaSetBuilding, SchemaFingerprintTableName, "melody_example_v4_user")
@@ -194,8 +176,6 @@ func TestUpSchemaRefusesAnUnfinishedBuildOfOtherStatements(t *testing.T) {
     }
 }
 
-/* a record table standing alone and empty is a run that stopped between creating it and writing its row: nothing
-   else was built, and the set starts over on it */
 func TestUpSchemaStartsOverARecordTableStandingAloneAndEmpty(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = interruptedVolumeAnswering("", "", SchemaFingerprintTableName)
@@ -209,7 +189,6 @@ func TestUpSchemaStartsOverARecordTableStandingAloneAndEmpty(t *testing.T) {
     }
 }
 
-/* the archive set finishes its own interrupted run the same way, in its own dialect */
 func TestUpArchiveSchemaFinishesARunItBeganAndDidNotFinish(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = interruptedVolumeAnswering(archiveSchemaFingerprint, schemaSetBuilding, ArchiveSchemaFingerprintTableName, CatalogReadingTableName)
@@ -224,8 +203,6 @@ func TestUpArchiveSchemaFinishesARunItBeganAndDidNotFinish(t *testing.T) {
     }
 }
 
-/* a row still building vouches for nothing at the check: the set began on the volume and did not finish, and only
-   a run that reaches its seal says every statement ran */
 func TestEnsureMigratedRefusesAVolumeWhoseSetIsStillBuilding(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = recordAnswering(catalogueSchemaFingerprint, schemaSetBuilding)
@@ -247,7 +224,6 @@ func countRecorded(recordedList []string, fragment string) int {
     return count
 }
 
-/* the conversion finds a currency by its code, so the schema holds one row per code, compared byte for byte */
 func TestCurrencyTableHoldsTheCodeUnique(t *testing.T) {
     if false == strings.Contains(createCurrencyTableSql, "UNIQUE KEY `"+CurrencyCodeIndexName+"` (`code`)") {
         t.Fatalf("the currency table declares no unique key on the code: %s", createCurrencyTableSql)
@@ -258,8 +234,6 @@ func TestCurrencyTableHoldsTheCodeUnique(t *testing.T) {
     }
 }
 
-/* a volume the set built and sealed under this code's fingerprint, every table standing, whose step bun never
-   recorded as applied: the step is answered done without a statement, and bun records it */
 func TestUpSchemaAnswersAVolumeItBuiltAndSealedWithoutRunningAStatement(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = interruptedVolumeAnswering(catalogueSchemaFingerprint, schemaSetBuilt, schemaTableNameList...)

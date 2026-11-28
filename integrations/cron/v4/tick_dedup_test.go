@@ -667,7 +667,6 @@ func TestTickDedup_LedgerRowOutlivesAStepBackLongerThanTheHold(t *testing.T) {
 
     _, _ = dispatchMinute(t, runner, runtimeInstance, tickDedupMinute)
 
-    /* another instance takes the lapsed marker, so only the ledger can let the winner re-run */
     frozenClock.Advance(10 * time.Minute)
     other := newTickDedupRunner(job, EntryConfig{}, RunnerConfig{TickDedup: TickDedupConfig{Locker: locker}})
     _, _ = dispatchMinute(t, other, runtimeInstance, tickDedupMinute)
@@ -848,7 +847,6 @@ func TestTickDedup_TheDocumentCarriesTheSkippedEntries(t *testing.T) {
     }
 }
 
-/* the audit's falsifier: two loops whose clocks wake 300ms apart over one locker, a command that returns at once, one run for the minute */
 func TestTickDedup_TwoRunnersOneLockerClocksApart(t *testing.T) {
     job := &countingCommand{commandName: "job:every-minute", ran: make(chan struct{}, 4)}
     locker := newSharedInMemoryLocker(clock.NewFrozenClock(tickDedupMinute))
@@ -1083,7 +1081,6 @@ func TestTickDedup_ARegisteredLockerThatCannotBeResolvedIsNotAsked(t *testing.T)
         t.Fatalf("expected the resolution failure kept on the run, got %+v", dedupRun)
     }
 
-    /* a stand-in counting the asks: the run's failure must short-circuit the ask */
     dedupRun.locker = &sharedLeaseTickLocker{panics: true}
     runner.warnOverALockerThatIsNotASharedLease(runtimeInstance, dedupRun)
 
@@ -1107,7 +1104,6 @@ func countRecordsByMessage(captured *capturingRunnerLogger, message string) int 
     return written
 }
 
-/* the ask fails at Run, the store not up yet: the coded ask-failed warning names it, and the first tick that reached the locker asks once more and names the locker that is not a shared lease */
 func TestRunnerCommand_ALockerThatCannotBeAskedAtRunIsAskedAgainAtTheFirstTickThatReachedIt(t *testing.T) {
     job := &countingCommand{commandName: "job:every-minute"}
     locker := &sharedLeaseTickLocker{recordingTickLocker: recordingTickLocker{inner: newSessionTickLocker()}, failedAsks: 1}
@@ -1135,7 +1131,6 @@ func TestRunnerCommand_ALockerThatCannotBeAskedAtRunIsAskedAgainAtTheFirstTickTh
     }
 }
 
-/* the re-ask that answers a shared lease writes nothing more, and an ask that fails at the re-ask too is not asked a third time */
 func TestRunnerCommand_TheReAskHappensOnceAndFollowsTheNormalRule(t *testing.T) {
     for name, testCase := range map[string]struct {
         locker     *sharedLeaseTickLocker
@@ -1171,7 +1166,6 @@ func TestRunnerCommand_TheReAskHappensOnceAndFollowsTheNormalRule(t *testing.T) 
     }
 }
 
-/* a registered locker that cannot be resolved at Run cannot be asked: the ask-failed warning names the service and the cause, and no tick reaches a locker to ask again */
 func TestTickDedup_ARegisteredLockerThatCannotBeResolvedWritesTheAskFailedWarning(t *testing.T) {
     job := &countingCommand{commandName: "job:every-minute"}
     captured := &capturingRunnerLogger{}
@@ -1202,7 +1196,6 @@ func TestTickDedup_ARegisteredLockerThatCannotBeResolvedWritesTheAskFailedWarnin
     }
 }
 
-/* over the lazy locker the record names the configured wrapper and, beside it, the locker it resolved to */
 func TestTickDedup_TheNotSharedLeaseWarningNamesTheLockerTheLazyOneResolvedTo(t *testing.T) {
     job := &countingCommand{commandName: "job:every-minute"}
     captured := &capturingRunnerLogger{}
@@ -1218,7 +1211,6 @@ func TestTickDedup_TheNotSharedLeaseWarningNamesTheLockerTheLazyOneResolvedTo(t 
     }
 }
 
-/* the Run warnings are diagnostics: a logger that panics writing them leaves the Run to its ticks, as the tick side's warning does */
 func TestTickDedup_ALoggerPanickingAtTheRunWarningsStillRunsTheRun(t *testing.T) {
     for name, locker := range map[string]lockcontract.Locker{
         "not shared lease": newSessionTickLocker(),

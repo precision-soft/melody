@@ -135,7 +135,6 @@ func TestTotpSecondFactor_ValidCodeAuthenticates(t *testing.T) {
     }
 }
 
-/* negative control: a wrong code keeps the request pending. */
 func TestTotpSecondFactor_WrongCodeIsPending(t *testing.T) {
     secret, _ := totp.GenerateSecret()
 
@@ -171,7 +170,6 @@ func TestTotpSecondFactor_ReplayedCodeIsRejected(t *testing.T) {
     }
 }
 
-/* Verify normalizes whitespace out of a submitted code, so "123 456" and "123456" are the same code. The replay guard must key on the normalized form: keying on the raw header value would let a captured code be replayed by re-spacing it. */
 func TestTotpSecondFactor_ReplayedCodeIsRejectedWhenRespaced(t *testing.T) {
     secret, _ := totp.GenerateSecret()
     code, _ := totp.GenerateCodeAt(secret, time.Now(), totp.Options{})
@@ -191,7 +189,6 @@ func TestTotpSecondFactor_ReplayedCodeIsRejectedWhenRespaced(t *testing.T) {
     }
 }
 
-/* negative control: with no ReplayGuard configured the source defaults to an in-process guard, so a captured code still cannot be replayed out of the box. */
 func TestTotpSecondFactor_ReplayedCodeIsRejectedByDefaultGuard(t *testing.T) {
     secret, _ := totp.GenerateSecret()
     code, _ := totp.GenerateCodeAt(secret, time.Now(), totp.Options{})
@@ -209,7 +206,6 @@ func TestTotpSecondFactor_ReplayedCodeIsRejectedByDefaultGuard(t *testing.T) {
     }
 }
 
-/* recoveryEnrollmentStore also implements TwoFactorRecoveryStore, tracking each recovery code's unused state so a redeemed code cannot be redeemed a second time. */
 type recoveryEnrollmentStore struct {
     secret   string
     enrolled bool
@@ -267,7 +263,6 @@ func TestTotpSecondFactor_RecoveryCodeAuthenticatesAndIsSingleUse(t *testing.T) 
     }
 }
 
-/* negative control: a recovery code that is not one of the user's unused codes keeps the request pending. */
 func TestTotpSecondFactor_UnknownRecoveryCodeIsPending(t *testing.T) {
     store := &recoveryEnrollmentStore{enrolled: true, unused: map[string]bool{"abcde-fghij": true}}
 
@@ -282,7 +277,6 @@ func TestTotpSecondFactor_UnknownRecoveryCodeIsPending(t *testing.T) {
     }
 }
 
-/* an enrollment store that does not implement TwoFactorRecoveryStore makes recovery unavailable: a recovery header is ignored and the request stays pending rather than authenticating. */
 func TestTotpSecondFactor_RecoveryIgnoredWhenStoreUnsupported(t *testing.T) {
     secret, _ := totp.GenerateSecret()
 
@@ -320,7 +314,7 @@ func TestTotpSecondFactor_AnonymousPrimaryPassesThrough(t *testing.T) {
     }
 }
 
-/* the frozen instant sits decades from the real clock, so a code generated FOR that instant authenticates only if the authenticator verifies on the injected clock — and stops authenticating once that clock alone leaves the skew window. */
+/* decades from the real clock, so the code authenticates only on the injected clock */
 func TestTotpSecondFactor_VerifiesOnTheInjectedClock(t *testing.T) {
     secret, secretErr := totp.GenerateSecret()
     if nil != secretErr {
@@ -359,7 +353,6 @@ func TestTotpSecondFactor_VerifiesOnTheInjectedClock(t *testing.T) {
     }
 }
 
-/* fixedEnrollmentStore never fails, so the fail-closed refusal needs a fixture that can reach it: inverted to return the primary token, that refusal would let every enrolled user past the second factor whenever the enrollment store is down, with every test built on fixedEnrollmentStore green. */
 type failingEnrollmentStore struct {
     lookupErr error
 }
@@ -396,7 +389,6 @@ func TestTotpSecondFactor_AFailingEnrollmentLookupRefusesInsteadOfPassingThrough
     }
 }
 
-/* secondFactorRejected reads the optional rejection door of a pending token, failing the test when the token does not carry it. */
 func secondFactorRejected(t *testing.T, token securitycontract.Token) bool {
     t.Helper()
 
@@ -541,7 +533,6 @@ func TestNewTotpSecondFactorAuthenticator_RefusesANilRequiredArgumentByName(t *t
 
 const throttleTestSecret = "JBSWY3DPEHPK3PXP"
 
-/* countingRecoveryEnrollmentStore redeems through recoveryEnrollmentStore and counts every redemption it was asked for */
 type countingRecoveryEnrollmentStore struct {
     recoveryEnrollmentStore
     mutex       sync.Mutex
@@ -557,7 +548,6 @@ func (instance *countingRecoveryEnrollmentStore) RedeemRecoveryCode(runtimeInsta
     return instance.recoveryEnrollmentStore.RedeemRecoveryCode(runtimeInstance, userIdentifier, code)
 }
 
-/* headerUserAuthenticator accepts the user the X-User header names, so one authenticator serves several accounts */
 type headerUserAuthenticator struct{}
 
 func (instance *headerUserAuthenticator) Supports(_ httpcontract.Request) bool {

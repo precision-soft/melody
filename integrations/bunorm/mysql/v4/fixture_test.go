@@ -20,7 +20,6 @@ import (
     lockcontract "github.com/precision-soft/melody/v4/lock/contract"
 )
 
-/* testRuntime is the runtime the provider tests open under: a run over a scope of an empty container, on a context that never ends */
 func testRuntime() containercontract.Runtime {
     return testRuntimeUnder(context.Background())
 }
@@ -29,7 +28,6 @@ func testRuntimeUnder(ctx context.Context) containercontract.Runtime {
     return melodyruntime.NewRun(ctx, container.NewContainer(container.ContainerConfig{}).NewScope())
 }
 
-/* scopelessRuntime answers a typed-nil scope, the runtime of another implementation the framework's own never are */
 type scopelessRuntime struct {
     containercontract.Runtime
 }
@@ -44,7 +42,6 @@ func (instance scopelessRuntime) Scope() containercontract.Scope {
     return scope
 }
 
-/* singleAttemptRetry keeps a refused dial from being retried under the default backoff */
 var singleAttemptRetry = RetryConfig{MaxAttempts: bound.Of(1)}
 
 func expectErrorNamingField(t *testing.T, err error, field string) {
@@ -82,7 +79,6 @@ func (instance neverOpeningDriver) Open(string) (driver.Conn, error) {
     return nil, errors.New("the test driver never opens")
 }
 
-/* releaseRecordingConnector grants every acquire and answers the release at once, or with stallRelease only when its context ends, counting the sessions it dials and ends */
 type releaseRecordingConnector struct {
     stallRelease bool
 
@@ -149,7 +145,6 @@ func (instance *releaseRecordingConnection) ExecContext(ctx context.Context, que
     stall := instance.connector.stallRelease
     instance.connector.mutex.Unlock()
 
-    /* the drivers refuse a statement whose context is already done before any packet, and so does the double */
     if nil != ctx.Err() {
         return nil, ctx.Err()
     }
@@ -198,7 +193,6 @@ func newReleaseRecordingDatabase(t *testing.T, connector *releaseRecordingConnec
     return database
 }
 
-/* mustCreateLock answers the lock a test's CreateLock made, a refusal failing the test where it happened */
 func mustCreateLock(lock lockcontract.Lock, createErr error) lockcontract.Lock {
     if nil != createErr {
         panic(createErr)

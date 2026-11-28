@@ -13,7 +13,6 @@ import (
     melodysecurity "github.com/precision-soft/melody/v4/security"
 )
 
-/* actorTestRuntime answers a runtime whose scope carries a console run's process context when processId is not empty, and a signed-in token when userIdentifier is not empty */
 func actorTestRuntime(processId string, userIdentifier string) melodycontainercontract.Runtime {
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     scope := containerInstance.NewScope()

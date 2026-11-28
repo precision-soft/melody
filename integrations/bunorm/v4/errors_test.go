@@ -8,7 +8,6 @@ import (
     "github.com/precision-soft/melody/v4/exception"
 )
 
-/* the link answers the class through Is and hands the driver failure on through Unwrap, and a journal rendering the exception it sits under reads the class once, where the driver failure stood */
 func TestDatabaseUnreachable_AnswersTheClassAndKeepsTheDriverFailureReachable(t *testing.T) {
     driverErr := &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connection refused")}
     openErr := exception.NewError("database connection failed", map[string]any{"host": "replica.internal"}, DatabaseUnreachable(driverErr))
@@ -22,7 +21,6 @@ func TestDatabaseUnreachable_AnswersTheClassAndKeepsTheDriverFailureReachable(t 
         t.Fatalf("expected the driver failure reachable through the link, got %v", openErr)
     }
 
-    /* the driver failure unwraps further on its own (an OpError to its inner error), so the chain is read on its head and on the count of the class, not on its length */
     chain, isChain := exception.LogContext(openErr, exception.LogContextOptions{})["causeChain"].([]string)
     if false == isChain || 2 > len(chain) || ErrDatabaseUnreachable.Error() != chain[0] || driverErr.Error() != chain[1] {
         t.Fatalf("expected the chain to read the class first and the driver failure right under it, got %v", exception.LogContext(openErr, exception.LogContextOptions{})["causeChain"])

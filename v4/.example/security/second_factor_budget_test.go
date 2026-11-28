@@ -68,7 +68,6 @@ func TestSecondFactorBudget_ReleaseGivesTheAccountItsBudgetBack(t *testing.T) {
     }
 }
 
-/* the budget is the account's own: another account that spent its budget leaves this one's whole */
 func TestSecondFactorBudget_KeepsOneBudgetPerAccount(t *testing.T) {
     budget := budgetOverPassword()
 

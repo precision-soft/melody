@@ -2659,7 +2659,6 @@ func TestManager_RegenerateSessionCutBeforeTheRemovalLeavesTheSessionIntact(t *t
     }
 }
 
-/* scopelessSessionRuntime carries a context and no scope, which only a runtime of another implementation can */
 type scopelessSessionRuntime struct {
     containercontract.Runtime
 }

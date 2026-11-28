@@ -24,7 +24,6 @@ const revisionTestInterval = 20 * time.Millisecond
 
 const revisionTestRoute = "example.websocket"
 
-/* runStreamHandler serves the stream in the background and answers the channel closed when the handler returned */
 func runStreamHandler(stream *signedInStream, revision StreamRevisionConfig, writer *recordingResponseWriter) <-chan struct{} {
     done := make(chan struct{})
     go func() {
@@ -108,7 +107,6 @@ func TestStreamHandler_ClosesWhenTheAccountChanges(t *testing.T) {
 
             done := runStreamHandler(stream, account.revision(revisionTestInterval), writer)
 
-            /* the stream holds while the account does */
             awaitReads(t, account, 2, 2*time.Second)
             select {
             case <-done:
@@ -144,7 +142,6 @@ func TestStreamHandler_ClosesWhenTheAccountCannotBeReRead(t *testing.T) {
     }
 }
 
-/* the client leaves while the re-read is inside the directory, which answers the context's error as a database driver does: no outage is journaled and nothing is written to the connection that is gone */
 func TestStreamHandler_AClientLeavingMidReReadIsNotJournaledAsUnreadable(t *testing.T) {
     account := newStreamAccount([]string{entity.RoleUser})
     stream := signedInStreamRequest(t, "/events/stream/?topic=visitor", account, true)
@@ -283,7 +280,6 @@ func TestStreamHandler_RefusesAnIncompleteRevisionConfigurationNamingTheField(t 
     }
 }
 
-/* waitingHandler stands for the websocket integration's: it streams until the context of the request handed to it ends */
 func waitingHandler(handed *atomic.Pointer[melodyhttpcontract.Request]) melodyhttpcontract.Handler {
     return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         handed.Store(&request)
@@ -351,7 +347,6 @@ func TestStreamRevisionMiddleware_PassesEveryOtherRouteUntouched(t *testing.T) {
     }
 }
 
-/* the watcher's re-read is in flight when the connection ends; the middleware returns only once it finished, so nothing reads the request scope after the kernel closes it */
 func TestStreamRevisionMiddleware_JoinsItsWatcherBeforeReturning(t *testing.T) {
     account := newStreamAccount([]string{entity.RoleUser})
     stream := signedInStreamRequest(t, "/ws?topic=visitor", account, true)
@@ -425,7 +420,6 @@ func TestStreamRevisionMiddleware_TheDecoratedRequestKeepsEveryOtherDoorOfTheReq
     awaitClosed(t, done, 2*time.Second, "the connection closed with its client")
 }
 
-/* the integration's own handler behind the middleware, on a real server: the decorated request reaches it, and the cancel of its context closes the upgraded connection */
 func TestStreamRevisionMiddleware_ClosesARealWebsocketConnectionWhenTheRevisionMoves(t *testing.T) {
     account := newStreamAccount([]string{entity.RoleUser})
     stream := signedInStreamRequest(t, "/ws?topic=visitor", account, true)
@@ -469,7 +463,6 @@ func TestStreamRevisionMiddleware_ClosesARealWebsocketConnectionWhenTheRevisionM
     awaitClosed(t, handlerDone, 3*time.Second, "the websocket handler returned once the roles changed")
 }
 
-/* a session the client holds but signed no account in carries no password version, so a stream has nothing to hold its revision on */
 func TestOpenStreamAuthority_RefusesASessionWithoutAPasswordVersion(t *testing.T) {
     for name, version := range map[string]any{"empty": "", "not a text": 42} {
         account := newStreamAccount([]string{entity.RoleUser})
@@ -487,7 +480,6 @@ func TestOpenStreamAuthority_RefusesASessionWithoutAPasswordVersion(t *testing.T
     }
 }
 
-/* the off door holds on /ws as on the event stream: with no interval and nothing to re-read with, a signed-in connection and one without a session reach the handler with their own request */
 func TestStreamRevisionMiddleware_DisabledPassesTheConnectionUntouched(t *testing.T) {
     for name, withSession := range map[string]bool{"signed in": true, "without a session": false} {
         t.Run(name, func(t *testing.T) {
@@ -517,7 +509,6 @@ func TestStreamRevisionMiddleware_DisabledPassesTheConnectionUntouched(t *testin
     }
 }
 
-/* the watcher runs on a goroutine of its own: a re-read that panics is journaled and ends that connection, not the process */
 func TestStreamRevisionMiddleware_APanickingReReadEndsTheConnectionAlone(t *testing.T) {
     account := newStreamAccount([]string{entity.RoleUser})
     stream := signedInStreamRequest(t, "/ws?topic=visitor", account, true)

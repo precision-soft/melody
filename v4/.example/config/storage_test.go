@@ -15,7 +15,6 @@ import (
     melodystorage "github.com/precision-soft/melody/v4/storage"
 )
 
-/* with S3 configured the aws.s3 module builds the storage at boot and checks the bucket under the runtime that resolves it, warning rather than failing the boot, so the first upload after an outage checks it again */
 func TestStorageModuleConfig_ChecksTheBucketUnderTheResolvingRuntimeAndWarns(t *testing.T) {
     released := make(chan struct{})
     server := httptest.NewServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
@@ -94,7 +93,6 @@ func TestBuildStorage_RefusesAnUnreadableInsecureSwitchBeforeItDials(t *testing.
     }
 }
 
-/* the example registers its local-disk storage only without S3, and builds nothing at boot for it */
 func TestRegisterStorageServices_RegistersTheLocalStorageOnlyWithoutS3(t *testing.T) {
     for _, testCase := range []struct {
         name     string

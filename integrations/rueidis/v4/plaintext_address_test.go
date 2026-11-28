@@ -104,7 +104,6 @@ func TestPlaintextAddressJudge_HonoursTheBootWarningIgnoreKey(t *testing.T) {
     }
 }
 
-/* the once is the provider's: a second application's provider over the same address writes its own line */
 func TestProvider_JudgesEachAddressOncePerProvider(t *testing.T) {
     cancelledContext, cancel := context.WithCancel(context.Background())
     cancel()
@@ -121,7 +120,6 @@ func TestProvider_JudgesEachAddressOncePerProvider(t *testing.T) {
     }
 }
 
-/* the runtime's context is done, so nothing is dialled; the warning is written first, and never with tls configured */
 func TestProviderOpen_WritesThePlaintextAddressWarningWithoutTls(t *testing.T) {
     for name, testCase := range map[string]struct {
         client   ClientConfig

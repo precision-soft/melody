@@ -16,7 +16,6 @@ import (
     storagecontract "github.com/precision-soft/melody/v4/storage/contract"
 )
 
-/* expectRule fails when a rule's name, default or bounds are not the documented ones */
 func expectRule[T bound.Unit](t *testing.T, ruleName string, actual bound.Rule[T], expected bound.Rule[T]) {
     t.Helper()
 

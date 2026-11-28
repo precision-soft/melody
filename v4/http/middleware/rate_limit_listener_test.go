@@ -69,7 +69,6 @@ func TestRegisterRateLimitRequestListener_AnswersTooManyRequestsOnceTheBudgetIsG
     }
 }
 
-/* OnLimitExceeded is the application's, so a typed nil of a concrete response type is the shape a hand-written "no response" takes; through a bare nil check it reads as a live response, SetResponse normalizes it to nil, and the refused request is served unmetered — the guard must read it through IsNilInterface and serve the 429 fallback */
 func TestRegisterRateLimitRequestListener_ATypedNilLimitResponseStillAnswers429(t *testing.T) {
     dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
 
@@ -200,7 +199,6 @@ func TestRegisterRateLimitRequestListener_RefusesAMissingLimiter(t *testing.T) {
     }
 }
 
-/* the listener door classifies the caller's cancellation apart from a store failure, the way its middleware twin does: at error every client that hung up mid-round-trip paged the operator for a healthy store — and this door meters every request, ahead of authentication, so it sees more of those than the middleware ever does. */
 func TestRegisterRateLimitRequestListener_ACancelledLimiterCallIsRecordedAtWarning(t *testing.T) {
     capture := &rateLimitCaptureLogger{Logger: logging.NewNopLogger()}
 
@@ -229,9 +227,6 @@ func TestRegisterRateLimitRequestListener_ACancelledLimiterCallIsRecordedAtWarni
     }
 }
 
-/* The request is an application-implementable contract, so a nil pointer of a request type reaches this
-door as a non-nil interface and the read below dereferences it. The untyped literal a sibling probe passes
-is the only shape a bare comparison already catches. */
 func TestRegisterRateLimitRequestListener_ATypedNilRequestIsLeftAlone(t *testing.T) {
     dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
 
@@ -521,7 +516,6 @@ func TestRegisterRateLimitRequestListener_ItsFailureEndsTheDispatch(t *testing.T
     }
 }
 
-/* the rate limiter's answer or refusal ends the kernel.request dispatch; it may skip the required listeners behind it, access control among them, so its 429 is served and not turned into a 500 */
 func TestRegisterRateLimitRequestListener_MaySkipTheRequiredListeners(t *testing.T) {
     dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
     RegisterRateLimitRequestListener(dispatcher, NewFixedWindowLimiter("test", 1, time.Minute, LimiterConfig{}), RateLimitConfig{})

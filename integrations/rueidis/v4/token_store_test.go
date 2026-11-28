@@ -309,7 +309,6 @@ func tokenStorePttl(t *testing.T, client redisclient.Client, key string) int64 {
     return pttl
 }
 
-/* only the token key ever carried PX; the per-user index set carried no expiry at all, so a user who logs in and out leaves an ever-growing set of dead member names behind for as long as the Redis lives — nothing sweeps it unless PurgeExpired is scheduled, and nothing here schedules it. */
 func TestRedisTokenStore_PutGivesTheUserIndexAnExpiryThatOutlivesItsToken(t *testing.T) {
     client := newTokenStoreClient(t)
     store := NewTokenStore(newTestConnection(client), TokenStoreConfig{Prefix: "melody:token:test:indexttl"})
@@ -329,7 +328,6 @@ func TestRedisTokenStore_PutGivesTheUserIndexAnExpiryThatOutlivesItsToken(t *tes
     }
 }
 
-/* the index set is how DeleteByUser finds a user's tokens, so its expiry may only ever be raised: a shorter-lived token added later must not pull the deadline in front of a token that lives longer. */
 func TestRedisTokenStore_PutRaisesButNeverShortensTheUserIndexExpiry(t *testing.T) {
     client := newTokenStoreClient(t)
     store := NewTokenStore(newTestConnection(client), TokenStoreConfig{Prefix: "melody:token:test:indexraise"})
@@ -353,7 +351,6 @@ func TestRedisTokenStore_PutRaisesButNeverShortensTheUserIndexExpiry(t *testing.
     }
 }
 
-/* a token with no expiry is revocable forever, so the set that indexes it must never expire either */
 func TestRedisTokenStore_NonExpiringTokenKeepsTheUserIndexPersistent(t *testing.T) {
     client := newTokenStoreClient(t)
     store := NewTokenStore(newTestConnection(client), TokenStoreConfig{Prefix: "melody:token:test:indexpersist"})
@@ -397,7 +394,6 @@ func sscanCallCount(t *testing.T, client redisclient.Client) int64 {
     return 0
 }
 
-/* Redis runs a script with every other client blocked, so reading a whole index set inside one script would stall the entire server in proportion to that user's token history. The walk has to be incremental, and the batch handed to any one script has to be bounded by this side, because SSCAN treats its count as a hint and can return more. */
 func TestRedisTokenStore_DeleteByUserRevokesInBoundedBatches(t *testing.T) {
     client := newTokenStoreClient(t)
     store := NewTokenStore(newTestConnection(client), TokenStoreConfig{Prefix: "melody:token:test:batched", ScanCount: bound.Of(10)})
@@ -407,7 +403,6 @@ func TestRedisTokenStore_DeleteByUserRevokesInBoundedBatches(t *testing.T) {
         store.Put(newTokenStoreRuntime(), "batched-token-"+strconv.Itoa(index), securitycontract.Claims{UserIdentifier: "karl"}, bound.UnlimitedDuration())
     }
 
-    /* another user's live token must survive a revocation that walks past it */
     store.Put(newTokenStoreRuntime(), "batched-token-other", securitycontract.Claims{UserIdentifier: "lena"}, bound.UnlimitedDuration())
     defer store.DeleteByUser(newTokenStoreRuntime(), "lena")
 
@@ -418,7 +413,6 @@ func TestRedisTokenStore_DeleteByUserRevokesInBoundedBatches(t *testing.T) {
         t.Fatalf("expected %d tokens removed, got %d", tokenCount, removed)
     }
 
-    /* one script over the whole set needs no cursor at all; a bounded walk needs one round trip per batch */
     if calls := sscanCallCount(t, client) - before; 2 > calls {
         t.Fatalf("expected the revocation to walk the index in more than one bounded batch, got %d sscan calls", calls)
     }
@@ -439,7 +433,6 @@ func TestRedisTokenStore_DeleteByUserRevokesInBoundedBatches(t *testing.T) {
     }
 }
 
-/* the purge reads the same sets a revocation does and has to hold the server for no more time, so it walks them the same way. It is in fact the operation that meets the biggest ones: it exists because dead members accumulate inside an index that is still alive, so the set it is handed is the whole history of an account that never stopped logging in — read into a single script, that is a multi-second freeze of every other client of that Redis. */
 func TestRedisTokenStore_PurgeExpiredPrunesInBoundedBatches(t *testing.T) {
     client := newTokenStoreClient(t)
     store := NewTokenStore(newTestConnection(client), TokenStoreConfig{Prefix: "melody:token:test:purgebatched", ScanCount: bound.Of(10)})
@@ -452,7 +445,6 @@ func TestRedisTokenStore_PurgeExpiredPrunesInBoundedBatches(t *testing.T) {
 
         store.Put(newTokenStoreRuntime(), tokenString, securitycontract.Claims{UserIdentifier: "mona"}, bound.UnlimitedDuration())
 
-        /* dropping the token key from underneath the index leaves exactly the state a purge exists for: a set that is still alive holding members whose tokens are gone */
         if deleteErr := client.Do(
             context.Background(),
             client.B().Del().Key(store.tokenKey(tokenString)).Build(),
@@ -469,7 +461,6 @@ func TestRedisTokenStore_PurgeExpiredPrunesInBoundedBatches(t *testing.T) {
         t.Fatalf("expected %d stale index members pruned, got %d", staleCount, pruned)
     }
 
-    /* one script over the whole set needs no cursor at all; a bounded walk needs one round trip per batch */
     if calls := sscanCallCount(t, client) - before; 2 > calls {
         t.Fatalf("expected the purge to walk the index in more than one bounded batch, got %d sscan calls", calls)
     }
@@ -1019,8 +1010,6 @@ func TestNewTokenStore_AnAbsentOrZeroMaximumClockSkewIsNoTolerance(t *testing.T)
     }
 }
 
-/* the bounded doors are probed over a store whose replies stop arriving; each call runs under a timer far below the client's own five-second ceiling, so a mutant that hands a round trip the unbounded context fails on the timer instead of on the ceiling, and a mutant that removes the bound on a read-only command — which the client retries for as long as the context allows — fails on the timer instead of never */
-
 func newWedgedTokenStore(t *testing.T, config TokenStoreConfig) (*RedisTokenStore, *gate) {
     t.Helper()
 
@@ -1104,7 +1093,6 @@ func TestRedisTokenStore_RevocationEpochCapsARuntimeWithoutDeadlineAtTheCallTime
     }))
 }
 
-/* the runtime half keeps a request deadline TIGHTER than the call timeout: with the call timeout at a second, a runtime carrying ten milliseconds is refused in tens of milliseconds, where a cap that replaced the request context would wait the full second */
 func TestRedisTokenStore_LookupKeepsATighterRequestDeadline(t *testing.T) {
     store, _ := newWedgedTokenStore(t, TokenStoreConfig{CallTimeout: bound.Of(time.Second)})
 
@@ -1157,7 +1145,6 @@ func TestRedisTokenStore_DeleteByUserBatchIsBoundedByTheCallTimeout(t *testing.T
     }))
 }
 
-/* the Lua batch behind PurgeExpired sits behind two cursor steps, the SCAN over the index sets and the SSCAN over one set; both are arrays and pass, the batch's integer is wedged */
 func TestRedisTokenStore_PurgeExpiredBatchIsBoundedByTheCallTimeout(t *testing.T) {
     client, storeGate := dialGated(t)
     store := NewTokenStore(newTestConnection(client), TokenStoreConfig{Prefix: "melody:token:test:wedge:" + t.Name(), CallTimeout: bound.Of(50 * time.Millisecond)})
@@ -1173,7 +1160,6 @@ func TestRedisTokenStore_PurgeExpiredBatchIsBoundedByTheCallTimeout(t *testing.T
     }))
 }
 
-/* the SSCAN of one index set is the second cursor walk of PurgeExpired: the outer SCAN's array passes, the inner one is wedged */
 func TestRedisTokenStore_PurgeExpiredMemberScanIsBoundedByTheCallTimeout(t *testing.T) {
     client, storeGate := dialGated(t)
     store := NewTokenStore(newTestConnection(client), TokenStoreConfig{Prefix: "melody:token:test:wedge:" + t.Name(), CallTimeout: bound.Of(50 * time.Millisecond)})
@@ -1318,7 +1304,6 @@ func TestRefuseOversizedIdentifier_AdmitsTheBoundItselfAndAnyLengthWhenUnlimited
     }
 }
 
-/* the read refuses no identifier the writes refuse: no boundary can stand under it, so the user's alone answers */
 func TestRedisTokenStore_RevocationEpochAnswersTheUsersBoundaryForADeviceNoWriteAccepts(t *testing.T) {
     client := newTokenStoreClient(t)
     store := NewTokenStore(newTestConnection(client), TokenStoreConfig{Prefix: "melody:token:test:epochunwritabledevice"})
@@ -1341,7 +1326,7 @@ func TestRedisTokenStore_RevocationEpochAnswersTheUsersBoundaryForADeviceNoWrite
     }
 }
 
-/* json stores the device as U+FFFD, so a boundary written under the raw bytes would never meet the token: the refusal is what keeps a device revocation from answering success without biting */
+/* json stores the device as U+FFFD, so a boundary under the raw bytes would never meet the token */
 func TestRedisTokenStore_ANonUtf8DeviceCanNotBeAcceptedAndThenEscapeItsRevocation(t *testing.T) {
     client := newTokenStoreClient(t)
     store := NewTokenStore(newTestConnection(client), TokenStoreConfig{Prefix: "melody:token:test:nonutf8device"})
@@ -1459,7 +1444,6 @@ func TestRedisTokenStore_AWriteInFlightEndsAtTheRuntimesDeadline(t *testing.T) {
     }
 }
 
-/* lapsedDeadlineContext carries a deadline already passed that its Err has not recorded yet */
 type lapsedDeadlineContext struct {
     context.Context
 }
@@ -1491,7 +1475,6 @@ func TestRedisTokenStore_ARoundTripCutByTheCallTimeoutNamesTheBound(t *testing.T
     }
 }
 
-/* countdownContext reads as live for its first calls of Err, then as cancelled */
 type countdownContext struct {
     context.Context
     remaining atomic.Int64

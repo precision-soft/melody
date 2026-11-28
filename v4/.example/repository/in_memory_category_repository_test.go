@@ -8,7 +8,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/entity"
 )
 
-/* every repository is a process-wide singleton and net/http serves each request on its own goroutine, so a listing request and a deleting request overlap; the writer here always removes a non-terminal element, which is what makes DeleteById compact the backing array under the reader */
+/* net/http overlaps a listing and a delete; a non-terminal element makes DeleteById compact the array under the reader */
 
 func TestInMemoryCategoryRepositoryConcurrentReadAndDelete(t *testing.T) {
     ctx := context.Background()

@@ -162,7 +162,6 @@ func TestSlidingWindowLimiter_AllowsAfterWindowExpires(t *testing.T) {
     }
 }
 
-/* the window is trimmed by index rather than rebuilt, so the cut has to land on exactly the marks that left the window: one short and the caller keeps paying for a request that expired, one long and the limit is widened by a slot nobody spent. Staggered marks are what tells the two apart — a whole-window cut and a no-op cut both pass when every mark carries the same instant. */
 func TestSlidingWindowLimiter_FreesExactlyTheExpiredPrefix(t *testing.T) {
     startedAt := time.Now()
     frozenClock := clock.NewFrozenClock(startedAt)
@@ -627,7 +626,6 @@ func TestRateLimitMiddleware_HandsTheRequestRuntimeToTheLimiter(t *testing.T) {
 }
 
 func TestRateLimitMiddleware_HonorsFailurePolicyDenialOnStoreError(t *testing.T) {
-    /* a fail-closed limiter reports the store failure AND returns allowed=false; the middleware must honor the denial */
     limiter := &fakeRuntimeRateLimiter{allowed: false, err: exception.NewError("store unreachable", nil, nil)}
 
     config := RateLimitConfig{}
@@ -645,7 +643,6 @@ func TestRateLimitMiddleware_HonorsFailurePolicyDenialOnStoreError(t *testing.T)
 }
 
 func TestRateLimitMiddleware_HonorsFailurePolicyAllowanceOnStoreError(t *testing.T) {
-    /* a fail-open limiter reports the store failure but returns allowed=true; the request must pass */
     limiter := &fakeRuntimeRateLimiter{allowed: true, err: exception.NewError("store unreachable", nil, nil)}
 
     config := RateLimitConfig{}
@@ -762,7 +759,6 @@ func TestFixedWindowLimiter_ForgetsAnIdleKeyAtTheDeclaredCleanupInterval(t *test
     }
 }
 
-/* the limiter is a fixed window, not a token bucket: the allowance is restored whole at the edge, so an instant straddling it admits up to twice the rate. Locked deliberately — SlidingWindowLimiter is the strict-invariant option. */
 func TestFixedWindowLimiter_RestoresTheWholeAllowanceAtTheWindowEdge(t *testing.T) {
     clockInstance := clock.NewFrozenClock(time.Unix(0, 0).UTC())
     limiter := NewFixedWindowLimiter("test", 100, time.Minute, LimiterConfig{Clock: clockInstance})
@@ -796,7 +792,6 @@ func TestFixedWindowLimiter_RestoresTheWholeAllowanceAtTheWindowEdge(t *testing.
     }
 }
 
-/* the strict alternative on the same traffic shape: half the allowance spent at the start and half just before the edge. The fixed window restores everything at the edge, so 150 requests land inside one trailing window; the sliding window only frees what actually aged out. */
 func TestSlidingWindowLimiter_HoldsTheRateWhereTheFixedWindowDoesNot(t *testing.T) {
     spendHalfThenCountAtEdge := func(allow func(string) bool, advance func(time.Duration)) int {
         for index := 0; index < 50; index++ {
@@ -848,7 +843,6 @@ func allowingNext() httpcontract.Handler {
     }
 }
 
-/* IpRateLimit builds its config internally and hands back only the middleware, so the resolver the documentation prescribes for a deployment behind a reverse proxy could never be reached: every client shared the proxy's single budget. The additive variant takes the resolver up front. */
 func TestIpRateLimit_ChargesTheForwardedClient(t *testing.T) {
     resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8"))
     handler := IpRateLimit(1, QuickLimitConfig{ClientIpResolver: resolver})(allowingNext())
@@ -869,7 +863,6 @@ func TestIpRateLimit_ChargesTheForwardedClient(t *testing.T) {
     }
 }
 
-/* The direct-peer behaviour of the helper without a resolver is correct without a proxy in front, so an application that upgrades keeps compiling and keeps its semantics. */
 func TestIpRateLimit_StillChargesTheDirectPeer(t *testing.T) {
     handler := IpRateLimit(1, QuickLimitConfig{})(allowingNext())
 
@@ -904,7 +897,6 @@ func TestSimpleRateLimit_ChargesTheForwardedClient(t *testing.T) {
     }
 }
 
-/* UserRateLimit falls back to the client address for a request carrying no user id, so unauthenticated traffic behind a proxy shared one budget — the traffic a limiter is most needed for. */
 func TestUserRateLimit_ChargesTheForwardedClientWhenAnonymous(t *testing.T) {
     resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8"))
     anonymous := func(request httpcontract.Request) string { return "" }
@@ -926,7 +918,6 @@ func TestUserRateLimit_ChargesTheForwardedClientWhenAnonymous(t *testing.T) {
     }
 }
 
-/* An identified user is keyed by id whatever the resolver says, so the resolver only governs the anonymous fallback. */
 func TestUserRateLimit_KeepsKeyingIdentifiedUsersById(t *testing.T) {
     resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8"))
     identified := func(request httpcontract.Request) string { return "user-1" }
@@ -943,7 +934,6 @@ func TestUserRateLimit_KeepsKeyingIdentifiedUsersById(t *testing.T) {
     }
 }
 
-/* A nil resolver is the documented way to ask for the direct peer, so the additive variants must behave exactly like the originals when given one. */
 func TestQuickRateLimits_NilResolverKeepsTheDirectPeer(t *testing.T) {
     handler := IpRateLimit(1, QuickLimitConfig{})(allowingNext())
 
@@ -957,8 +947,6 @@ func TestQuickRateLimits_NilResolverKeepsTheDirectPeer(t *testing.T) {
         t.Fatalf("a nil resolver must key the direct peer, so both clients share one budget")
     }
 }
-
-/* a window past the midpoint of the duration range must not wrap the idle-prune threshold negative: the cleanup would then delete every bucket and refill a budget the window promised to hold */
 
 func TestFixedWindowLimiter_MaxDurationWindowSurvivesIdlePrune(t *testing.T) {
     frozenClock := clock.NewFrozenClock(time.Now())
@@ -990,8 +978,6 @@ func TestSlidingWindowLimiter_MaxDurationWindowSurvivesIdlePrune(t *testing.T) {
     }
 }
 
-/* SimpleRateLimit is one of the three helpers an application actually calls. Its documented semantics are the direct peer — the resolver cannot be set afterwards because the helper builds its config internally — so two clients behind one proxy sharing a budget is the correct behaviour here, and this test fails if the helper starts reading a forwarded header. */
-
 func TestSimpleRateLimit_ChargesTheDirectPeer(t *testing.T) {
     handler := SimpleRateLimit(1, QuickLimitConfig{})(allowingNext())
 
@@ -1005,8 +991,6 @@ func TestSimpleRateLimit_ChargesTheDirectPeer(t *testing.T) {
         t.Fatalf("without a resolver both clients key the direct peer and share one budget")
     }
 }
-
-/* a budget the helper hands out has to be a budget: the refusal is the 429 the framework spells as TooManyRequests, not a bare error a handler might mistake for a store failure. */
 
 func TestSimpleRateLimit_RefusesWithTooManyRequests(t *testing.T) {
     handler := SimpleRateLimit(1, QuickLimitConfig{})(allowingNext())
@@ -1109,8 +1093,6 @@ func TestLimiters_ANilClockReadsTheSystemClock(t *testing.T) {
     }
 }
 
-/* UserRateLimit keys on the identity rather than the address, which is the whole point of it: one user must carry one budget across every address they arrive from, and two users sharing an address must not share one. */
-
 func TestUserRateLimit_KeysOnTheIdentityRatherThanTheAddress(t *testing.T) {
     identity := "alice"
     getUserId := func(request httpcontract.Request) string { return identity }
@@ -1135,8 +1117,6 @@ func TestUserRateLimit_KeysOnTheIdentityRatherThanTheAddress(t *testing.T) {
     }
 }
 
-/* a request carrying no identity falls back to the address. Without the fallback every anonymous request would key on one empty identity and share a single budget — the first unauthenticated client to arrive would spend it for everyone, which turns the limiter into a denial of service against the traffic it is most needed for. */
-
 func TestUserRateLimit_FallsBackToTheAddressWhenAnonymous(t *testing.T) {
     anonymous := func(request httpcontract.Request) string { return "" }
 
@@ -1158,7 +1138,6 @@ func TestUserRateLimit_FallsBackToTheAddressWhenAnonymous(t *testing.T) {
     }
 }
 
-/* a limit handler that produces neither response nor error still refused the request, the reading the listener door gives: passed through, the nil response would be normalized into an empty 204 and the refused request served as success. */
 func TestRateLimitMiddleware_AnswersTheSilentLimitHandlerWith429(t *testing.T) {
     frozenClock := clock.NewFrozenClock(time.Now())
     limiter := NewFixedWindowLimiter("test", 1, time.Minute, LimiterConfig{Clock: frozenClock})
@@ -1201,7 +1180,6 @@ func TestRateLimitMiddleware_RefusesANilLimiterByName(t *testing.T) {
     assertPanicsNamingArgument(t, func() { RateLimitMiddleware(nil, RateLimitConfig{}) }, "limiter is required for rate limit middleware", "limiter", "RateLimitMiddleware")
 }
 
-/* the middleware's record classifies the caller's cancellation apart from a store failure: at error every disconnect on a rate-limited route paged the operator for a healthy store. */
 func TestRateLimitMiddleware_ACancelledLimiterCallIsRecordedAtWarning(t *testing.T) {
     capture := &rateLimitCaptureLogger{}
 
@@ -1272,7 +1250,6 @@ func (instance *alreadyReportingRuntimeLimiter) Allow(runtimeInstance containerc
     )
 }
 
-/* a limiter that filed its own record marks it, and the middleware then writes nothing beside it. The limiter knows the key and the failure mode and has doors with no error return at all, so it is the honest place to file from; without the mark being read here, arming its default turned every refused request during an outage into two identical records — at the moment the journal is under the most load. */
 func TestRateLimitMiddleware_AFailureTheLimiterAlreadyRecordedIsNotRecordedAgain(t *testing.T) {
     capture := &rateLimitCaptureLogger{}
 
@@ -1297,7 +1274,6 @@ func TestRateLimitMiddleware_AFailureTheLimiterAlreadyRecordedIsNotRecordedAgain
     request := testhelper.NewHttpTestRequest(nethttp.MethodGet, "http://example.com/limited")
     _, _ = handler(runtimeInstance, httptest.NewRecorder(), request)
 
-    /* an empty journal is also what a middleware that never metered the request leaves behind, so the silence means nothing until the limiter says it was asked */
     if 1 != limiter.allowWithRuntimeCalls {
         t.Fatalf("expected the middleware to meter the request exactly once, got %d calls", limiter.allowWithRuntimeCalls)
     }
@@ -1311,17 +1287,14 @@ func TestRateLimitMiddleware_AFailureTheLimiterAlreadyRecordedIsNotRecordedAgain
     }
 }
 
-/* a typed-nil limiter passes the plain comparison, looks live for the guard, and dereferences its nil receiver on the first request the middleware meters; the interface read refuses it at construction under the same name */
 func TestRateLimitMiddleware_RefusesATypedNilLimiterByName(t *testing.T) {
     assertPanicsNamingArgument(t, func() { RateLimitMiddleware((*FixedWindowLimiter)(nil), RateLimitConfig{}) }, "limiter is required for rate limit middleware", "limiter", "RateLimitMiddleware")
 }
 
-/* the listener door shares the middleware door's refusal. The panic is asserted by NAME: with the guard dead, the nil dispatcher passed in the same call panics too, and a recover that accepts any panic would report that second failure as the refusal it is not. */
 func TestRegisterRateLimitRequestListener_RefusesATypedNilLimiterByName(t *testing.T) {
     assertPanicsNamingArgument(t, func() { RegisterRateLimitRequestListener(nil, (*FixedWindowLimiter)(nil), RateLimitConfig{}) }, "limiter is required for rate limit request listener", "limiter", "RegisterRateLimitRequestListener")
 }
 
-/* the marks are searched with a binary search, which is entitled to an ordered slice, so the recorded instant is clamped to the last mark. A wall clock moved backwards under the process otherwise appended out of order, and an unordered slice does not merely keep an expired mark — the search can cut a LIVE one away and hand the key its budget back, on a limiter the package points at login, one-time codes and password reset. */
 func TestSlidingWindowLimiter_AClockMovedBackwardsNeverReplenishesTheBudget(t *testing.T) {
     startedAt := time.Now()
     frozenClock := clock.NewFrozenClock(startedAt)
@@ -1332,7 +1305,6 @@ func TestSlidingWindowLimiter_AClockMovedBackwardsNeverReplenishesTheBudget(t *t
         t.Fatal("expected the first request to be admitted")
     }
 
-    /* the clock answers an earlier instant than one already recorded */
     frozenClock.TravelTo(startedAt.Add(5 * time.Second))
     if false == allowedBy(limiter, "key1") {
         t.Fatal("expected the second request to be admitted; the budget is two")
@@ -1345,7 +1317,6 @@ func TestSlidingWindowLimiter_AClockMovedBackwardsNeverReplenishesTheBudget(t *t
     }
 }
 
-/* one IPv6 host is routinely handed a /64 and can rotate through it, so the key aggregates an IPv6 address to its /64: keyed on the /128, every request of one host had a budget of its own */
 func TestDefaultKeyExtractor_AggregatesAnIpv6ClientToItsSlash64(t *testing.T) {
     limiter := NewFixedWindowLimiter("test", 5, time.Minute, LimiterConfig{})
     config := RateLimitConfig{}

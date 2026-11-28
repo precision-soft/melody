@@ -337,7 +337,6 @@ func TestResolveRecoveredExit_OutOfRangeExitErrorCarriesItsErrorValueAsTheCause(
         t.Fatalf("expected a substitute error pending logging")
     }
 
-    /* the zero value carries no error value, so the substitute must not box a typed nil as its cause */
     if nil != err.Unwrap() {
         t.Fatalf("expected no cause for a wrapper carrying no error value, got %v", err.Unwrap())
     }
@@ -433,7 +432,6 @@ func (instance recoveredMessagePanicsError) Error() string {
     panic("Error() panics")
 }
 
-/* the recovery defers of the process boundary render the recovered error's message themselves, outside the recover the exception package's doors use, so an Error() that panics — on the nil field that made it panic-worthy — raised a second panic there, past the teardown and the exit code */
 func TestResolveRecoveredExit_AnErrorWhoseMessagePanicsIsStillResolved(t *testing.T) {
     err, exitCode, needsLogging := resolveRecoveredExit(recoveredMessagePanicsError{}, 5)
 
@@ -608,7 +606,6 @@ func TestLogOnRecoverAndExit_AnAbsentBudgetDoesNotDisarmTheShield(t *testing.T) 
         return
     }
 
-    /* the two halves pin the two directions the door can be broken in, and each is read on the figure the ABANDONMENT NAMES rather than on the fact that one happened: a bound read off the wrong figure abandons the step just the same and says nothing about which value produced it */
     probeModes := []struct {
         mode           string
         expectedFigure string
@@ -618,7 +615,7 @@ func TestLogOnRecoverAndExit_AnAbsentBudgetDoesNotDisarmTheShield(t *testing.T) 
     }
 
     for _, probeMode := range probeModes {
-        /* the child is bounded from out here because the form this test exists to refuse does not return at all: without it the mutant hangs the suite until go test times out, instead of failing in a second with the reason */
+        /* bounded from out here: the refused form never returns, and would hang the suite until go test times out */
         probeContext, cancelProbe := context.WithTimeout(context.Background(), 20*time.Second)
 
         command := exec.CommandContext(
@@ -630,7 +627,7 @@ func TestLogOnRecoverAndExit_AnAbsentBudgetDoesNotDisarmTheShield(t *testing.T) 
 
         output, runErr := command.CombinedOutput()
 
-        /* the deadline is read BEFORE the cancel, which would otherwise be the reason the context carries an error and would report every healthy child as one that never exited */
+        /* the deadline is read before the cancel, which would otherwise be why the context carries an error */
         probeDeadlinePassed := errors.Is(probeContext.Err(), context.DeadlineExceeded)
         cancelProbe()
 
@@ -906,7 +903,6 @@ func TestLogOnRecoverAndExit_RefusesAnOutOfRangeExitCode(t *testing.T) {
                 }
             }()
 
-            /* nil recovered: the refusal must fire on the healthy pass, so a caller wired with a bad code is caught on its first run rather than on its first panic */
             LogOnRecoverAndExit(&captureLogger{}, nil, outOfRangeCode, ExitOptions{})
         }()
     }
@@ -1114,7 +1110,6 @@ func TestLogOnRecoverAndExit_WritesTheCertificateForAnAlreadyLoggedError(t *test
     }
 }
 
-/* the probe panics in Unwrap, which the already-logged probe calls; the exception package reads the mark under a recover of its own, so the value reaches the record under its own message with the caller's code. The shield of the resolve step remains for a value no reader contains. */
 func TestResolveRecoveredExitShielded_ResolvesAValueWhoseUnwrapPanicsUnderItsOwnMessage(t *testing.T) {
     err, resolvedExitCode, needsLogging := resolveRecoveredExitShielded(&panickingResolveError{}, 3)
 
@@ -1152,7 +1147,6 @@ func (instance *panickingResolveError) Unwrap() error {
     return nil
 }
 
-/* RunShieldedStep answers whether the step finished, which is what lets the clean shutdown tell a teardown that completed from one it had to abandon: the budget exists so a process holding something it cannot release ends anyway, and a caller told nothing would have no reason to exit non-zero */
 func TestRunShieldedStep_AnswersWhetherTheStepFinished(t *testing.T) {
     if false == RunShieldedStep("a step that returns", ShieldedStepOptions{}, func(_ context.Context) {}) {
         t.Fatalf("expected a returning step to report completion")
@@ -1178,7 +1172,6 @@ func TestRunShieldedStep_AnswersWhetherTheStepFinished(t *testing.T) {
     }
 }
 
-/* a step that panicked did not finish, and answering true for it hands the caller a completion the step never had: the panic is contained on the step's own goroutine, so the shutdown that reads this answer sees neither the panic nor an error and exits as though the teardown had run to the end */
 func TestRunShieldedStep_AnswersFalseForAStepThatPanicked(t *testing.T) {
     if true == RunShieldedStep(
         "a step that panics",
@@ -1194,7 +1187,6 @@ func TestRunShieldedStep_AnswersFalseForAStepThatPanicked(t *testing.T) {
 /* the marker tells a re-executed test binary that it is the child whose stderr has nowhere left to go */
 const exitEchoStalledProbeMarker = "MELODY_EXIT_ECHO_STALLED_PROBE"
 
-/* the echo is the last thing between the failure and os.Exit, and it writes to stderr: a stderr that is a pipe nobody drains blocks, and the exit the process was owed never happened — the record was written, the code was resolved, and the process hung on the line that says so. It is bounded rather than shielded, because the shield reports an abandoned step on the very channel that is blocked. */
 func TestLogOnRecoverAndExit_AStalledStderrDoesNotHoldTheExit(t *testing.T) {
     if "1" == os.Getenv(exitEchoStalledProbeMarker) {
         exitStepBudget = 200 * time.Millisecond
@@ -1259,7 +1251,6 @@ func TestLogOnRecoverAndExit_AStalledStderrDoesNotHoldTheExit(t *testing.T) {
     }
 }
 
-/* RunShieldedStep abandons on the budget its caller declared, not on the package one: the package budget is deliberately left LONG here, so a door that ignored its argument would hold this test for it instead of answering. */
 func TestRunShieldedStep_AbandonsOnTheBudgetItWasGiven(t *testing.T) {
     originalBudget := exitStepBudget
     exitStepBudget = 10 * time.Second
@@ -1315,7 +1306,6 @@ func TestRunShieldedStep_AnAbsentBudgetIsThePackageBudget(t *testing.T) {
     }
 }
 
-/* an unlimited budget means NO deadline, not the package's own. The package budget is set far BELOW the step's own duration here, so a door that fell back to it would abandon the step and answer false; only a door that installs no deadline at all can answer true. */
 func TestRunShieldedStep_AnUnlimitedBudgetWaitsWithoutADeadline(t *testing.T) {
     originalBudget := exitStepBudget
     exitStepBudget = 30 * time.Millisecond
@@ -1435,7 +1425,6 @@ func TestLogOnRecoverAndExit_RefusesABudgetOutsideItsRuleOnTheHealthyPass(t *tes
     }
 }
 
-/* the step is handed the deadline the shield holds it to, and that deadline is strictly EARLIER than the moment the shield gives up. A step told to finish at the very instant of the abandonment is abandoned every time — the timer is armed before the step starts — so what it produces reaches nobody, which on the teardown path is the whole diagnosis. */
 func TestRunShieldedStep_HandsTheStepADeadlineBelowItsOwn(t *testing.T) {
     const budget = 400 * time.Millisecond
 
@@ -1465,7 +1454,6 @@ func TestRunShieldedStep_HandsTheStepADeadlineBelowItsOwn(t *testing.T) {
     }
 }
 
-/* a step that honours exactly the deadline handed to it is reported as finished, since its deadline sits below the moment the shield abandons it */
 func TestRunShieldedStep_AStepThatHonoursItsDeadlineIsNotAbandoned(t *testing.T) {
     const budget = 400 * time.Millisecond
 
@@ -1480,7 +1468,6 @@ func TestRunShieldedStep_AStepThatHonoursItsDeadlineIsNotAbandoned(t *testing.T)
     }
 }
 
-/* an unlimited budget removes the deadline from the step's context too, not only from the shield: the caller said there is no term, and a context carrying one would put back the term the caller removed. */
 func TestRunShieldedStep_AnUnlimitedBudgetHandsTheStepNoDeadline(t *testing.T) {
     var hasDeadline bool
 
@@ -1497,7 +1484,6 @@ func TestRunShieldedStep_AnUnlimitedBudgetHandsTheStepNoDeadline(t *testing.T) {
     }
 }
 
-/* the before-exit hook runs under the budget its caller declares, not under the package constant: the panic path and the clean return release the same services, and exception.Exit is a panic, so every command that exits non-zero takes this door. */
 func TestLogOnRecoverAndExit_RunsTheHookUnderTheDeclaredBudget(t *testing.T) {
     if "1" == os.Getenv(declaredBudgetProbeMarker) {
         LogOnRecoverAndExit(
@@ -1543,10 +1529,9 @@ func TestLogOnRecoverAndExit_RunsTheHookUnderTheDeclaredBudget(t *testing.T) {
 
 const declaredBudgetProbeMarker = "MELODY_DECLARED_BUDGET_PROBE"
 
-/* the declared budget is far below the package constant, so the deadline the hook receives separates the two: under the declared one it is at most this, under the package constant it is seconds. */
+/* far below the package constant, so the deadline the hook receives tells the two budgets apart */
 const declaredHookBudget = 200 * time.Millisecond
 
-/* the exit line carries request-derived text, and a raw escape sequence in it repaints the terminal the operator reads the exit on */
 func TestEchoExitToStderr_EscapesAControlCharacterOfTheErrorText(t *testing.T) {
     readEnd, writeEnd, pipeErr := os.Pipe()
     if nil != pipeErr {

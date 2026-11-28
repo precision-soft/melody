@@ -36,7 +36,6 @@ func TestConfig_ANilExcludedPathListExcludesNothing(t *testing.T) {
     }
 }
 
-/* an entry without a leading slash is compared as a prefix against a request path that always begins with one, so it could never match and silently excluded nothing — the server normalizes it to the shape that matches */
 func TestConfig_AnExcludedPathWithoutItsLeadingSlashIsNormalized(t *testing.T) {
     server := newTestEmbeddedServer(Config{ExcludedPathList: []string{"admin", "/api"}})
 

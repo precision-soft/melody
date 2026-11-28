@@ -47,7 +47,6 @@ func TestApiDeleteDoorDeletesACurrencyNoProductIsPricedIn(t *testing.T) {
     }
 }
 
-/* a seeded product is priced in cur-ron, so its delete is refused and the currency stays: the conversion of that product keeps a currency to read */
 func TestApiDeleteDoorRefusesACurrencyAProductIsPricedIn(t *testing.T) {
     fixture := newCurrencyDoorFixture(t)
 

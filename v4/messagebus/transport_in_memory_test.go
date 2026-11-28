@@ -64,7 +64,6 @@ func TestInMemoryTransport_RequeueAfterCloseIsRefusedDeterministically(t *testin
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
-    /* before the guard, one select weighed a ready queue slot against the closed transport and Go picks between ready cases at RANDOM — a post-Close requeue succeeded about half the time, so "closed" was enforced on Send and coin-flipped on Nack; fifty attempts make a surviving coin flip astronomically unlikely */
     for attempt := 0; attempt < 50; attempt++ {
         if nackErr := transport.Nack(runtimeInstance, NewEnvelope(taskCreated{TaskId: attempt}, nil), messagebuscontract.NackOptions{Requeue: true}); nil == nackErr {
             t.Fatalf("expected every post-close requeue to be refused, attempt %d landed", attempt)
@@ -87,7 +86,6 @@ func TestInMemoryTransport_DroppedDelayedRequeueIsLoggedThroughTheRuntime(t *tes
         t.Fatalf("unexpected nack error: %v", nackErr)
     }
 
-    /* the Nack already answered success and the drop happens later on a detached goroutine: the logger captured from the Nack's runtime is the only witness */
     deadline := time.Now().Add(2 * time.Second)
     for time.Now().Before(deadline) {
         if true == logger.hasMessageContaining("dropped a delayed requeue") {
@@ -138,7 +136,6 @@ func TestInMemoryTransport_ASubscriptionEndsWithItsRuntimeAndTheQueueServesTheNe
             _ = transport.Send(runtimeInstance, NewEnvelope(taskCreated{TaskId: 7}, nil))
         }()
 
-        /* the stopped subscription may already hold the delivery; it hands it back to the queue */
         time.Sleep(20 * time.Millisecond)
         stop()
 
@@ -214,7 +211,6 @@ func TestInMemoryTransport_ConcurrentSendsAndCloseAreRaceFreeAndNeverPanic(t *te
         go func() {
             defer senders.Done()
             for iteration := 0; iteration < 200; iteration++ {
-                /* a panic here — a send onto a closed queue — fails the test rather than crashing the binary */
                 _ = transport.Send(runtimeInstance, NewEnvelope(taskCreated{TaskId: iteration}, nil))
             }
         }()
@@ -246,7 +242,6 @@ func TestInMemoryTransport_ConcurrentSendsAndCloseAreRaceFreeAndNeverPanic(t *te
     close(stopReader)
 }
 
-/* the transport closed while the message waited out its delay: the requeue cannot happen, and the loss is journaled on the logger captured at the Nack */
 func TestInMemoryTransport_ADelayedRequeueDroppedAtCloseIsLogged(t *testing.T) {
     transport := NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(4)})
 
@@ -272,9 +267,6 @@ func TestInMemoryTransport_ADelayedRequeueDroppedAtCloseIsLogged(t *testing.T) {
     t.Fatalf("expected the requeue dropped at close to be logged through the runtime's logger")
 }
 
-/* emergencyJournalCapture installs, before any goroutine can reach it, an emergency logger writing into a pipe, and
-   collects what it writes: the emergency logger reads os.Stderr once, when it is created, so creating it here keeps the
-   transport's goroutine from ever reading the variable this test reassigns */
 type emergencyJournalCapture struct {
     mutex    sync.Mutex
     written  bytes.Buffer
@@ -331,7 +323,6 @@ func (instance *emergencyJournalCapture) text() string {
     return instance.written.String()
 }
 
-/* the logger is resolved at every delayed Nack, and a runtime without one is no loss yet: the emergency line is owed at a drop, not at the Nack */
 func TestInMemoryTransport_ADelayedNackOnARuntimeWithoutALoggerWritesNoEmergencyLine(t *testing.T) {
     capture := captureEmergencyJournal(t)
 
@@ -342,8 +333,7 @@ func TestInMemoryTransport_ADelayedNackOnARuntimeWithoutALoggerWritesNoEmergency
         t.Fatalf("unexpected nack error: %v", nackErr)
     }
 
-    /* the capture is closed before it is read: closing waits for its reader to drain the pipe, so a line the Nack wrote
-       is in the text rather than still in flight */
+    /* closed before it is read: closing waits for its reader to drain the pipe */
     capture.restore()
     written := capture.text()
 
@@ -354,7 +344,6 @@ func TestInMemoryTransport_ADelayedNackOnARuntimeWithoutALoggerWritesNoEmergency
     }
 }
 
-/* a drop on a Nack whose runtime carried no logger is the moment the line is owed: it goes to the emergency logger */
 func TestInMemoryTransport_ADropOnARuntimeWithoutALoggerIsJournaledOnTheEmergencyLogger(t *testing.T) {
     capture := captureEmergencyJournal(t)
     defer capture.restore()

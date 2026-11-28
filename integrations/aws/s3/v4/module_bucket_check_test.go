@@ -99,7 +99,6 @@ func TestModule_ABucketCheckWithoutAClientOrNotEnabledIsRefused(t *testing.T) {
     }
 }
 
-/* a missing bucket is created in the region the check declares */
 func TestModule_ABucketCheckCreatesAMissingBucketInItsRegion(t *testing.T) {
     var createBody atomic.Value
     server := httptest.NewServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {

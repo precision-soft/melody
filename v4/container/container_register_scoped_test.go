@@ -59,7 +59,6 @@ func TestRegisterScopedGeneric_NilRegistrarIsRefusedByName(t *testing.T) {
     }
 }
 
-/* the refusal belongs to the type registration and has to be told apart from the provider contract's own refusal of an any-returning provider: opting the type registration out is what reaches that second one. */
 func TestRegisterScopedGeneric_AnyServiceTypeIsRefusedForTheTypeRegistration(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 

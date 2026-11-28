@@ -20,7 +20,6 @@ import (
     lockcontract "github.com/precision-soft/melody/v4/lock/contract"
 )
 
-/* testRuntime is the runtime the provider tests open under: a run over a scope of an empty container, on a context that never ends */
 func testRuntime() containercontract.Runtime {
     return testRuntimeUnder(context.Background())
 }
@@ -28,8 +27,6 @@ func testRuntime() containercontract.Runtime {
 func testRuntimeUnder(ctx context.Context) containercontract.Runtime {
     return melodyruntime.NewRun(ctx, container.NewContainer(container.ContainerConfig{}).NewScope())
 }
-
-/* the shared material of this package's tests. A connector that never connects is what lets the registration tests hand the locker a real *bun.DB without a server: the doors under test decide what to register, and none of them issues a query, so a handle that would fail on the first one is the honest double. */
 
 type neverConnectingConnector struct{}
 
@@ -51,7 +48,6 @@ func newUndialedDatabase() *bun.DB {
     return bun.NewDB(sql.OpenDB(neverConnectingConnector{}), pgdialect.New())
 }
 
-/* spyServiceRegistrar records the names a registration door claims, which is the whole observable of both doors: what they register, and under which name. It satisfies the module's registrar contract as well as this package's narrower one, so one double serves both tests. */
 type spyServiceRegistrar struct {
     names []string
 }
@@ -70,7 +66,6 @@ func (instance *spyServiceRegistrar) MustRegister(serviceName string, provider a
     instance.RegisterService(serviceName, provider, options)
 }
 
-/* scopelessRuntime answers a typed-nil scope, the runtime of another implementation the framework's own never are */
 type scopelessRuntime struct {
     containercontract.Runtime
 }
@@ -85,7 +80,6 @@ func (instance scopelessRuntime) Scope() containercontract.Scope {
     return scope
 }
 
-/* singleAttemptRetry keeps a refused dial from being retried under the default backoff */
 var singleAttemptRetry = RetryConfig{MaxAttempts: bound.Of(1)}
 
 func expectErrorNamingField(t *testing.T, err error, field string) {
@@ -117,7 +111,6 @@ func expectPanicNamingField(t *testing.T, field string, callback func()) {
     callback()
 }
 
-/* releaseRecordingConnector grants every acquire and answers the release at once, or with stallRelease only when its context ends, counting the sessions it dials and ends */
 type releaseRecordingConnector struct {
     stallRelease bool
 
@@ -186,7 +179,6 @@ func (instance *releaseRecordingConnection) QueryContext(ctx context.Context, qu
     released := false == instance.connector.unlockAnswersFalse
     instance.connector.mutex.Unlock()
 
-    /* the drivers refuse a statement whose context is already done before any packet, and so does the double */
     if nil != ctx.Err() {
         return nil, ctx.Err()
     }
@@ -243,7 +235,6 @@ func (instance *spyServiceRegistrar) ReservePhaseService(serviceName string, kin
     return nil
 }
 
-/* mustCreateLock answers the lock a test's CreateLock made, a refusal failing the test where it happened */
 func mustCreateLock(lock lockcontract.Lock, createErr error) lockcontract.Lock {
     if nil != createErr {
         panic(createErr)

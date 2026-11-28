@@ -30,7 +30,6 @@ import (
     "github.com/precision-soft/melody/v4/openapi"
 )
 
-/* invoke is the form an application reaches a framework door through without spelling its token: the token type is inferred from the method value and its zero value passed */
 func invoke[T any](door func(T)) {
     var zero T
     door(zero)
@@ -70,7 +69,6 @@ func requireFrameworkOnlyRefusal(t *testing.T, expectedMessage string, call func
     call()
 }
 
-/* the first parameter of each door is a token an untyped struct{}{} cannot stand for */
 func requireTokenRefusesEmptyStructLiteral(t *testing.T, doorName string, door any) {
     t.Helper()
 
@@ -125,7 +123,6 @@ func TestFrameworkDoors_RefuseATokenTheFrameworkDidNotBuild(t *testing.T) {
     /* the .env carries the cron keys, which only a registered cron module declares */
     applicationInstance.RegisterModule(melodycron.NewModule(melodycron.ModuleConfig{}))
 
-    /* the boot runtime door sits on an unexported kernel: reflection is the only reach, and the zero token it builds is refused */
     kernelInstance := applicationInstance.Boot()
     installer := reflect.ValueOf(kernelInstance).MethodByName("InstallBootRuntime")
     if false == installer.IsValid() {
@@ -148,7 +145,6 @@ func TestFrameworkDoors_RefuseATokenTheFrameworkDidNotBuild(t *testing.T) {
 /* a loopback port nothing listens on: the boot's dial of the broker is refused at once, never held for the dial timeout */
 const closedLoopbackAmqpDsn = "amqp://guest:guest@127.0.0.1:1/"
 
-/* environmentFilesWithAmqpDsn answers the committed .env alone, with AMQP_DSN set to the dsn handed, so an embedded boot reads neither a developer's .env.local nor the stack's broker; the local build reads the files on disk whatever it is handed */
 func environmentFilesWithAmqpDsn(t *testing.T, dsn string) fs.FS {
     t.Helper()
 
@@ -178,7 +174,6 @@ func environmentFilesWithAmqpDsn(t *testing.T, dsn string) fs.FS {
     return fstest.MapFS{".env": &fstest.MapFile{Data: []byte(strings.Join(lines, "\n"))}}
 }
 
-/* the example served under a server of its owner's: the handler the application hands out answers the health route, the owner begins the shutdown before its server's and closes the application after it */
 func TestApplicationHttpHandler_ServesTheHealthRouteUnderAnotherServer(t *testing.T) {
     /* the test binary's own flags would read as a cli command; without them the process runs the .env's default mode, http */
     originalArguments := os.Args
@@ -205,12 +200,10 @@ func TestApplicationHttpHandler_ServesTheHealthRouteUnderAnotherServer(t *testin
         t.Fatalf("unexpected http handler error: %v", handlerErr)
     }
 
-    /* the websocket module serves /ws, the hub reached per connection through its provider */
     if websocketRoute, found := applicationInstance.Boot().HttpRouter().RouteDefinition("example.websocket"); false == found || "/ws" != websocketRoute.Pattern() {
         t.Fatalf("expected the websocket module to register /ws, got %v %v", websocketRoute, found)
     }
 
-    /* the amqp module registers its connection, the boot's check of the broker, exactly when the resolved AMQP_DSN is set: the embedded build reads the test's refused loopback port, the local build the files on disk, a developer's .env.local included */
     amqpDsn := applicationInstance.Configuration().MustGet("app.amqp.dsn").String()
     if ("" != amqpDsn) != applicationInstance.Boot().ServiceContainer().Has(melodyamqp.ServiceConnection) {
         t.Fatalf("expected the amqp module registered exactly beside AMQP_DSN, the dsn %q", amqpDsn)

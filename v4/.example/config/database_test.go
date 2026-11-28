@@ -51,7 +51,6 @@ func TestInsecureSwitch_ArmsOnTheExactSpellingAndRefusesAnyOtherValueByName(t *t
     }
 }
 
-/* the registry's refusal reads the same for either database — "database connection failed" over a host — so the handle providers name the manager and where it is: the operator reading a console knows WHICH database refused before knowing why, and the registry's refusal stays the cause */
 func TestDatabaseOpenedBy_NamesTheManagerAndItsLocationWhenTheOpenRefuses(t *testing.T) {
     registry, registryErr := melodybunorm.NewManagerRegistry(
         []melodybunorm.ProviderDefinition{
@@ -86,7 +85,6 @@ func TestDatabaseOpenedBy_NamesTheManagerAndItsLocationWhenTheOpenRefuses(t *tes
     }
 }
 
-/* the reading repository is resolved by type through the generated wiring, and a refusal of the archive's database on that first resolution reaches the console naming the archive set and its step, not as the container's "service not registered in resolver", the relabelling it applies to any error that is not this application's own. */
 func TestArchiveReadingRepositoryResolvedByTypeNamesTheArchiveRatherThanTheWiring(t *testing.T) {
     serviceContainer := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
 
@@ -115,12 +113,10 @@ func TestArchiveReadingRepositoryResolvedByTypeNamesTheArchiveRatherThanTheWirin
     }
 }
 
-/* databaseTestRuntime is a run over a scope of an empty container, under ctx */
 func databaseTestRuntime(ctx context.Context) melodycontainercontract.Runtime {
     return melodyruntime.NewRun(ctx, melodycontainer.NewContainer(melodycontainer.ContainerConfig{}).NewScope())
 }
 
-/* registryOver resolves the registry the module registers, through its own provider, beside a logger service */
 func registryOver(t *testing.T, moduleInstance *Module) *melodybunorm.ManagerRegistry {
     t.Helper()
 
@@ -144,7 +140,6 @@ func registryOver(t *testing.T, moduleInstance *Module) *melodybunorm.ManagerReg
     return registry
 }
 
-/* the registry's lazy opens run under the runtime of the caller that asked: the archive is opened on a request or a scheduled command, and an open in flight when that caller goes away ends with its context rather than running its whole retry budget. Cancelled, the open ends at once naming the cancellation, and the registry closes with nothing pending. */
 func TestBuildDatabase_RunsTheArchiveOpenUnderTheCallersRuntime(t *testing.T) {
     ctx, cancel := context.WithCancel(context.Background())
     defer cancel()
@@ -190,7 +185,6 @@ func TestBuildDatabase_RunsTheArchiveOpenUnderTheCallersRuntime(t *testing.T) {
     }
 }
 
-/* the catalogue is opened by the first request that reads it, so its budget is request-sized too: against a mysql that refuses, the open gives up in under three seconds, not after ten attempts one to five seconds apart. */
 func TestBuildDatabase_GivesTheCatalogueARequestSizedOpenBudget(t *testing.T) {
     moduleInstance := moduleWithEnvironment(t, map[string]string{
         environmentKeyMysqlHost:     "127.0.0.1",
@@ -214,7 +208,6 @@ func TestBuildDatabase_GivesTheCatalogueARequestSizedOpenBudget(t *testing.T) {
     }
 }
 
-/* the archive's open budget is request-sized: against a postgres that refuses, the open gives up in under three seconds. */
 func TestBuildDatabase_GivesTheArchiveARequestSizedOpenBudget(t *testing.T) {
     moduleInstance := moduleWithEnvironment(t, map[string]string{
         environmentKeyPgsqlHost:     "127.0.0.1",
@@ -229,7 +222,6 @@ func TestBuildDatabase_GivesTheArchiveARequestSizedOpenBudget(t *testing.T) {
     _, openErr := registryOver(t, moduleInstance).Database(databaseTestRuntime(context.Background()), databaseArchiveManagerName)
     elapsed := time.Since(startedAt)
 
-    /* the registry's own headline is "database connection failed"; the attempts spent are in its cause */
     if nil == openErr || false == strings.Contains(openErr.Error(), "database connection failed") {
         t.Fatalf("expected the open to give up after its attempts, got %v", openErr)
     }
@@ -239,7 +231,6 @@ func TestBuildDatabase_GivesTheArchiveARequestSizedOpenBudget(t *testing.T) {
     }
 }
 
-/* the first resolution of the archive repository applies the migration set after the dial, a wait of up to the lock window on a held migration lock; that wait runs under the process context the storage carries, so a cancelled process ends it at once rather than running the whole window while the teardown waits. Over a refusing connector the dial refuses first either way, so the arm that separates the two is the context's refusal being what the migration set hands back. */
 func TestArchiveStorageCarriesTheProcessContextIntoTheMigrationSet(t *testing.T) {
     ctx, cancel := context.WithCancel(context.Background())
     cancel()
@@ -264,7 +255,6 @@ func TestArchiveStorageCarriesTheProcessContextIntoTheMigrationSet(t *testing.T)
     }
 }
 
-/* the composition root binds the process context onto the handle it publishes */
 func TestRegisterArchiveStorageService_BindsTheProcessContext(t *testing.T) {
     ctx, cancel := context.WithCancel(context.Background())
     defer cancel()
@@ -291,8 +281,6 @@ func TestRegisterArchiveStorageService_BindsTheProcessContext(t *testing.T) {
     }
 }
 
-/* recordingProvider opens a handle over a connector that is never dialed and records the logger the registry
-   handed it: the journal an open reports through is the logger the registry was built on */
 type recordingProvider struct {
     openedWith []melodyloggingcontract.Logger
 }
@@ -307,7 +295,6 @@ func (instance *recordingProvider) OpenForMigration(runtimeInstance melodycontai
     return instance.Open(runtimeInstance, parameters, logger)
 }
 
-/* databaseServicesOver registers the database services of a module whose registry declares the catalogue and the archive over recording providers, beside a logger service that counts its resolutions; the buffer that logger writes into is returned, so a test reads where a record written through the logger an open receives lands */
 func databaseServicesOver(t *testing.T, archiveWired bool) (melodycontainercontract.Container, *recordingProvider, *recordingProvider, *lockedJournalBuffer, *int) {
     t.Helper()
 
@@ -355,7 +342,6 @@ func databaseServicesOver(t *testing.T, archiveWired bool) (melodycontainercontr
     return containerInstance, catalogProvider, archiveProvider, journalBuffer, &loggerResolutions
 }
 
-/* lockedJournalBuffer is the journal's destination, read by the test while the application may still write */
 type lockedJournalBuffer struct {
     mutex   sync.Mutex
     content strings.Builder
@@ -375,7 +361,6 @@ func (instance *lockedJournalBuffer) String() string {
     return instance.content.String()
 }
 
-/* the chain the catalogue storage starts (storage, handle, registry, journal) continues here: the handle resolves the registry, and the registry's provider builds it on the container's journal before the handle is opened, so the open reports through the application's logger. A handle that captured the registry would resolve nothing, so the teardown would have no edge to order the two closes by. */
 func TestRegisterDatabaseServices_EachHandleResolvesTheRegistryWhichTakesTheJournalFirst(t *testing.T) {
     for _, handle := range []struct {
         serviceName string
@@ -404,7 +389,6 @@ func TestRegisterDatabaseServices_EachHandleResolvesTheRegistryWhichTakesTheJour
             t.Fatalf("%s: expected one open, got %d", handle.serviceName, len(opened.openedWith))
         }
 
-        /* the registry hands its own logger, which carries the application's, so the journal is proven by where a record lands rather than by identity */
         opened.openedWith[0].Warning("open reported through the journal", nil)
         if false == strings.Contains(journalBuffer.String(), "open reported through the journal") {
             t.Fatalf("%s: expected the open handed a logger reporting into the container's journal, got %q", handle.serviceName, journalBuffer.String())
@@ -412,9 +396,6 @@ func TestRegisterDatabaseServices_EachHandleResolvesTheRegistryWhichTakesTheJour
     }
 }
 
-/* both handles are asked for by NAME: a resolution by type between two handles of one concrete type could only
-   answer whichever landed first, so the question is not askable at all. And without an archive the archive's
-   handle is not registered, the catalogue's still is. */
 func TestRegisterDatabaseServices_KeepsBothHandlesOffTheTypeIndexAndTheArchiveBehindItsSwitch(t *testing.T) {
     containerInstance, _, _, _, _ := databaseServicesOver(t, true)
     if false == containerInstance.Has(serviceDatabase) || false == containerInstance.Has(serviceArchiveDatabase) {
@@ -431,7 +412,6 @@ func TestRegisterDatabaseServices_KeepsBothHandlesOffTheTypeIndexAndTheArchiveBe
     }
 }
 
-/* a declared catalogue is opened by its service at the first resolution, never by the build: against a mysql that refuses, the build answers at once with the catalogue wired and nothing opened, so a process that never reads the catalogue holds no pool for the teardown to miss */
 func TestBuildDatabase_DeclaresTheCatalogueWithoutOpeningIt(t *testing.T) {
     moduleInstance := moduleWithEnvironment(t, map[string]string{
         environmentKeyMysqlHost:     "127.0.0.1",
@@ -464,7 +444,6 @@ func TestBuildDatabase_DeclaresTheCatalogueWithoutOpeningIt(t *testing.T) {
     }
 }
 
-/* the catalogue's locker resolves the handle at its first use, through the handle's own service, rather than capturing one at registration */
 func TestRegisterLockerService_ResolvesTheCatalogueHandleAtFirstUse(t *testing.T) {
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
@@ -494,7 +473,6 @@ func TestRegisterLockerService_ResolvesTheCatalogueHandleAtFirstUse(t *testing.T
     }
 }
 
-/* the registry is built at boot: a declared host whose database is left empty is a definition the registry refuses, so the boot fails naming it rather than the first request that reads the catalogue */
 func TestRegisterDatabaseServices_BuildsTheRegistryAtBootSoARefusedDefinitionFailsTheBoot(t *testing.T) {
     moduleInstance := moduleWithEnvironment(t, map[string]string{
         environmentKeyMysqlHost: "127.0.0.1",
@@ -529,7 +507,6 @@ func TestRegisterDatabaseServices_BuildsTheRegistryAtBootSoARefusedDefinitionFai
     }
 }
 
-/* runtimeRecordingProvider opens a handle over a connector that is never dialed and records the context of the runtime the registry handed it */
 type runtimeRecordingProvider struct {
     openedUnder []context.Context
 }
@@ -544,7 +521,6 @@ func (instance *runtimeRecordingProvider) OpenForMigration(runtimeInstance melod
     return instance.Open(runtimeInstance, parameters, logger)
 }
 
-/* each handle the module registers is opened under the runtime of the resolution that publishes it: the open's context carries that resolution's deadline */
 func TestRegisterDatabaseServices_EachHandleOpensUnderTheResolvingRuntime(t *testing.T) {
     for _, serviceName := range []string{serviceDatabase, serviceArchiveDatabase} {
         provider := &runtimeRecordingProvider{}

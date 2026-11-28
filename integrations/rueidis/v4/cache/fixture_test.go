@@ -24,7 +24,6 @@ func testRuntimeUnder(ctx context.Context) containercontract.Runtime {
     return runtime.NewRun(ctx, container.NewContainer(container.ContainerConfig{}).NewScope())
 }
 
-/* contextlessTestRuntime carries no context, which no constructor of the runtime package builds */
 type contextlessTestRuntime struct {
     containercontract.Runtime
 }
@@ -33,7 +32,6 @@ func (instance *contextlessTestRuntime) Context() context.Context {
     return nil
 }
 
-/* liveBackend answers a backend over the redis the validation lane starts, under a prefix unique to the calling test so parallel suites never read one another's keys. The suite skips where no address is exported, the way the rate limiter suite of the parent package does. */
 func liveBackend(t *testing.T) (*Backend, rueidis.Client) {
     t.Helper()
 
@@ -60,7 +58,7 @@ func liveBackend(t *testing.T) (*Backend, rueidis.Client) {
     }
 
     t.Cleanup(func() {
-        /* the cleanup clears through its own backend: a test that closed the one under test would otherwise leave its keys behind, since a closed backend refuses Clear like every other operation */
+        /* cleared through its own backend: the test may have closed the one under test, and a closed backend refuses */
         cleaner, cleanerErr := NewBackend(newTestConnection(client), BackendConfig{Prefix: prefix})
         if nil != cleanerErr {
             t.Logf("could not build the cleanup backend: %v", cleanerErr)
@@ -76,7 +74,6 @@ func liveBackend(t *testing.T) (*Backend, rueidis.Client) {
     return backend, client
 }
 
-/* rawTtl reads the expiry redis actually holds, which is the only way to tell a key written without expiry from one written with a long one. */
 func rawTtl(t *testing.T, client rueidis.Client, fullKey string) int64 {
     t.Helper()
 
@@ -89,7 +86,6 @@ func rawTtl(t *testing.T, client rueidis.Client, fullKey string) int64 {
     return remaining
 }
 
-/* gatedConn is a net.Conn whose Read stops delivering once wedged, the shape of a store that accepts connections but stops answering; the gate is shared by every conn the client dials, so the retry the client makes on a fresh connection meets the same silence. */
 type gatedConn struct {
     net.Conn
 
@@ -218,7 +214,6 @@ func dialGated(t *testing.T) (rueidis.Client, *gate) {
     return client, shared
 }
 
-/* awaitOutcome runs a call expected to return on its own within the budget and fails the test by name when it does not, so a mutant that removes a bound fails here instead of hanging the suite. */
 func awaitOutcome(t *testing.T, budget time.Duration, call func() error) error {
     t.Helper()
 
@@ -238,7 +233,6 @@ func awaitOutcome(t *testing.T, budget time.Duration, call func() error) error {
     }
 }
 
-/* newTestConnection is the owner a backend under test is built over, under the default namespace */
 func newTestConnection(client rueidis.Client) *melodyrueidis.Connection {
     return melodyrueidis.NewConnection(client, "melody")
 }

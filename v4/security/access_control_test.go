@@ -267,7 +267,7 @@ func TestRules_ReturnsCopy(t *testing.T) {
     }
 }
 
-/* the attribute is ROLE_ADMIN and not PUBLIC_ACCESS, the precaution the invalid-pattern sibling already takes: with PUBLIC_ACCESS the unanchored refusal below panics for an empty pattern too, so this test passed with its own guard deleted and only observed the neighbour's. The message is what pins which one answered. */
+/* ROLE_ADMIN, not PUBLIC_ACCESS: with PUBLIC_ACCESS the unanchored refusal panics for an empty pattern too */
 func TestNewRegexRule_EmptyPatternPanics(t *testing.T) {
     testhelper.AssertPanicsWithError(t, func() {
         _ = accesscontrol.NewRegexRule("", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}})
@@ -356,7 +356,6 @@ func TestNewRawPrefixRule_LonePublicAccessIsAllowed(t *testing.T) {
     }
 }
 
-/* a rule whose attributes all normalize away still matches its path, so it granted every authenticated principal and shadowed any longer-prefixed rule that would have denied; the blank attribute is refused at construction instead */
 func TestAccessControlRule_RejectsAnAttributeListThatNormalizesToEmpty(t *testing.T) {
     for _, attributes := range [][]string{
         {},

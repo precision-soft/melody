@@ -203,7 +203,6 @@ func TestCompile_DescribesTheFrameworksPathPrefixMatcher(t *testing.T) {
     }
 }
 
-/* compileMergeStrategyFirewall compiles one firewall under the strategy given: the global policy and the firewall's own both claim /admin under a different role, so the order of the merged rules decides which answers, and only the global policy claims /reports, so whether it was inherited at all is read there */
 func compileMergeStrategyFirewall(t *testing.T, mergeStrategy AccessControlMergeStrategy) *security.AccessControl {
     t.Helper()
 

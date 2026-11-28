@@ -13,7 +13,6 @@ import (
     "testing"
 )
 
-/* fourthMajorSourceList lists the Go files of the fourth major: the framework, its example and every v4 integration, the repository read from this package's directory */
 func fourthMajorSourceList(t *testing.T) []string {
     t.Helper()
 
@@ -71,7 +70,6 @@ func TestSourceWalk_NoFileImportsTheRemovedRuntimePackages(t *testing.T) {
     }
 }
 
-/* a runtime rebuilt from another's scope takes a kind the caller names, where WithContext keeps the one it had */
 func TestSourceWalk_NoProductionFileRebuildsARuntimeFromAnothersScope(t *testing.T) {
     rebuilt := regexp.MustCompile(`New(Request|Run)\(\s*[^,()]+(\([^()]*\))?,\s*[A-Za-z_][A-Za-z0-9_]*\.Scope\(\)\s*,?\s*\)`)
 
@@ -107,7 +105,6 @@ func TestSourceWalk_NoFileNamesTheRemovedResolutionContextDoors(t *testing.T) {
     }
 }
 
-/* an accessor a provider reads stays resolver-only; every other named accessor has a runtime form beside it */
 var accessorWithoutRuntimeForm = map[string]string{
     "v4/container:MustFromResolver":                                 "generic door, its runtime form is runtime.MustFromRuntime",
     "v4/container:MustFromResolverByType":                           "generic door, by type, its runtime form is runtime.MustFromRuntimeByType",
@@ -128,7 +125,6 @@ var accessorWithoutRuntimeForm = map[string]string{
 }
 
 func TestSourceWalk_EveryNamedResolverAccessorHasARuntimeFormOrADecision(t *testing.T) {
-    /* a generic accessor and a suffixed one count too; the twin is looked for in the same file */
     accessor := regexp.MustCompile(`(?m)^func ([A-Z][A-Za-z0-9]*)FromResolver([A-Za-z0-9]*)[\[(]`)
     seen := map[string]bool{}
     _, integrationErr := os.Stat(filepath.Join("..", "..", "..", "integrations"))
@@ -187,7 +183,6 @@ func TestSourceWalk_EveryNamedResolverAccessorHasARuntimeFormOrADecision(t *test
 
 const exampleOwnAccessor = "the example's own accessor, which R-0 step 6 moves to the runtime"
 
-/* the calls a runtime-holding file of the fourth major still makes with a runtime's context and its scope apart, each counted; a provider-only accessor's decision is the one in accessorWithoutRuntimeForm, keyed by the call's own package unless the allowance names the accessor */
 var runtimeHeldResolverCallAllowed = map[string]runtimeHeldResolverAllowance{
     "v4/openapi/generate_command.go:InfoFromResolver":                                {count: 1, decision: "provider"},
     "v4/openapi/generate_command.go:RegistryMustFromResolver":                        {count: 1, decision: "provider"},
@@ -233,7 +228,6 @@ type runtimeHeldResolverCall struct {
     line   int
 }
 
-/* runtimeHeldResolverCalls answers the calls of one source that take a runtime's context and the same runtime's scope apart, as their two leading arguments or as a method of the scope handed the context; a context or a scope held in a local of the same function counts, and so does the scope a runtime was built over */
 func runtimeHeldResolverCalls(source string, content []byte) ([]runtimeHeldResolverCall, error) {
     fileSet := token.NewFileSet()
     file, parseErr := parser.ParseFile(fileSet, source, content, parser.SkipObjectResolution)
@@ -341,7 +335,6 @@ func runtimeHeldResolverCalls(source string, content []byte) ([]runtimeHeldResol
     return callList, nil
 }
 
-/* runtimeOfContext answers the runtime whose Context() the expression is, holds, or derives a context from as its first argument */
 func runtimeOfContext(expression ast.Expr, contextOf map[string]string) string {
     switch typed := ast.Unparen(expression).(type) {
     case *ast.CallExpr:
@@ -359,7 +352,6 @@ func runtimeOfContext(expression ast.Expr, contextOf map[string]string) string {
     return ""
 }
 
-/* runtimeOfScope answers the runtime whose Scope() the expression is or holds, through a type assertion */
 func runtimeOfScope(expression ast.Expr, scopeOf map[string]string) string {
     switch typed := ast.Unparen(expression).(type) {
     case *ast.CallExpr:
@@ -367,7 +359,6 @@ func runtimeOfScope(expression ast.Expr, scopeOf map[string]string) string {
             return types.ExprString(ast.Unparen(selector.X))
         }
 
-        /* a conversion, containercontract.Resolver(R.Scope()), keeps the scope */
         if 1 == len(typed.Args) {
             return runtimeOfScope(typed.Args[0], scopeOf)
         }
@@ -395,7 +386,6 @@ func calleeName(function ast.Expr) string {
     return ""
 }
 
-/* code holding a runtime resolves through it; a resolver door handed the runtime's context and scope bypasses the runtime's refusals */
 func TestSourceWalk_NoFourthMajorFileHandsARuntimesContextAndScopeToAResolverDoor(t *testing.T) {
     seen := map[string]int{}
 

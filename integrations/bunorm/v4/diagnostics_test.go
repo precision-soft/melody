@@ -13,9 +13,6 @@ import (
     "github.com/uptrace/bun/schema"
 )
 
-/* bun's own diagnostics reach the application's journal instead of standard error. They are the developer's declaration mistakes — here a query carrying an argument with nowhere to put it — and written to standard error as unstructured text they are invisible to a deployment whose journal is a json file.
-
-   The warning is provoked through bun's public surface rather than by calling its logger, because what has to be proven is that bun uses the destination this package installs, not that a *log.Logger writes where it is pointed. It goes through the EXPORTED door: the once guards only the forwarder, and the destination behind it is replaced on every call, so a second run of this test proves exactly what the first does. */
 func TestRouteDiagnostics_SendsBunsOwnChannelToTheJournal(t *testing.T) {
     logger := &capturingDiagnosticLogger{}
 
@@ -47,7 +44,6 @@ func TestRouteDiagnostics_SendsBunsOwnChannelToTheJournal(t *testing.T) {
     }
 }
 
-/* TestRouteDiagnostics_ASecondRoutingTakesTheChannelBack is the guard the retargeting exists for: a process that builds, closes and rebuilds its application routes twice, and the SECOND lifecycle's diagnostics must reach the second logger, not the first lifecycle's, closed by then. The assertion is two-sided on purpose: the second logger must receive the record AND the first must not, since a one-sided check passes on a forwarder that writes to both. */
 func TestRouteDiagnostics_ASecondRoutingTakesTheChannelBack(t *testing.T) {
     firstLifecycle := &capturingDiagnosticLogger{}
     secondLifecycle := &capturingDiagnosticLogger{}
@@ -67,9 +63,6 @@ func TestRouteDiagnostics_ASecondRoutingTakesTheChannelBack(t *testing.T) {
     }
 }
 
-/* TestResetDiagnostics_HandsTheChannelBack pins what a teardown gets. The registry calls it from its own Close, while the logger it routed to is still alive, so no record is written into a journal that is closing; afterwards the line belongs on standard error, which is where bun puts it when nobody routes it at all.
-
-   What is asserted is that the routed logger stops receiving. The fallback's own destination is standard error by construction — asserting on the process console would be asserting on the test runner's output, not on this package. */
 func TestResetDiagnostics_HandsTheChannelBack(t *testing.T) {
     logger := &capturingDiagnosticLogger{}
 
@@ -84,7 +77,6 @@ func TestResetDiagnostics_HandsTheChannelBack(t *testing.T) {
     }
 }
 
-/* a provider that could not resolve a logger takes nothing on the way past: without the guard it would install an adapter over nothing, and bun's diagnostics would go from standard error to nowhere at all — a destination strictly worse than the one it replaced. */
 func TestRouteDiagnostics_ANilLoggerLeavesTheDestinationWhereItWas(t *testing.T) {
     logger := &capturingDiagnosticLogger{}
     RouteDiagnostics(logger)
@@ -99,9 +91,6 @@ func TestRouteDiagnostics_ANilLoggerLeavesTheDestinationWhereItWas(t *testing.T)
     }
 }
 
-/* TestRouteDiagnostics_ATypedNilLoggerLeavesTheDestinationWhereItWas is the same guard for the nil that a plain nil comparison lets through. A resolver answering a nil pointer of its own logger type produces a non-nil interface, so without the typed-nil reading the destination would be replaced by a receiver whose first record panics — inside bun's own logging call, one frame from a query.
-
-   The double dereferences its receiver on every method, which is what lets the guard die: a double whose methods tolerate a nil receiver would pass with the guard removed. */
 func TestRouteDiagnostics_ATypedNilLoggerLeavesTheDestinationWhereItWas(t *testing.T) {
     logger := &capturingDiagnosticLogger{}
     RouteDiagnostics(logger)
@@ -117,7 +106,6 @@ func TestRouteDiagnostics_ATypedNilLoggerLeavesTheDestinationWhereItWas(t *testi
     }
 }
 
-/* the providers route on every open; a routing on the logger already installed must install nothing, or every open allocated a fresh writer for the same journal and replaced the live one for no change */
 func TestRouteDiagnostics_ARoutingOnTheSameLoggerInstallsNothing(t *testing.T) {
     logger := &capturingDiagnosticLogger{}
     t.Cleanup(ResetDiagnostics)
@@ -142,7 +130,6 @@ func TestRouteDiagnostics_ARoutingOnTheSameLoggerInstallsNothing(t *testing.T) {
     }
 }
 
-/* the once installs the forwarder, not a destination, so a routing after a hand-back reaches the journal again through the same forwarder: the once never needs resetting */
 func TestRouteDiagnostics_RoutesAgainAfterAHandBack(t *testing.T) {
     logger := &capturingDiagnosticLogger{}
     t.Cleanup(ResetDiagnostics)
@@ -158,7 +145,6 @@ func TestRouteDiagnostics_RoutesAgainAfterAHandBack(t *testing.T) {
     }
 }
 
-/* the hand-back a teardown asks for is scoped to its own logger: when another logger holds the channel, nothing happens */
 func TestResetDiagnosticsRoutedTo_LeavesAnotherLoggersChannelAlone(t *testing.T) {
     first := &capturingDiagnosticLogger{}
     second := &capturingDiagnosticLogger{}
@@ -184,7 +170,6 @@ func TestResetDiagnosticsRoutedTo_LeavesAnotherLoggersChannelAlone(t *testing.T)
     }
 }
 
-/* sliceCarryingLogger is a logger held by value whose dynamic type is not comparable — the shape of a test double or an integrator's adapter that keeps its records in a slice — so `==` between two Logger interfaces holding it panics at runtime */
 type sliceCarryingLogger struct {
     records []string
 }
@@ -205,7 +190,6 @@ func (instance sliceCarryingLogger) CauseChainDepth() int {
     return 8
 }
 
-/* routing bun's diagnostics to a logger whose dynamic type is not comparable panicked on the SECOND routing — the first found no live target to compare against — and at a registry's Close through the hand-back, for a logger that had routed fine once: a bare comparison of two interfaces is a runtime panic on an incomparable dynamic type. Such a logger has no identity, so the hand-back goes through the destination the routing answered */
 func TestRouteDiagnostics_ALoggerWhoseTypeIsNotComparableRoutesTwiceAndHandsBackThroughTheDestinationItRouted(t *testing.T) {
     t.Cleanup(ResetDiagnostics)
 
@@ -225,7 +209,6 @@ func TestRouteDiagnostics_ALoggerWhoseTypeIsNotComparableRoutesTwiceAndHandsBack
     }
 }
 
-/* two distinct loggers of equal content, both without identity, are two loggers: read by content they were one, so the Close of the registry holding the second took the channel the first had routed */
 func TestResetDiagnosticsRoutedTo_TwoValueLoggersOfEqualContentAreNotOneLogger(t *testing.T) {
     t.Cleanup(ResetDiagnostics)
 
@@ -246,7 +229,6 @@ func TestResetDiagnosticsRoutedTo_TwoValueLoggersOfEqualContentAreNotOneLogger(t
     }
 }
 
-/* mapCarryingLogger writes its own map under its own mutex on every record — the shape of a logger that keeps counters — so a comparison that read its content would read the map under no lock while a record is being written */
 type mapCarryingLogger struct {
     mutex  *sync.Mutex
     counts map[string]int
@@ -283,7 +265,6 @@ func (instance mapCarryingLogger) CauseChainDepth() int {
     return 8
 }
 
-/* a routing and a hand-back on a logger without identity read none of its content: read by content, the comparison walked the logger's map while its own Log was writing it, a data race the detector reported on every run. Proven under -race, the shape a mutation cannot separate. */
 func TestRouteDiagnostics_ALoggerWithoutIdentityIsNeverReadWhileItWrites(t *testing.T) {
     t.Cleanup(ResetDiagnostics)
 
@@ -339,7 +320,6 @@ func TestRegistryLogger_ForwardsTheWrappedLoggersCauseChainDepth(t *testing.T) {
     }
 }
 
-/* a routing through the registry's logger writes bun's records to the application's logger itself */
 func TestRegistryLogger_RoutesBunsRecordsToTheWrappedLogger(t *testing.T) {
     t.Cleanup(ResetDiagnostics)
 
@@ -353,7 +333,6 @@ func TestRegistryLogger_RoutesBunsRecordsToTheWrappedLogger(t *testing.T) {
     }
 }
 
-/* a retired registry logger routes nothing, the door every late routing goes through */
 func TestRouteDiagnostics_ARetiredRegistryLoggerRoutesNothing(t *testing.T) {
     t.Cleanup(ResetDiagnostics)
 

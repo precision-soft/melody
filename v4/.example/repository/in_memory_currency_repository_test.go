@@ -9,12 +9,10 @@ import (
     "github.com/precision-soft/melody/v4/.example/entity"
 )
 
-/* the probes below are about concurrent access, not about quotes, so every currency they create carries the
-   same fixed instant: a quote that moved between two of them would be a second variable in a test that has
-   one subject. */
+/* one fixed instant for every currency: the probes are about concurrent access, not quotes */
 var currencyProbeQuoteInstant = time.Date(2026, time.September, 7, 9, 0, 0, 0, time.UTC)
 
-/* every repository is a process-wide singleton and net/http serves each request on its own goroutine, so a listing request and a deleting request overlap; the writer here always removes a non-terminal element, which is what makes DeleteById compact the backing array under the reader */
+/* net/http overlaps a listing and a delete; a non-terminal element makes DeleteById compact the array under the reader */
 
 func TestInMemoryCurrencyRepositoryConcurrentReadAndDelete(t *testing.T) {
     ctx := context.Background()
@@ -85,9 +83,6 @@ func TestInMemoryCurrencyRepositoryConcurrentReadAndDelete(t *testing.T) {
     }
 }
 
-/* the quote write is conditional on the row's instant, judged and written under the one lock: an older
-   document that arrives after a newer one is refused, the same document twice is refused, and a newer one
-   lands — the rule about "never a newer price" is a rule about the row at the moment of the write */
 func TestInMemoryCurrencyRepositoryUpdateQuoteWritesOnlyOverARowThatIsNotNewer(t *testing.T) {
     repository := newInMemoryCurrencyRepository(true)
     ctx := context.Background()
@@ -117,7 +112,6 @@ func TestInMemoryCurrencyRepositoryUpdateQuoteWritesOnlyOverARowThatIsNotNewer(t
     }
 }
 
-/* the reading is judged on this clock, except against the reading the row already names: the provider may re-quote that reading at another rate, landing on this clock a little earlier than the first arrival, and the re-quote is written; the reading itself, arriving again, is not written a second time */
 func TestInMemoryCurrencyRepositoryUpdateQuoteJudgesTheReadingOnThisClockAndByItsStamp(t *testing.T) {
     repository := newInMemoryCurrencyRepository(true)
     ctx := context.Background()
@@ -147,8 +141,6 @@ func TestInMemoryCurrencyRepositoryUpdateQuoteJudgesTheReadingOnThisClockAndByIt
     }
 }
 
-/* a rename reads the row, and a refresh writes a newer quote before the rename writes: the rename changes the code
-   and the name and leaves the quote the refresh wrote */
 func TestInMemoryCurrencyRepositoryUpdateKeepsAQuoteWrittenAfterTheRenameRead(t *testing.T) {
     ctx := context.Background()
     repositoryInstance := newInMemoryCurrencyRepository(true)
@@ -177,7 +169,6 @@ func TestInMemoryCurrencyRepositoryUpdateKeepsAQuoteWrittenAfterTheRenameRead(t 
     }
 }
 
-/* the highest minted currency deleted, the next create does not adopt its identifier, and with it the products still priced in it */
 func TestInMemoryCurrencyRepositoryNeverMintsADeletedIdentifierAgain(t *testing.T) {
     ctx := context.Background()
     repositoryInstance := newInMemoryCurrencyRepository(true)

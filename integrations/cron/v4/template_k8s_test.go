@@ -47,7 +47,6 @@ func TestK8sRenderEmitsCronJobManifest(t *testing.T) {
         }
     }
 
-    /* CLI mode is driven by args, not by an env var; the manifest must not emit a dead MELODY_CLI env block */
     for _, forbidden := range []string{"env:", "MELODY_CLI"} {
         if true == strings.Contains(content, forbidden) {
             t.Fatalf("expected manifest to omit %q, got:\n%s", forbidden, content)
@@ -201,7 +200,6 @@ func TestK8sRenderRejectsCollidingResourceNames(t *testing.T) {
 }
 
 func TestK8sRenderSuffixesNamesForMultiInstanceCommand(t *testing.T) {
-    /* a command with Instances > 1 expands into several entries sharing one Name; each must become a distinct CronJob rather than colliding on metadata.name */
     entries := []Entry{
         {Name: "outbox:dispatch", User: "www-data", Arguments: []string{"outbox:dispatch", "--instance-index=1"}, Schedule: &Schedule{Minute: "0"}, InstanceIndex: 1, InstanceCount: 2},
         {Name: "outbox:dispatch", User: "www-data", Arguments: []string{"outbox:dispatch", "--instance-index=2"}, Schedule: &Schedule{Minute: "0"}, InstanceIndex: 2, InstanceCount: 2},
@@ -224,7 +222,6 @@ func TestK8sRenderSuffixesNamesForMultiInstanceCommand(t *testing.T) {
 }
 
 func TestK8sRenderDoesNotSuffixSingleInstanceName(t *testing.T) {
-    /* InstanceCount 0 (literal entries) and 1 are both single-instance and must not carry a -<index> suffix */
     for _, instanceCount := range []int{0, 1} {
         entry := Entry{Name: "app:info", User: "www-data", Arguments: []string{"app:info"}, Schedule: &Schedule{Minute: "0"}, InstanceIndex: 1, InstanceCount: instanceCount}
 
@@ -271,7 +268,6 @@ func TestK8sRenderRejectsWhitespaceInScheduleField(t *testing.T) {
 }
 
 func TestK8sRenderRejectsPercentInScheduleField(t *testing.T) {
-    /* % is invalid in a cron schedule field; the k8s template must reject it with a k8s-appropriate reason, not the crontab line-continuation wording */
     entries := []Entry{
         {
             Name:      "app:info",
@@ -358,7 +354,6 @@ func TestK8sRenderEscapesControlCharacterInImage(t *testing.T) {
     }
 }
 
-/* the empty render is what --prune writes into a stale manifest: it must carry the marker so the file stays recognizable to the next sweep, and it must not demand the container image, because there are zero containers to build and the sweep runs under RenderOptions{} */
 func TestK8sRenderWithoutEntriesCarriesTheMarkerAndNeedsNoImage(t *testing.T) {
     rendered, renderErr := defaultK8sTemplate.Render(nil, RenderOptions{})
     if nil != renderErr {
@@ -374,7 +369,6 @@ func TestK8sRenderWithoutEntriesCarriesTheMarkerAndNeedsNoImage(t *testing.T) {
     }
 }
 
-/* the namespace is held to the RFC 1123 label grammar, so an uppercase letter or a dot fails generation instead of rendering a manifest kubectl apply refuses */
 func TestK8sRenderRefusesANamespaceThatIsNotAnRfc1123Label(t *testing.T) {
     entries := []Entry{k8sSampleEntry("product:list")}
 
@@ -394,7 +388,6 @@ func TestK8sRenderRefusesANamespaceThatIsNotAnRfc1123Label(t *testing.T) {
     }
 }
 
-/* in the exec form every element is one argv entry, so an empty token reaches the pod verbatim and fails there as a CrashLoopBackOff — the crontab dialects quote it as '' and hand the process an empty argument its own flag parsing answers */
 func TestK8sRenderRefusesEmptyInvocationTokens(t *testing.T) {
     withEmptyCommandToken := k8sSampleEntry("product:list")
     withEmptyCommandToken.Command = []string{"", "run"}
@@ -416,7 +409,6 @@ func TestK8sRenderRefusesEmptyInvocationTokens(t *testing.T) {
     }
 }
 
-/* yamlQuote iterates runes, so an invalid UTF-8 byte would be rewritten to U+FFFD, and for the image reference another image would be pulled than the one configured */
 func TestK8sRenderRefusesInvalidUtf8(t *testing.T) {
     entries := []Entry{k8sSampleEntry("product:list")}
 
@@ -424,7 +416,6 @@ func TestK8sRenderRefusesInvalidUtf8(t *testing.T) {
         t.Fatalf("expected the invalid UTF-8 image to be refused")
     }
 
-    /* the invalid token stands alone so it is the ONLY candidate: beside a valid sibling, an inverted guard refuses the sibling and answers the same observable error, and the mutant survives over a live guard */
     withInvalidToken := k8sSampleEntry("product:list")
     withInvalidToken.Arguments = []string{"--flag=\xff"}
 
@@ -433,7 +424,6 @@ func TestK8sRenderRefusesInvalidUtf8(t *testing.T) {
     }
 }
 
-/* the refusal of an invalid UTF-8 token names the class it belongs to — a character the manifest cannot carry — and not the empty-command class, which a caller that sorts refusals by sentinel would read it as */
 func TestK8sRenderFilesAnInvalidUtf8TokenUnderTheForbiddenCharacterClass(t *testing.T) {
     withInvalidToken := k8sSampleEntry("product:list")
     withInvalidToken.Arguments = []string{"--flag=\xff"}

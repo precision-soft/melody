@@ -152,7 +152,6 @@ func TestApiCreateDoorAnswersATakenCodeAsAConflictAndStoresNoSecondRow(t *testin
     }
 }
 
-/* the binding validates the body as sent; the door stores it trimmed, so it validates that spelling too: a name of one rune padded to two is refused, not stored */
 func TestApiCreateDoorValidatesTheTrimmedBody(t *testing.T) {
     fixture := newCurrencyDoorFixture(t)
 

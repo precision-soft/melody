@@ -31,7 +31,6 @@ func (instance *countingConnector) Driver() driver.Driver {
     return nil
 }
 
-/* endedRuntimeResolver answers the container's services under a runtime whose context has ended */
 type endedRuntimeResolver struct {
     melodycontainercontract.Resolver
     runtimeInstance melodycontainercontract.Runtime
@@ -72,7 +71,6 @@ func TestOutboxStoreFactory_EnsuresTheSchemaUnderTheResolvingRuntime(t *testing.
     }
 }
 
-/* the module's store is built at boot with the warning mode, and its provider ensures the schema under the boot runtime */
 func TestOutboxModuleConfig_TheStoreIsBuiltAtBootAndEnsuresTheSchemaThere(t *testing.T) {
     connector := &countingConnector{}
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})

@@ -177,7 +177,6 @@ func TestScopeRegisterScoped_ClosedDuringTheLockHandOffIsStillRefused(t *testing
         t.Fatalf("expected the refusal to classify as ErrScopeClosed")
     }
 
-    /* the stage is what makes this test about the window rather than about the sleep: a run whose goroutine had not yet reached the container read lock is refused by the entry check instead, which is a pass this assertion refuses to give. */
     if "lockHandOff" != refusalStageOf(t, registerErr) {
         t.Fatalf("expected the guard after the lock hand-off to answer, got %q", refusalStageOf(t, registerErr))
     }
@@ -585,7 +584,6 @@ func (instance *scopedLateHandler) Handle() string {
     return "late"
 }
 
-/* the collection order CollectionPriority declares is honoured for a registration the container plans, so a registration made on the live scope has to be ordered by the same rule: the scope's own references are the ones a request-time dispatcher collects */
 func TestRegisterScoped_OnTheScopeHonoursTheCollectionPriority(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -624,13 +622,11 @@ func TestRegisterScoped_OnTheScopeHonoursTheCollectionPriority(t *testing.T) {
         t.Fatalf("expected both scoped handlers, got %v", collected)
     }
 
-    /* the declared priority contradicts the type-and-name fallback, which would put scopedEarlyHandler first, so only an honoured priority can produce this order */
     if "late" != collected[0] || "early" != collected[1] {
         t.Fatalf("expected the scoped registrations ordered by descending priority, got %v", collected)
     }
 }
 
-/* the container's scoped door refuses a teardown declaration because a scope keeps its own graph and there is nowhere to write one; the live scope's door registers into that same scope, so it has to refuse it for the same reason instead of accepting it and installing nothing */
 func TestRegisterScoped_OnTheScopeRefusesATeardownDependency(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -656,7 +652,6 @@ func TestRegisterScoped_OnTheScopeRefusesATeardownDependency(t *testing.T) {
     }
 }
 
-/* the type form of the declaration is refused on the live scope as the name form is: the scope has no graph to write it into either way. */
 func TestRegisterScoped_OnTheScopeRefusesATeardownDependencyKeyedByType(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 

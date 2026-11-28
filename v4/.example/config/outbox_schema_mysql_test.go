@@ -41,7 +41,6 @@ func outboxSchemaTestDatabase(t *testing.T) *bun.DB {
     return database
 }
 
-/* the MySQL arm of the outbox schema runs here, where the example keeps its outbox: a table created without sent_at gains it once, as DATETIME like every other time column bun gives it */
 func TestOutboxSchema_EnsureSchemaAddsTheSendTimeOnMySql(t *testing.T) {
     database := outboxSchemaTestDatabase(t)
     store := outbox.NewStore(database, &outboxNoticeCodec{}, outbox.StoreConfig{})
@@ -67,7 +66,6 @@ func TestOutboxSchema_EnsureSchemaAddsTheSendTimeOnMySql(t *testing.T) {
     }
 }
 
-/* a table created before the headers and the transport, and a fresh one, both carry the two nullable columns once */
 func TestOutboxSchema_EnsureSchemaAddsTheHeadersAndTheTransportOnMySql(t *testing.T) {
     database := outboxSchemaTestDatabase(t)
     store := outbox.NewStore(database, &outboxNoticeCodec{}, outbox.StoreConfig{})
@@ -101,7 +99,6 @@ func TestOutboxSchema_EnsureSchemaAddsTheHeadersAndTheTransportOnMySql(t *testin
     }
 }
 
-/* the select, update and delete keep the model's alias over a configured table, which a unit test on the default table would not see */
 func TestOutboxSchema_AConfiguredTableServesTheClaimTheResolutionsAndTheRequeueOnMySql(t *testing.T) {
     database := outboxSchemaTestDatabase(t)
     ctx := context.Background()

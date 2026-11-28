@@ -35,7 +35,6 @@ func (instance *fakeDatabaseProvider) Open(runtimeInstance containercontract.Run
     return instance.database, nil
 }
 
-/* the migration door answers the pool Open answered, which the registry shares by identity */
 func (instance *fakeDatabaseProvider) OpenForMigration(runtimeInstance containercontract.Runtime, parameters bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     return instance.database, nil
 }
@@ -65,7 +64,7 @@ func newRuntimeWithDatabase(t *testing.T, database *bun.DB) containercontract.Ru
 
     runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
 
-    /* the pool is opened first, so the migration door, answering the very same pool, is shared with it by identity and a run's release leaves it open */
+    /* opened first, so the migration door answering the same pool shares it by identity */
     if nil != database {
         if _, managerErr := registry.Manager(runtimeInstance, "primary"); nil != managerErr {
             t.Fatalf("failed to open the manager: %s", managerErr.Error())
@@ -75,7 +74,6 @@ func newRuntimeWithDatabase(t *testing.T, database *bun.DB) containercontract.Ru
     return runtimeInstance
 }
 
-/* runMigrationCommand drives a migration command exactly like the CLI kernel does: the command metadata is mounted on a command context, the arguments are parsed and the command's Run receives the parsed context. */
 func runMigrationCommand(
     t *testing.T,
     runtimeInstance containercontract.Runtime,
@@ -91,7 +89,6 @@ func runMigrationCommand(
     return buffer.String(), runErr
 }
 
-/* runMigrationCommandTo is runMigrationCommand over a writer the test supplies — one that fails, for the report the command could not write in full */
 func runMigrationCommandTo(
     t *testing.T,
     writer io.Writer,
@@ -157,7 +154,6 @@ func appliedMigrationRowsHook(appliedNames ...string) func(query string) ([]stri
     }
 }
 
-/* lockCountHook answers the count of the migration locks table, the probe a refused lock asks, with heldLocks rows */
 func lockCountHook(heldLocks int64) func(query string) ([]string, [][]driver.Value, error) {
     return func(query string) ([]string, [][]driver.Value, error) {
         if true == strings.HasPrefix(query, "SELECT count(*)") && true == strings.Contains(query, "bun_migration_locks") {
@@ -168,7 +164,6 @@ func lockCountHook(heldLocks int64) func(query string) ([]string, [][]driver.Val
     }
 }
 
-/* a statement on the migrations table, not on the locks table whose marker rows carry the migrations table's name */
 func mentionsMigrationsTable(query string) bool {
     return strings.Contains(query, "bun_migrations") && false == strings.Contains(query, "bun_migration_locks")
 }
@@ -198,7 +193,6 @@ func isMigrationStatusSelect(query string) bool {
     return strings.HasPrefix(query, "SELECT") && mentionsMigrationsTable(query)
 }
 
-/* the connection every definition of these tests declares: the registry refuses an empty host and an empty database, and none of the fake providers dials it */
 var testConnectionParameters = bunorm.ConnectionParameters{Host: "127.0.0.1", Database: "melody"}
 
 var resolvedDefaultOptions = CommandConfig{
@@ -207,7 +201,6 @@ var resolvedDefaultOptions = CommandConfig{
     CommandPrefix:            DefaultCommandPrefix,
 }
 
-/* queryRecorder captures every statement sent to the fake driver so tests can assert on the exact statements and their relative order (for example that the migration lock is taken before any migration work and released afterwards). */
 type queryRecorder struct {
     mutex     sync.Mutex
     queries   []string
@@ -233,7 +226,6 @@ func (instance *queryRecorder) recordedQueries() []string {
     return queries
 }
 
-/* firstIndexMatching returns the index of the first recorded query accepted by the matcher, or -1 when no recorded query matches. */
 func (instance *queryRecorder) firstIndexMatching(matcher func(query string) bool) int {
     for index, query := range instance.recordedQueries() {
         if true == matcher(query) {
@@ -344,7 +336,6 @@ func (instance *fakeSqlDriver) Open(name string) (driver.Conn, error) {
     return nil, errors.New("open by dsn is not supported by the fake driver")
 }
 
-/* fakeDialect is a minimal bun dialect built only from packages that already live in the bun core module, so no database driver or dialect dependency is required. It reports the sqlite dialect name, which keeps the verbose database-identity lookup (a mysql-only feature) out of the command flows. */
 type fakeDialect struct {
     schema.BaseDialect
 
@@ -392,7 +383,6 @@ func (instance *fakeDialect) DefaultSchema() string {
     return "main"
 }
 
-/* newFakeBunDatabase returns a real *bun.DB backed by the in-memory fake driver together with the recorder observing every statement. */
 func newFakeBunDatabase() (*bun.DB, *queryRecorder) {
     recorder := &queryRecorder{}
     sqlDatabase := sql.OpenDB(&fakeConnector{recorder: recorder})
@@ -408,7 +398,6 @@ var (
     _ schema.Dialect        = (*fakeDialect)(nil)
 )
 
-/* probeCommand is a melody command assembled in place: the tests below exercise a piece of the base command against a parsed command context, and the command contract is what carries a flag set to the dispatch that parses it. */
 type probeCommand struct {
     nameValue   string
     flagsValue  []clicontract.Flag
@@ -444,7 +433,6 @@ func dispatchProbeCommand(
     return melodycli.DispatchCommand(context.Background(), command, runtimeInstance, arguments, io.Discard, melodycli.DispatchOptions{})
 }
 
-/* capturingCommand delegates to the command under test and keeps its error, so a test can tell a refused command line — which the dispatch answers — from the command's own failure, which is what it is asserting. */
 type capturingCommand struct {
     clicontract.Command
     runtimeInstance containercontract.Runtime

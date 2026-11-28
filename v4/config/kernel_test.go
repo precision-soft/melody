@@ -35,7 +35,6 @@ func TestKernelGettersMatchParameterValues(t *testing.T) {
     }
 }
 
-/* every kernel value is validated at construction, and each refusal names what it refused: these are the settings a deployment gets wrong in its .env, and the boot is the only place where saying so is still useful. A validator that stopped refusing would let the process start on a value nothing downstream can act on — a mode nothing dispatches, a role no runner matches, an environment that decides debug tooling. */
 func TestNewKernelConfiguration_RefusesEveryValueItCannotAct(t *testing.T) {
     cases := []struct {
         name             string
@@ -138,7 +137,6 @@ func TestNewKernelConfiguration_RefusesEveryValueItCannotAct(t *testing.T) {
     }
 }
 
-/* the environment refusal names the key it is about, because the emptiness it refuses is read elsewhere and read differently: the dotenv source answers "dev" for a present-but-empty MELODY_ENV and loads .env.dev, so the process reaches this refusal having already taken the development values. Without the key an operator has nothing to search for, and without the sentence no reason the development files were the ones read. */
 func TestNewKernelConfiguration_TheEmptyEnvironmentRefusalNamesTheKeyAndTheFiles(t *testing.T) {
     _, kernelErr := newKernelConfiguration(ModeHttp, RoleAll, "", "/srv/app", "/srv/app/var/log", "", string(loggingcontract.LevelInfo), "/srv/app/var/cache", bound.Duration{}, bound.Duration{}, bound.Count{})
 
@@ -171,7 +169,6 @@ func TestNewKernelConfiguration_TheEmptyEnvironmentRefusalNamesTheKeyAndTheFiles
     }
 }
 
-/* a kernel configuration whose every value is acceptable is built and hands each one back, including the log path, which is allowed to be empty because an empty one means stdout */
 func TestNewKernelConfiguration_AcceptsAValidSetAndKeepsEveryValue(t *testing.T) {
     kernelConfigurationInstance, kernelErr := newKernelConfiguration(ModeHttp, RoleWorker, EnvironmentProduction, "/srv/app", "/srv/app/var/log", "/srv/app/var/log/app.log", string(loggingcontract.LevelWarning), "/srv/app/var/cache", bound.Duration{}, bound.Duration{}, bound.Count{})
     if nil != kernelErr {
@@ -204,7 +201,6 @@ func TestNewKernelConfiguration_AcceptsAValidSetAndKeepsEveryValue(t *testing.T)
     }
 }
 
-/* the log level decides what every later record is filtered against, so a name the logger does not know is refused instead of falling back */
 func TestParseKernelLogLevel_MapsEveryKnownNameAndRefusesTheRest(t *testing.T) {
     known := []loggingcontract.Level{
         loggingcontract.LevelDebug,
@@ -372,7 +368,6 @@ func TestConfigurationBootWarningsIgnoredRefusesWhatSilencesNothing(t *testing.T
         }
     }
 
-    /* whether a code names a warning anyone writes is judged at boot, once the modules declared theirs */
     for _, code := range []string{"aws.s3.plaintextEndpoint", internal.BootWarningNameSessionUnboundedTtlOnBoundedDefaultStorage} {
         if _, err := newConfigurationFromValues(map[string]string{BootWarningsIgnoredKey: code}); nil != err {
             t.Fatalf("expected %q admitted when the configuration is built, got %v", code, err)

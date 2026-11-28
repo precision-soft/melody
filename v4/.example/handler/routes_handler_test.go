@@ -4,7 +4,6 @@ import (
     "testing"
 )
 
-/* every parameter a pattern names gets a sample value, so the listed example is a path the route matches, whatever the parameter is called */
 func TestExampleParametersOf_NamesEveryParameterOfThePattern(t *testing.T) {
     parameters := exampleParametersOf("/products/api/read/:id/history/:reading/")
     if 2 != len(parameters) || "1" != parameters["id"] || "1" != parameters["reading"] {

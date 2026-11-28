@@ -20,17 +20,15 @@ func TestRememberInFlightCall_RemoveWaiterDoesNotPoisonAConcurrentJoiner(t *test
     call.AddWaiter()
     shard.inFlightByKey[rememberFlightKey{key: "k"}] = call
 
-    /* A fresh joiner enters rememberWithStampedeProtection's critical section: it holds the shard mutex, has just found the in-flight call and is about to inspect IsCanceled and AddWaiter. */
     shard.mutex.Lock()
 
     removeWaiterReturned := make(chan struct{})
     go func() {
-        /* The last existing waiter times out and leaves. */
         call.RemoveWaiter(shard)
         close(removeWaiterReturned)
     }()
 
-    /* Give the departing waiter's RemoveWaiter time to run. When the decrement-to-zero and the cancel decision are made outside the shard mutex, it observes zero waiters and cancels the call right here, under the joiner's feet. */
+    /* give the departing waiter's RemoveWaiter time to run, so a cancel decided outside the shard mutex shows */
     time.Sleep(50 * time.Millisecond)
 
     if true == call.IsCanceled() {
@@ -39,13 +37,11 @@ func TestRememberInFlightCall_RemoveWaiterDoesNotPoisonAConcurrentJoiner(t *test
         t.Fatalf("joiner observed a canceled in-flight call while still holding the shard mutex")
     }
 
-    /* The joiner commits to joining the healthy call under the same mutex. */
     call.AddWaiter()
     shard.mutex.Unlock()
 
     <-removeWaiterReturned
 
-    /* Because the joiner incremented the waiter count under the mutex, the departing waiter must not have canceled the call. */
     if true == call.IsCanceled() {
         t.Fatalf("healthy joiner was poisoned by the departing waiter's cancel")
     }
@@ -71,7 +67,6 @@ func TestRememberInFlightCall_WaitZeroTakesACompletedResult(t *testing.T) {
     }
 }
 
-/* the wait is driven from a goroutine and given a deadline of its own: a wait that does NOT end on the context is the defect under test, so letting it run to the package timeout would report the same failure ten minutes later and with the reason buried in a panic dump */
 func waitForRememberCallAnswer(
     t *testing.T,
     call *rememberInFlightCall,
@@ -195,7 +190,6 @@ func TestRememberInFlightCall_AMemoizedResultBeatsALapsedContextEveryTime(t *tes
     }
 }
 
-/* the timeout refusal names the WAIT, since RememberOptions.WaitTimeout bounds the caller's wait and not the computation, which keeps running. */
 func TestNewRememberWaitTimedOutError_NamesTheWaitNotTheCallback(t *testing.T) {
     timedOutErr, isMelodyErr := newRememberWaitTimedOutError("k", time.Second).(*exception.Error)
     if false == isMelodyErr || "cache remember wait timed out" != timedOutErr.Message() {

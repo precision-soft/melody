@@ -86,7 +86,6 @@ func TestService_OriginAllowed_SchemeQualifiedSubdomainWildcard(t *testing.T) {
     }
 }
 
-/* a nil AllowOrigins expresses no preference and receives the permissive default; an EMPTY list is an expressed preference — no origin is allowed — so it denies instead of silently widening to the wildcard the moment an environment-derived list arrives empty */
 func TestService_OriginAllowed_ExplicitlyEmptyOriginListDeniesEveryOrigin(t *testing.T) {
     service := NewService(Config{
         AllowOrigins: []string{},
@@ -382,8 +381,6 @@ func TestNewService_PanicsWhenCredentialsWithExplicitlyEmptyOrigins(t *testing.T
     })
 }
 
-/* the port is part of the origin: an allow entry without a port grants only the portless spelling, otherwise any service on another port of an allowed host inherits the grant — with the credentials the restrictive configurations pair with it */
-
 func TestService_SchemelessEntryIsPortSignificant(t *testing.T) {
     service := NewService(Config{
         AllowOrigins: []string{"app.example.com"},
@@ -465,8 +462,6 @@ func TestRestrictiveService_PairsCredentialsWithTheNamedOrigins(t *testing.T) {
     }
 }
 
-/* the restrictive policy is deliberately narrower than the default one: no PATCH and no OPTIONS among the methods it advertises, and only Content-Type and Authorization among the headers. A widening of either is a policy change, so the advertised strings are pinned rather than left to be read off the constructor. */
-
 func TestRestrictiveService_AdvertisesANarrowerPolicyThanTheDefault(t *testing.T) {
     service := RestrictiveService([]string{"https://app.example.com"})
 
@@ -489,8 +484,6 @@ func TestRestrictiveService_AdvertisesANarrowerPolicyThanTheDefault(t *testing.T
     }
 }
 
-/* RestrictiveService(nil) is the shape a deployment reaches by handing it a list an environment variable failed to produce: credentials granted to no origin, refused at boot. */
-
 func TestRestrictiveService_RefusesToBootWithoutAnyOrigin(t *testing.T) {
     defer func() {
         recovered := recover()
@@ -506,8 +499,6 @@ func TestRestrictiveService_RefusesToBootWithoutAnyOrigin(t *testing.T) {
     RestrictiveService(nil)
 }
 
-/* an explicitly empty list is the other half of the same mistake and takes the other branch: it is an expressed preference — no origin is allowed — so it never becomes the wildcard, and credentials with nothing to grant them to is refused by its own message. */
-
 func TestRestrictiveService_RefusesToBootWithAnExplicitlyEmptyOriginList(t *testing.T) {
     defer func() {
         recovered := recover()
@@ -522,8 +513,6 @@ func TestRestrictiveService_RefusesToBootWithAnExplicitlyEmptyOriginList(t *test
 
     RestrictiveService([]string{})
 }
-
-/* the four slice accessors hand out a copy. The service is a process-wide singleton read from every request goroutine, so a caller that mutated what it received would rewrite the policy of every request that follows — and OriginAllowed reads the very slice AllowOrigins returns. */
 
 func TestService_SliceAccessorsHandOutACopy(t *testing.T) {
     service := NewService(Config{
@@ -558,8 +547,6 @@ func TestService_SliceAccessorsHandOutACopy(t *testing.T) {
         t.Fatalf("expected the expose headers to be unchanged, got: %q", service.ExposeHeaders()[0])
     }
 }
-
-/* the joined strings are computed once at construction and are what reaches the wire, so they are asserted against the lists they were built from rather than against themselves. */
 
 func TestService_AccessorsReportTheConfiguredPolicy(t *testing.T) {
     service := NewService(Config{
@@ -600,9 +587,6 @@ func TestService_AccessorsReportTheConfiguredPolicy(t *testing.T) {
     }
 }
 
-/* The request is an application-implementable contract, so a nil pointer of a request type reaches this
-door as a non-nil interface and the read below dereferences it. The untyped literal a sibling probe passes
-is the only shape a bare comparison already catches. */
 func TestService_IsPreflight_ATypedNilRequestIsNotPreflight(t *testing.T) {
     service := NewService(Config{AllowOrigins: []string{"http://example.com"}})
 
@@ -623,7 +607,6 @@ func TestService_RequestOrigin_ATypedNilRequestHasNoOrigin(t *testing.T) {
     }
 }
 
-/* a Vary field is a comma-separated list, and the compression middleware writes Accept-Encoding into the same field on the same response, so Origin routinely arrives beside another token. Comparing the whole field against the single token misses it and appends a second entry naming Origin twice, which a shared cache reads as a different set of dimensions than the one the response was stored under. */
 func TestAddVaryOrigin_ReadsAnExistingFieldTokenByToken(t *testing.T) {
     headers := nethttp.Header{}
     headers.Set("Vary", "Accept-Encoding, Origin")
@@ -639,7 +622,6 @@ func TestAddVaryOrigin_ReadsAnExistingFieldTokenByToken(t *testing.T) {
     }
 }
 
-/* header field names are case-insensitive, so a layer that wrote the token in another case named the same dimension. The lowercase spelling is the one the comparison already carries, so it separates nothing; an upper-case one is recognised only if the case is folded, and no other probe in this package writes a Vary field at all. */
 func TestAddVaryOrigin_ReadsAnExistingTokenInAnyCase(t *testing.T) {
     headers := nethttp.Header{}
     headers.Set("Vary", "ORIGIN")

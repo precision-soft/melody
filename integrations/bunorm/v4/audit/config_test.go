@@ -106,7 +106,6 @@ type nilRuntimeForAudit struct {
     containercontract.Runtime
 }
 
-/* a runtime that carries no context, refused like an absent one */
 type contextlessRuntimeForAudit struct {
     containercontract.Runtime
 }
@@ -144,7 +143,6 @@ func TestRegistry_EnsureSchemaNamesTheTableItCouldNotCreate(t *testing.T) {
     }
 }
 
-/* Register copies the ignored fields, so a caller appending to its own slice afterwards does not change what the registry reads */
 func TestRegistry_RegisterCopiesTheIgnoredFields(t *testing.T) {
     ignoredFields := make([]string, 1, 4)
     ignoredFields[0] = "password"

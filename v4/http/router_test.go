@@ -566,13 +566,11 @@ func TestRouter_AllowHeaderRespectsMethodPolicy(t *testing.T) {
         return recorder.Header().Get("Allow")
     }
 
-    /* default policy advertises the synthetic OPTIONS and HEAD it actually honors */
     defaultAllow := allowFor(newGetOnlyKernel())
     if false == strings.Contains(defaultAllow, nethttp.MethodOptions) || false == strings.Contains(defaultAllow, nethttp.MethodHead) {
         t.Fatalf("default policy Allow must advertise OPTIONS and HEAD, got %q", defaultAllow)
     }
 
-    /* with both policy flags off, OPTIONS and HEAD in fact return 405, so Allow must not promise them */
     restricted := newGetOnlyKernel()
     restricted.policies.methodPolicy.AutomaticOptionsDisabled = true
     restricted.policies.methodPolicy.HeadFallbackDisabled = true
@@ -703,7 +701,6 @@ func TestRouter_MatchHandsOutACopyOfTheRouteAttributes(t *testing.T) {
     }
 }
 
-/* a pattern that names one parameter twice is ambiguous by construction: the extraction writes both segments under one map key, so the handler can only ever read one of the two values and cannot tell which, and the openapi document emitted for it is spec-invalid on duplicate path parameters. */
 func TestRouterRegistration_RefusesADuplicateParameterName(t *testing.T) {
     testhelper.AssertPanicsWithError(
         t,
@@ -740,7 +737,6 @@ func TestRouterRegistration_RefusesAParameterDeclaredTwiceThroughAnOptionalOrACa
     }
 }
 
-/* a bare ":" binds nothing, so the segment it occupies would be matched and then discarded in silence */
 func TestRouterRegistration_RefusesAParameterWithNoName(t *testing.T) {
     testhelper.AssertPanicsWithError(
         t,
@@ -757,7 +753,6 @@ func TestRouterRegistration_RefusesAParameterWithNoName(t *testing.T) {
     )
 }
 
-/* an unnamed catch-all is the deliberate spelling of "swallow the rest and bind nothing" */
 func TestRouterRegistration_AcceptsAnUnnamedCatchAll(t *testing.T) {
     router := NewRouter()
     router.Handle(
@@ -900,7 +895,6 @@ func TestRouterMatch_AnEncodedSegmentIsUnescapedForTheHandler(t *testing.T) {
     }
 }
 
-/* a route the registry declined is not put in the matching tree. The index the tree receives is the position of the last STORED route, so registering it for a declined duplicate gave the pattern's entry somebody else's route — the invariant every reader of the tree relies on, and the one the priority tie-break reads the index for. */
 func TestRouterAddRoute_ADeclinedDuplicateDoesNotEnterTheMatchingTree(t *testing.T) {
     router := NewRouter()
 
@@ -972,7 +966,7 @@ func TestRouter_CatchAllKeepsAnEncodedSeparatorInsideItsSegment(t *testing.T) {
     }
 }
 
-/* a literal "%2F" is sent as "%252F"; the catch-all binds it as the encoded separator, the same value "/files/a%2Fb" binds, since only the separator is re-escaped on the way to the binding */
+/* a literal "%2F" is sent as "%252F", binding the same encoded separator "/files/a%2Fb" binds */
 func TestRouter_CatchAllBindsALiteralEncodedSeparatorAsTheEncodedSeparator(t *testing.T) {
     router := NewRouter()
 
@@ -1011,7 +1005,6 @@ func TestRouter_CatchAllBindsALiteralEncodedSeparatorAsTheEncodedSeparator(t *te
     }
 }
 
-/* the readers spin on the registration guard while the kernel raises the flag from another goroutine, the way a late registration meets a kernel that starts serving: each reader must see the raised flag and refuse. */
 func TestRouter_RegistrationGuardReadsTheServingFlagRaisedByAnotherGoroutine(t *testing.T) {
     const readerCount = 8
 

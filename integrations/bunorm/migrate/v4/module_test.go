@@ -19,7 +19,6 @@ func TestModule_NameAndDescription(t *testing.T) {
     }
 }
 
-/* the empty configuration is refused at registration by name: registering the commands is this module's only purpose, so an empty config is a wiring mistake with no legal reading — accepted, the operator discovered it as "unknown command" at the first db:migrate. */
 func TestModule_RegisterCliCommandsRefusesTheEmptyConfigurationByName(t *testing.T) {
     defer func() {
         recoveredValue := recover()

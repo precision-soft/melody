@@ -668,7 +668,6 @@ func TestConfigurationHttp_SessionCookieSecure_AnswersTheKeyAsSet(t *testing.T) 
     }
 }
 
-/* the key only hardens the cookie: from-scheme and never would lower a Go always, so neither has a key spelling */
 func TestConfigurationHttp_SessionCookieSecure_RefusesAnyOtherValueNamingTheKey(t *testing.T) {
     for _, value := range []string{"never", "from-scheme", "Always", " always", "true", "from_scheme"} {
         _, err := newConfigurationFromValues(map[string]string{HttpSessionCookieSecureKey: value})

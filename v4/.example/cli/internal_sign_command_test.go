@@ -290,7 +290,6 @@ func TestInternalSignCommand_RefusesAnActorFlagWithoutTheActor(t *testing.T) {
     }
 }
 
-/* recordingSignSecrets records the runtime each provider door is asked under */
 type recordingSignSecrets struct {
     melodysecurity.HmacSecretProvider
     seen []melodycontainercontract.Runtime
@@ -374,7 +373,6 @@ func TestInternalSignCommandAsksTheProviderUnderTheBootRuntimeAtBootAndTheRunsRu
     }
 }
 
-/* the ttl left out is the boot signer's, read at the run, so the help hides the zero the flag would print as its default */
 func TestInternalSignCommand_TheHelpPrintsNoZeroTtlDefault(t *testing.T) {
     help := renderCommandHelp(t, &InternalSignCommand{})
 

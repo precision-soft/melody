@@ -29,7 +29,6 @@ import (
     melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
 )
 
-/* recordingDriver is the least a bun handle needs in order to EXECUTE a statement and say what it executed: the store under test deletes through Exec, and what a test reads is the statement bun composed and sent, not the answer a server would give. Every statement is answered as one row affected. The migration package keeps a twin of this shape; a test fixture cannot cross a package boundary, so it is written where this package can reach it. */
 type recordingDriver struct {
     mutex   sync.Mutex
     queries []string
@@ -73,7 +72,6 @@ func (instance *recordingConnection) Close() error {
     return nil
 }
 
-/* a transaction is accepted and records nothing of its own: the enrollment release runs its two deletes inside one, and what it wrote is still the recorded sequence */
 func (instance *recordingConnection) Begin() (driver.Tx, error) {
     return recordingTransaction{}, nil
 }
@@ -104,7 +102,6 @@ func (instance recordingResult) RowsAffected() (int64, error) {
     return 1, nil
 }
 
-/* renderingDialect is the least a bun handle needs in order to RENDER a statement: the mysql dialect asks the connection for its version as it is installed, which the recording driver cannot answer, while what these tests read is the statement bun composes. The twofactor package keeps the twin this one is written after. */
 type renderingDialect struct {
     schema.BaseDialect
     tables *schema.Tables
@@ -151,7 +148,6 @@ func (instance *renderingDialect) DefaultSchema() string {
     return "main"
 }
 
-/* newRecordingDatabase answers a bun handle whose every statement is rendered and lands in the recorder. */
 func newRecordingDatabase() (*bun.DB, *recordingDriver) {
     recorder := &recordingDriver{}
 
@@ -163,8 +159,6 @@ var _ driver.Connector = (*recordingDriver)(nil)
 var _ driver.ExecerContext = (*recordingConnection)(nil)
 var _ schema.Dialect = (*renderingDialect)(nil)
 
-/* fixedTwoFactorStore hands the enrollment release one store whatever the runtime, the source its tests need
-   where production resolves the store through the container */
 func fixedTwoFactorStore(store *twofactor.Store) twofactor.StoreSource {
     return func(runtimeInstance melodycontainercontract.Runtime) (*twofactor.Store, error) {
         return store, nil
@@ -179,7 +173,6 @@ func exampleTestRuntimeUnder(ctx context.Context) melodycontainercontract.Runtim
     return melodyruntime.NewRun(ctx, melodycontainer.NewContainer(melodycontainer.ContainerConfig{}).NewScope())
 }
 
-/* notificationFixture is a runtime holding the cache, the notification hub with one page subscribed to each topic of the application, and the journal, so a listener runs to its end */
 type notificationFixture struct {
     cache             *deleteCountingCache
     catalogPage       *melodyhttp.ServerSentEventSubscriber
@@ -247,7 +240,6 @@ func notificationUnderTest(t *testing.T) notificationFixture {
     }
 }
 
-/* assertNoNotification fails when the page was told anything; a broadcast is delivered before Broadcast returns, so nothing pending means nothing sent */
 func assertNoNotification(t *testing.T, page *melodyhttp.ServerSentEventSubscriber, description string) {
     t.Helper()
 
@@ -258,7 +250,6 @@ func assertNoNotification(t *testing.T, page *melodyhttp.ServerSentEventSubscrib
     }
 }
 
-/* receivedNotification answers the one notification the page was told, failing when it was told none */
 func receivedNotification(t *testing.T, page *melodyhttp.ServerSentEventSubscriber, description string) catalogNotification {
     t.Helper()
 

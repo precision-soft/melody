@@ -43,7 +43,6 @@ func TestRegisterScoped_RefusesANameTheContainerAlreadyHolds(t *testing.T) {
     }
 }
 
-/* both registrations opt out of the type registration on purpose: with it, the cross-level TYPE check refuses first and the name check underneath is never reached. */
 func TestRegister_RefusesANameAScopedRegistrationAlreadyHolds(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -363,7 +362,6 @@ func TestRegisterScoped_ProtectedNameRefused(t *testing.T) {
     }
 }
 
-/* unlike its two siblings — the generic front door and the one on a live scope, which both wrap the failure with a message naming the declaration — this door re-panics the registration's own refusal unchanged, matching MustRegister beside it; the assertion pins that spelling. */
 func TestContainer_MustRegisterScoped_RegistersAndRePanicsTheRefusalUnchanged(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -505,7 +503,6 @@ func TestContainer_RegisterScoped_StrictDuplicateTypeRefused(t *testing.T) {
     }
 }
 
-/* the identity registry guards the scoped type door with the same refusal the container door carries: two function-local types of one name in one package share one identity key, and a scoped registration taking the key of an already-registered DIFFERENT type would hand the creation guard and the teardown one node for two types. The second declaration is refused at its own boot line. */
 func TestRegisterScoped_TypeIdentityKeyCollisionRefused(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -528,7 +525,6 @@ func TestRegisterScoped_TypeIdentityKeyCollisionRefused(t *testing.T) {
     }
 }
 
-/* TestContainer_RegisterScoped_RefusesATeardownDependency pins the refusal the declarative edge gets on the scoped path. A scope keeps its own teardown graph, recorded per scope from the resolutions that scope actually made, so a declaration written once at registration has no scope to be written into — and accepting it silently would install nothing while reading as an ordering that holds. */
 func TestContainer_RegisterScoped_RefusesATeardownDependency(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 

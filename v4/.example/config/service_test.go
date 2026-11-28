@@ -33,7 +33,6 @@ import (
     "github.com/uptrace/bun/dialect/mysqldialect"
 )
 
-/* The catalog storage is the one door an ordinary http process passes through on its way to a repository: the generated wiring resolves it by type for every one of them. A provider that captures the handle the composition root already built resolves nothing, so the container records no dependency, the registry's SetLogger never runs and at SIGTERM neither the pool nor the registry is closed. Resolving is what writes the edge. */
 func TestRegisterCatalogStorageService_ResolvesTheHandleRatherThanCapturingIt(t *testing.T) {
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
 
@@ -66,9 +65,6 @@ func TestRegisterCatalogStorageService_ResolvesTheHandleRatherThanCapturingIt(t 
     }
 }
 
-/* The sister case the gate exists for: without a configured database the handle service is never registered,
-   so a provider that resolved unconditionally would fail here and take the whole nomenclature with it. The
-   storage is still published, carrying nothing. */
 func TestRegisterCatalogStorageService_PublishesAHandlelessStorageWithoutADatabase(t *testing.T) {
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
 
@@ -85,7 +81,7 @@ func TestRegisterCatalogStorageService_PublishesAHandlelessStorageWithoutADataba
     }
 }
 
-/* the example's accounts sign in with their names as passwords, so only development seeds them: the handle the composition root publishes is marked in development, with or without a database, and unmarked anywhere else */
+/* the example's accounts sign in with their names as passwords, so only development seeds them */
 func TestRegisterCatalogStorageService_SeedsTheAccountsInDevelopmentOnly(t *testing.T) {
     for _, environmentCase := range []struct {
         environment   string
@@ -118,7 +114,6 @@ func TestRegisterCatalogStorageService_SeedsTheAccountsInDevelopmentOnly(t *test
     }
 }
 
-/* outside development the handle seeds the nomenclature and no account, with or without a database */
 func TestCatalogStorageSeeding_ProductionSeedsTheNomenclatureAlone(t *testing.T) {
     for _, value := range []string{"", "true"} {
         storage := resolvedCatalogStorage(t, map[string]string{melodyconfig.EnvironmentNameKey: melodyconfig.EnvironmentProduction, environmentKeyCatalogueSeed: value})
@@ -129,7 +124,6 @@ func TestCatalogStorageSeeding_ProductionSeedsTheNomenclatureAlone(t *testing.T)
     }
 }
 
-/* APP_CATALOGUE_SEED=false leaves the nomenclature out in every environment, the accounts untouched by it */
 func TestCatalogStorageSeeding_TheSeedSwitchLeavesItOut(t *testing.T) {
     for _, environmentCase := range []struct {
         environment   string
@@ -163,7 +157,6 @@ func resolvedCatalogStorage(t *testing.T, values map[string]string) *persistence
     return storage
 }
 
-/* the catalogue schema is built at boot with the warning mode, and a database that does not answer answers the schema's failure, so an http boot goes on with a warning */
 func TestRegisterCatalogSchemaService_IsBuiltAtBootWarnsAndAnswersACatalogueItCannotPrepare(t *testing.T) {
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     containerInstance.MustRegister(serviceDatabase, func(resolver melodycontainercontract.Resolver) (*bun.DB, error) {
@@ -187,7 +180,6 @@ func TestRegisterCatalogSchemaService_IsBuiltAtBootWarnsAndAnswersACatalogueItCa
 
 type callerContextMarker struct{}
 
-/* seedContextHook records every seed insert that ran on a context other than the caller's */
 type seedContextHook struct {
     mutex   sync.Mutex
     foreign []string
@@ -205,10 +197,8 @@ func (instance *seedContextHook) BeforeQuery(ctx context.Context, event *bun.Que
 
 func (instance *seedContextHook) AfterQuery(ctx context.Context, event *bun.QueryEvent) {}
 
-/* seededCatalogueTables are the nomenclatures the catalogue schema seeds whatever the environment; the accounts are seeded in development alone */
 var seededCatalogueTables = []string{"melody_example_v4_category", "melody_example_v4_currency", "melody_example_v4_product"}
 
-/* the heal: a database that did not answer at the first resolution is reached by the next one, which prepares the catalogue, the storage built anew since a failed creation leaves nothing behind */
 func TestRegisterCatalogSchemaService_TheNextResolutionAfterTheDatabaseAnswersPreparesTheCatalogue(t *testing.T) {
     dsn := os.Getenv("MYSQL_DSN")
     if "" == dsn {
@@ -225,7 +215,6 @@ func TestRegisterCatalogSchemaService_TheNextResolutionAfterTheDatabaseAnswersPr
     hook := &seedContextHook{}
     database.AddQueryHook(hook)
 
-    /* the fourth major's own trail table is dropped and its seeded nomenclatures emptied, so the heal has to create and seed them again */
     if _, dropErr := database.NewRaw("DROP TABLE IF EXISTS " + persistence.AuditTable).Exec(t.Context()); nil != dropErr {
         t.Fatalf("drop the trail table: %v", dropErr)
     }
@@ -281,7 +270,6 @@ func TestRegisterCatalogSchemaService_TheNextResolutionAfterTheDatabaseAnswersPr
     }
 }
 
-/* the module's own registration builds the catalogue schema at boot with the warning mode */
 func TestModuleRegisterServices_BuildsTheCatalogueSchemaAtBootAndWarns(t *testing.T) {
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     moduleInstance := moduleWithEnvironment(t, map[string]string{})
@@ -294,7 +282,6 @@ func TestModuleRegisterServices_BuildsTheCatalogueSchemaAtBootAndWarns(t *testin
     }
 }
 
-/* without a database there is nothing to prepare: the schema is published without a statement */
 func TestRegisterCatalogSchemaService_PublishesTheSchemaWithoutADatabase(t *testing.T) {
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
 
@@ -308,7 +295,6 @@ func TestRegisterCatalogSchemaService_PublishesTheSchemaWithoutADatabase(t *test
     }
 }
 
-/* refusingBackplane refuses every publish, the failure the hub files */
 type refusingBackplane struct{}
 
 func (instance refusingBackplane) Publish(runtimeInstance melodycontainercontract.Runtime, topic string, event melodyhttp.ServerSentEvent) error {
@@ -319,9 +305,7 @@ func (instance refusingBackplane) CloseWithContext(closeContext context.Context)
     return nil
 }
 
-/* the hub files its own failures, and its provider builds it with the application's journal; without it a redis outage would silence cross-node delivery into a counter nobody reads. A publish the backplane refuses after the hub is resolved reaches the logger the container publishes. */
 func TestHub_IsBuiltInItsProviderWithTheApplicationsLogger(t *testing.T) {
-    /* read after the close, which waits for the publishes in flight: the record is written before it returns */
     journal := &bytes.Buffer{}
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
@@ -354,8 +338,6 @@ func TestHub_IsBuiltInItsProviderWithTheApplicationsLogger(t *testing.T) {
     }
 }
 
-/* without an archive the archive's storage is still published, carrying nothing — the generated wiring fills
-   the archive repository by type — and it does not reach for the archive's handle, which is not registered */
 func TestRegisterArchiveStorageService_PublishesAHandlelessStorageWithoutAnArchive(t *testing.T) {
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
 

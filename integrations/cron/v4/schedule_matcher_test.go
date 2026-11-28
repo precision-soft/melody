@@ -152,7 +152,6 @@ func TestScheduleMatcher_RejectsMalformedFields(t *testing.T) {
     }
 }
 
-/* the accepted shapes mirror what the generator's field validation lets through, so a Configuration that runs in-process also generates. */
 func TestScheduleMatcher_AcceptsWellFormedFields(t *testing.T) {
     cases := []struct {
         name     string
@@ -173,7 +172,6 @@ func TestScheduleMatcher_AcceptsWellFormedFields(t *testing.T) {
     }
 }
 
-/* the entry classification follows vixie cron: an entry is fixed-time only when both the minute and the hour pin concrete values, and a wildcard that carries a step still counts as a wildcard. The classification models the runner's own wall-clock reconciliation, so it is independent of the day-combination dialect. */
 func TestScheduleMatcher_FixedTimeClassification(t *testing.T) {
     cases := []struct {
         name      string
@@ -207,7 +205,7 @@ func TestScheduleMatcher_FixedTimeClassification(t *testing.T) {
     }
 }
 
-/* calendar facts the day-dialect cases rely on, asserted so the expectations stay self-verifying: in July 2026 the 13th and the 27th are odd-numbered Mondays, the 15th is an odd-numbered Wednesday, the 20th is an even-numbered Monday, and the 14th and the 21st are Tuesdays. */
+/* calendar facts the day-dialect cases rely on, asserted so the expectations stay self-verifying */
 func assertJuly2026Weekdays(t *testing.T) {
     t.Helper()
 
@@ -228,7 +226,6 @@ func assertJuly2026Weekdays(t *testing.T) {
     }
 }
 
-/* the schedule pins midnight, steps the day of month across the odd days and restricts the day of week to Monday. Under the crontab dialect the stepped-wildcard day of month is star-based and therefore unrestricted, so the day fields combine with and and only odd-numbered Mondays match — vixie crond's rule; under the kubernetes dialect only the plain wildcard is unrestricted, so the day fields combine with or and any odd day or any Monday matches — the robfig rule. */
 func TestScheduleMatcher_DayDialectClassifiesTheSteppedWildcard(t *testing.T) {
     assertJuly2026Weekdays(t)
 
@@ -316,7 +313,6 @@ func TestScheduleMatcher_DayDialectClassifiesTheSteppedWildcard(t *testing.T) {
     }
 }
 
-/* a plain wildcard day field is unrestricted in both dialects, so the remaining restricted day field applies on its own either way. */
 func TestScheduleMatcher_PlainWildcardDayFieldsBehaveIdenticallyAcrossDialects(t *testing.T) {
     assertJuly2026Weekdays(t)
 
@@ -349,7 +345,6 @@ func TestScheduleMatcher_PlainWildcardDayFieldsBehaveIdenticallyAcrossDialects(t
     }
 }
 
-/* two genuinely restricted day fields — a range without a step and a pinned weekday — combine with or in both dialects: the dialect changes only how a star-based field is classified, never the or over two restricted fields, matching vixie crond, whose day-star flags read solely a leading star. */
 func TestScheduleMatcher_TwoRestrictedDayFieldsCombineWithOrInBothDialects(t *testing.T) {
     assertJuly2026Weekdays(t)
 
@@ -375,7 +370,6 @@ func TestScheduleMatcher_TwoRestrictedDayFieldsCombineWithOrInBothDialects(t *te
     }
 }
 
-/* the robfig scheduler keeps its star bit on the plain and the unit-stepped wildcard and on any list containing them, so those shapes are unrestricted under the kubernetes dialect and the day fields combine with and; only a stepped wildcard with a step above one stays restricted and combines with or. */
 func TestScheduleMatcher_KubernetesDialectKeepsTheStarBitShapesUnrestricted(t *testing.T) {
     assertJuly2026Weekdays(t)
 
@@ -443,7 +437,6 @@ func TestScheduleMatcher_KubernetesDialectKeepsTheStarBitShapesUnrestricted(t *t
     }
 }
 
-/* the robfig scheduler bounds day of week at 6, so the kubernetes dialect must reject the Sunday alias 7 a crontab accepts — otherwise an in-process-green schedule renders a CronJob manifest the cluster rejects. */
 func TestScheduleMatcher_KubernetesDialectRejectsDayOfWeekSeven(t *testing.T) {
     schedule := &Schedule{Minute: "0", Hour: "12", DayOfWeek: "7"}
 
@@ -456,7 +449,6 @@ func TestScheduleMatcher_KubernetesDialectRejectsDayOfWeekSeven(t *testing.T) {
     }
 }
 
-/* shapes no target scheduler runs must fail at parse: a sign-prefixed number parses under strconv but not under crond, unicode whitespace survives per-item trimming into an unrunnable crontab token, and a step beyond the field's cardinality would overflow the expansion loop into minutes the range never allowed. */
 func TestScheduleMatcher_RejectsUngeneratableShapes(t *testing.T) {
     cases := []struct {
         name     string
@@ -483,7 +475,6 @@ func TestScheduleMatcher_RejectsUngeneratableShapes(t *testing.T) {
     }
 }
 
-/* a step wider than the field is what crond does with it, not an error: busybox crond accepts `* / 90` (spaced to keep this comment intact) and only the range's low value fires, as with a step of exactly the field's cardinality. The matcher clamps rather than refuses, which also keeps a step near the integer maximum from overflowing the expansion loop. */
 func TestScheduleMatcher_StepWiderThanTheFieldAdmitsOnlyTheLowValue(t *testing.T) {
     cases := []struct {
         name        string
@@ -515,7 +506,6 @@ func TestScheduleMatcher_StepWiderThanTheFieldAdmitsOnlyTheLowValue(t *testing.T
     }
 }
 
-/* the matcher and the generator are two halves of one documented rule: every schedule that runs in-process must be generatable. Whatever the matcher accepts, the generator must accept too — the reverse does not hold, since the generator deliberately does not parse the expression (it never learns that minute 99 is out of range). This is the guard that catches one half being tightened without the other. */
 func TestScheduleMatcher_AcceptedFieldsAreAlwaysGeneratable(t *testing.T) {
     fields := []string{
         "*", "5", "*/15", "*/60", "*/90", "5-10", "5-59/2", "1,5", "0", "59",
@@ -538,7 +528,6 @@ func TestScheduleMatcher_AcceptedFieldsAreAlwaysGeneratable(t *testing.T) {
     }
 }
 
-/* a step on a single value ("5/15") is the one shape no two target schedulers agree on: vixie crond refuses it as a bad field and with it the whole crontab, busybox crond accepts it, robfig reads it as the range from that value up. So neither half picks a meaning: the matcher and the generator refuse it, naming the rewrite all three read alike. */
 func TestScheduleMatcher_SteppedSingleValueIsRejectedByBothHalves(t *testing.T) {
     cases := []struct {
         name     string
@@ -564,7 +553,6 @@ func TestScheduleMatcher_SteppedSingleValueIsRejectedByBothHalves(t *testing.T) 
                 t.Fatalf("expected ErrSteppedSingleValue, got %v", generatorErr)
             }
 
-            /* the error must name the rewrite, since that is the whole point of refusing an ambiguous shape */
             if false == strings.Contains(generatorErr.Error(), "-") {
                 t.Fatalf("expected the error to suggest an explicit range, got %v", generatorErr)
             }
@@ -572,7 +560,6 @@ func TestScheduleMatcher_SteppedSingleValueIsRejectedByBothHalves(t *testing.T) 
     }
 }
 
-/* the unambiguous rewrite the rejection points at must actually be accepted by both halves — an error that names an equally-refused alternative would be a dead end. */
 func TestScheduleMatcher_TheSuggestedExplicitRangeIsAccepted(t *testing.T) {
     schedule := &Schedule{Minute: "5-59/15"}
 
@@ -596,7 +583,6 @@ func TestScheduleMatcher_TheSuggestedExplicitRangeIsAccepted(t *testing.T) {
     }
 }
 
-/* the whitespace rule is one rule at one width across both halves. Embedded whitespace is the correctness half: an ascii space, a vertical tab and a no-break space inside a field each make vixie crond fail the whole crontab with "bad minute". Leading and trailing whitespace crond tolerates, but the generator refuses it, so a matcher that repaired it would admit a schedule that cannot be generated. */
 func TestScheduleMatcher_WhitespaceIsRejectedByBothHalves(t *testing.T) {
     fields := []string{" 5", "5 ", "1, 5", "1,\u00a05", "1\v-5", "1,\f5", "5\t", "1\u20285"}
 
@@ -626,7 +612,6 @@ func TestScheduleMatcher_UnknownDialectIsRejected(t *testing.T) {
     }
 }
 
-/* the matcher folds the three-letter names crond reads in the month and day-of-week fields, so a generate-ready schedule with names also runs in-process */
 func TestScheduleMatcher_AcceptsNameTokens(t *testing.T) {
     matcher, matcherErr := newScheduleMatcher(&Schedule{Month: "JAN", DayOfWeek: "mon-fri"}, RunnerDialectCrontab)
     if nil != matcherErr {
@@ -656,7 +641,6 @@ func TestScheduleMatcher_RejectsANameGluedToDigits(t *testing.T) {
     }
 }
 
-/* the kubernetes template renders a whole-field "?" the robfig scheduler reads as the wildcard with its star bit intact, so the runner's matcher must accept every schedule the generator emits: "?" parses under the kubernetes dialect alone and stays refused by the crontab and zero-value dialects, which crond would reject. */
 func TestScheduleMatcher_KubernetesDialectAcceptsWholeFieldQuestionMark(t *testing.T) {
     for _, schedule := range []*Schedule{
         {Minute: "0", Hour: "3", DayOfMonth: "?"},
@@ -677,7 +661,6 @@ func TestScheduleMatcher_KubernetesDialectAcceptsWholeFieldQuestionMark(t *testi
     }
 }
 
-/* the generator accepts "?" only whole-field and only in the day fields, so the matcher mirrors that exact set: inside a list, a step, a range, or a non-day field it dies in the numeric parse even under kubernetes. */
 func TestScheduleMatcher_QuestionMarkStaysWholeFieldAndDayOnly(t *testing.T) {
     for _, schedule := range []*Schedule{
         {Minute: "?"},
@@ -693,7 +676,6 @@ func TestScheduleMatcher_QuestionMarkStaysWholeFieldAndDayOnly(t *testing.T) {
     }
 }
 
-/* robfig keeps the star bit on "?", so a day pair with one "?" combines with and: the named day restricts, the "?" side is unrestricted. */
 func TestScheduleMatcher_QuestionMarkDayFieldIsUnrestricted(t *testing.T) {
     assertJuly2026Weekdays(t)
 
@@ -724,7 +706,6 @@ func TestScheduleMatcher_QuestionMarkDayFieldIsUnrestricted(t *testing.T) {
     }
 }
 
-/* the kubernetes mirror of TestScheduleMatcher_AcceptedFieldsAreAlwaysGeneratable, in the other direction: every day-field shape the generator validates for a CronJob manifest also parses in the in-process matcher, or NewRunnerCommand panics at boot on a Configuration the cluster runs. */
 func TestScheduleMatcher_KubernetesGeneratableDayFieldsAlwaysParse(t *testing.T) {
     for _, schedule := range []*Schedule{
         {DayOfMonth: "?"},
@@ -746,7 +727,6 @@ func TestScheduleMatcher_KubernetesGeneratableDayFieldsAlwaysParse(t *testing.T)
     }
 }
 
-/* the name fold runs before the dialect-specific parse, so a named schedule the kubernetes generator renders must also parse in the matcher under that dialect, bounds included: sun-sat folds onto 0-6, inside the kubernetes ceiling */
 func TestScheduleMatcher_AcceptsNameTokensUnderTheKubernetesDialect(t *testing.T) {
     schedule := &Schedule{Minute: "0", Hour: "12", Month: "jan-dec", DayOfWeek: "mon-fri"}
 

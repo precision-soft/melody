@@ -26,7 +26,6 @@ import (
     lockcontract "github.com/precision-soft/melody/v4/lock/contract"
 )
 
-/* stubClient is a client no door may reach: it satisfies the interface and panics on any command, so a pin on a refusal that fires before a round trip runs without a backend */
 type stubClient struct {
     redisclient.Client
 }
@@ -90,12 +89,10 @@ func newTokenStoreClient(t *testing.T) redisclient.Client {
     return connection.Client()
 }
 
-/* openRuntime is the runtime a provider door is handed in a test: the test's own context, no scope */
 func openRuntime(t *testing.T) containercontract.Runtime {
     return &contextOnlyRuntime{ctx: t.Context()}
 }
 
-/* connectionOver is the module's connection factory over a client the test holds, answering one owner */
 func connectionOver(client redisclient.Client) func(resolver containercontract.Resolver) (*Connection, error) {
     connection := NewConnection(client, "melody")
 
@@ -108,7 +105,6 @@ func runtimeOver(ctx context.Context) containercontract.Runtime {
     return &contextOnlyRuntime{ctx: ctx}
 }
 
-/* gatedConn is a net.Conn whose Read stops delivering once wedged: every byte the store sends after that is swallowed and the read blocks until the conn is closed or a deadline set on it lands, which is what a store that accepts connections but stops answering looks like from the client. Writes pass through untouched, so the command reaches the store and the client's own reader, pinger and reconnect run exactly as they do in production. The wedge is CONSTRUCTED rather than awaited, so a test holds the window open for as long as its assertions need. */
 type gatedConn struct {
     net.Conn
 
@@ -120,7 +116,6 @@ type gatedConn struct {
     closeOnce       sync.Once
 }
 
-/* gate is shared by every conn a client dials, including the ones its retry policy dials AFTER the first one failed: a wedge that reached only the first conn would let the retry succeed on the second, which is not what an unanswering store does. A wedge may be narrowed to the replies of one RESP type, read off the first byte, so a door that makes two round trips in one call — a cursor step answered with an array, then a Lua batch answered with an integer — can have its SECOND round trip wedged while the first passes; nothing outside the call could interpose between them otherwise. */
 type gate struct {
     mutex      sync.Mutex
     wedged     bool
@@ -135,7 +130,6 @@ func (instance *gate) Wedge() {
     instance.mutex.Unlock()
 }
 
-/* WedgeIntegerReplies swallows only the replies that open with ':', the shape of a Lua script answering a count, and lets every array — a SCAN or SSCAN step — through. */
 func (instance *gate) WedgeIntegerReplies() {
     instance.mutex.Lock()
     instance.wedged = true
@@ -151,7 +145,6 @@ func (instance *gate) WedgeIntegerRepliesAfter(passed int) {
     instance.mutex.Unlock()
 }
 
-/* WedgeArrayRepliesAfter lets the next `passed` array replies through and swallows the arrays after them, so the second cursor walk of a call is wedged while the first step of the outer walk passes; the client's own PONGs are not arrays and are never counted. */
 func (instance *gate) WedgeArrayRepliesAfter(passed int) {
     instance.mutex.Lock()
     instance.wedged = true
@@ -253,7 +246,6 @@ func (instance *gatedConn) Close() error {
     return instance.Conn.Close()
 }
 
-/* dialGated opens a client over gated conns against the redis the validation lane starts, with the provider's default connection timeout so the client's own ceiling is the one production runs under. */
 func dialGated(t *testing.T) (redisclient.Client, *gate) {
     t.Helper()
 
@@ -285,7 +277,6 @@ func dialGated(t *testing.T) (redisclient.Client, *gate) {
     return client, shared
 }
 
-/* pingSwallowingProxy forwards every connection to the redis the validation lane starts and stops relaying the store's replies on a connection once that connection has sent a PING, so the client's handshake succeeds and every PING, the boot ping and the Ping door, waits on its own deadline */
 func pingSwallowingProxy(t *testing.T) string {
     t.Helper()
 
@@ -373,10 +364,9 @@ func pingSwallowingProxy(t *testing.T) string {
     return listener.Addr().String()
 }
 
-/* boundProbeBudget is the timer every bounded-call probe runs under: far below the client's five-second connection timeout, so a mutant that hands a round trip the unbounded context fails on the timer whichever class the command is in — a write the ceiling would end in five seconds, a read the client retries for good. */
+/* far below the client's five-second connection timeout, so an unbounded round trip fails on the timer */
 const boundProbeBudget = 2 * time.Second
 
-/* awaitOutcome runs a call that is expected to return on its own within the budget and fails the test by name when it does not, so a mutant that removes a bound fails here instead of hanging the suite for the client's ceiling times the number of tests. A panic inside the call is handed back as its value. */
 func awaitOutcome(t *testing.T, budget time.Duration, call func() error) error {
     t.Helper()
 
@@ -408,7 +398,6 @@ func awaitOutcome(t *testing.T, budget time.Duration, call func() error) error {
     }
 }
 
-/* requireDeadlineExceeded asserts that a refusal carries a deadline in its chain. That separates a bounded call from one the client's retry policy ended, which never returns, but not from one the client's own connection timeout ended, which refuses through context.DeadlineExceeded too, five seconds in; what separates the bound from that ceiling is the budget every probe runs under, two seconds. */
 func requireDeadlineExceeded(t *testing.T, err error) {
     t.Helper()
 
@@ -421,7 +410,6 @@ func requireDeadlineExceeded(t *testing.T, err error) {
     }
 }
 
-/* capturingLogger records the level and message of every record it is handed, so a pin can read what a door journaled */
 type capturingLogger struct {
     records []capturedRecord
 }
@@ -464,7 +452,6 @@ func (instance *capturingLogger) CauseChainDepth() int {
     return 8
 }
 
-/* scriptCountingConn counts the script commands one client writes, which a server-wide tally cannot tell from another package's or application's */
 type scriptCountingConn struct {
     net.Conn
     frames *atomic.Int64
@@ -566,7 +553,6 @@ func newScriptCountingClient(t *testing.T) (redisclient.Client, *atomic.Int64) {
     return client, frames
 }
 
-/* mustCreateLock answers the lock a test's CreateLock made, a refusal failing the test where it happened */
 func mustCreateLock(lock lockcontract.Lock, createErr error) lockcontract.Lock {
     if nil != createErr {
         panic(createErr)
@@ -575,12 +561,10 @@ func mustCreateLock(lock lockcontract.Lock, createErr error) lockcontract.Lock {
     return lock
 }
 
-/* newTestConnection is the owner a component under test is built over, under the default namespace */
 func newTestConnection(client redisclient.Client) *Connection {
     return NewConnection(client, "melody")
 }
 
-/* expectPanicNamingArgument runs the callback and fails unless it panics with an exception naming the argument */
 func expectPanicNamingTheArgument(t *testing.T, argument string, callback func()) {
     t.Helper()
 
@@ -610,7 +594,6 @@ func subscribeTestTopic(t *testing.T, hub *melodyhttp.ServerSentEventHub, topic 
     return subscriber
 }
 
-/* captureStandardError reopens the emergency logger on a pipe for the action, so a record an absent logger filed there is read back */
 func captureStandardError(t *testing.T, action func()) string {
     t.Helper()
 

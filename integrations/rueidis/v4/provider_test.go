@@ -169,7 +169,6 @@ func TestProvider_Open_AnAbsentBootPingTimeoutPingsUnderTheDefaultBound(t *testi
     }
 }
 
-/* the frozen majors also assert the configuration parameter the refusal names, because there the provider is told the parameter names and the operator needs the key to go and set. This major is handed the values, so the refusal names the deadlines that governed the attempt and nothing else — and above all not the credential. */
 func TestProviderOpen_TheRefusalNamesTheDeadlinesAndNotTheCredential(t *testing.T) {
     provider := NewProvider("melody", ProviderConfig{})
 
@@ -380,7 +379,6 @@ func TestProvider_OpenReturnsOnACyclicChainFromATlsVerifier(t *testing.T) {
     }
 }
 
-/* countingListener accepts every connection and counts it, so a pin can tell whether a door dialled at all */
 func countingListener(t *testing.T) (string, *atomic.Int64) {
     t.Helper()
 
@@ -559,7 +557,6 @@ func TestProviderOpen_AnswersTheOwnerThatClosesItsClientOnce(t *testing.T) {
     }
 }
 
-/* contextRecordingClient answers every command through the real client and records the context each command is handed */
 type contextRecordingClient struct {
     redisclient.Client
     seen context.Context
@@ -641,7 +638,6 @@ func TestProvider_OpenHandsTheNamespaceToTheConnection(t *testing.T) {
     }
 }
 
-/* one row per constructor of the sweep: an absent logger or clock builds, a typed nil is refused naming the field */
 func TestOptionalDependencies_NilIsTheDefaultAndATypedNilIsRefused(t *testing.T) {
     client := newTokenStoreClient(t)
 

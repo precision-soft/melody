@@ -317,7 +317,6 @@ func TestServerSentEventHub_ANilRuntimePanicsNamingTheDoor(t *testing.T) {
     }
 }
 
-/* a logger that keeps the level beside the message, so a record can be asserted at the level it deserves rather than merely asserted to exist */
 type hubRecordingLogger struct {
     mutex    sync.Mutex
     warnings []string
@@ -400,7 +399,6 @@ func TestServerSentEventHub_CloseClosesTheBackplaneItOwns(t *testing.T) {
 
     _ = hub.CloseWithContext(t.Context())
 
-    /* the interface declares Close for a reason — the shipped backplanes hold a goroutine, a cancel func and a live subscription — and the hub is the only holder of the reference */
     if 1 != backplane.closeCount() {
         t.Fatalf("expected the backplane to be closed exactly once, got %d", backplane.closeCount())
     }
@@ -446,7 +444,6 @@ func TestServerSentEventHub_ANilBackplaneIsRefusedNamingClearBackplane(t *testin
             generation := hub.generation
             hub.mutex.RUnlock()
 
-            /* a refusal that cleared on its way out would still pass the panic check */
             if nil == generation || installed != generation.backplane {
                 t.Fatalf("expected the refused nil to leave the installed backplane in place")
             }
@@ -576,7 +573,6 @@ func TestServerSentEventHub_SetBackplaneAcceptsTheSameBackplaneInstalledTwice(t 
     }
 }
 
-/* the contract is implemented outside this package, so a backplane carried by VALUE with a slice inside is a shape an application may hand over; == on two such values panics with the runtime's own message, and the refusal this door writes never ran */
 func TestServerSentEventHub_SetBackplaneRefusesANonComparableBackplaneByName(t *testing.T) {
     hub := NewServerSentEventHub(ServerSentEventHubConfig{})
 
@@ -606,7 +602,6 @@ func TestServerSentEventHub_ClearingTheBackplaneIsAllowedOnAClosedHub(t *testing
 
     _ = hub.CloseWithContext(t.Context())
 
-    /* a backplane's own close clears itself from the hub as its first step, and the hub's close calls it: refusing the clear would abort the close halfway and leak exactly the goroutine and the subscription the close exists to release */
     if clearErr := hub.ClearBackplane(t.Context()); nil != clearErr {
         t.Fatalf("clear on a closed hub: %v", clearErr)
     }
@@ -660,7 +655,6 @@ func TestServerSentEventHub_ContainsAPanickingBackplane(t *testing.T) {
     hub := NewServerSentEventHub(ServerSentEventHubConfig{Logger: logger})
     hub.SetBackplane(&panickingBackplane{})
 
-    /* replicate runs on whatever goroutine broadcast — a message-bus consumer's, commonly, where a panic ends the process */
     hub.Broadcast(newTestRuntime(), "topic", ServerSentEvent{Data: "payload"})
 
     if 1 != logger.errorCount() {
@@ -678,7 +672,6 @@ func TestServerSentEventHub_RecordsTheFirstDropOfASubscriberAtWarningAndNotEvery
         hub.DeliverLocal("topic", ServerSentEvent{Data: "payload"})
     }
 
-    /* silence made a whole class of outage — the slow consumer — invisible by construction, while a record per drop would bury the journal under the same fault */
     if 1 != logger.warningCount() {
         t.Fatalf("expected exactly one record for the overflowing subscriber, got %d", logger.warningCount())
     }
@@ -691,7 +684,6 @@ func TestServerSentEventHub_RecordsTheFirstDropOfASubscriberAtWarningAndNotEvery
 func TestServerSentEventHub_ZeroValueSubscribesInsteadOfPanickingOnANilMap(t *testing.T) {
     hub := &ServerSentEventHub{}
 
-    /* the struct is exported with only unexported fields, so a composition root that writes &ServerSentEventHub{} compiles, boots and reports a subscriber count, then panicked on an assignment to a nil map inside the first request that connected */
     subscriber := subscribeTestTopic(t, hub, "topic")
     if nil == subscriber {
         t.Fatalf("expected a subscriber")
@@ -829,13 +821,11 @@ func TestServerSentEventHub_IsClosedTellsAClosedHubFromAnEndedStream(t *testing.
 
     _ = hub.CloseWithContext(t.Context())
 
-    /* a caller's range cannot tell the subscriber handed back by a shut-down hub from an ordinary end of stream; this is the door that answers the difference */
     if false == hub.IsClosed() {
         t.Fatalf("a shut-down hub reports open")
     }
 }
 
-/* a backplane whose Publish is held open, so the shutdown and replacement windows can be forced rather than raced */
 type gatedBackplane struct {
     entered chan struct{}
     release chan struct{}
@@ -884,7 +874,6 @@ func TestServerSentEventHub_CloseWaitsForAnInFlightPublishBeforeClosingTheBackpl
         close(shutdownReturned)
     }()
 
-    /* the publish has passed the closed check and is inside the backplane; the shutdown must not close it under the call — a backplane whose Close shuts an internal channel answers a late publish with a send on a closed channel */
     select {
     case <-shutdownReturned:
         t.Fatalf("shutdown returned while a publish was in flight")
@@ -902,7 +891,6 @@ func TestServerSentEventHub_CloseWaitsForAnInFlightPublishBeforeClosingTheBackpl
     }
 }
 
-/* the deadline bounds the CALLER's wait, not the fate of what the hub owns. On the branch where it runs out the hub is still the only holder of the backplane and has already set the flag that makes every later close answer nil, so a return that neither closes it nor hands it on would put its connection, its channels and its listen goroutine beyond every door in the process — and report success from then on. The two assertions are ordered: it must NOT be closed while the publish is inside it, and it must be closed once the publish ends. */
 func TestServerSentEventHub_ASpentCloseDeadlineHandsTheBackplaneToADetachedCloser(t *testing.T) {
     hub := NewServerSentEventHub(ServerSentEventHubConfig{})
     backplane := newGatedBackplane()
@@ -936,7 +924,6 @@ func TestServerSentEventHub_ASpentCloseDeadlineHandsTheBackplaneToADetachedClose
         t.Fatalf("the backplane was never closed: the hub dropped its only reference and every later close answers nil, so nothing in the process can reach it")
     }
 
-    /* and the handing-on does not become a second closer: the shut flag answers a later close before it can reach the backplane, which a double close would show as a panic on the channel this double shuts */
     if closeErr := hub.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("a close after the detached one reported %v", closeErr)
     }
@@ -957,7 +944,6 @@ func TestServerSentEventHub_ClearingTheBackplaneWaitsForAnInFlightPublish(t *tes
         close(clearReturned)
     }()
 
-    /* the sequence the contract prescribes is clear, close what you took out, install the replacement: a clear that returns while a publish is still inside the backplane hands the caller a backplane to close under that publish — a cancelled context on one shipped backplane and a shut channel on the other, both recorded as an outage that never happened, and the event in flight never reaching the other nodes */
     select {
     case <-clearReturned:
         t.Fatalf("clearing the backplane returned while a publish was in flight")
@@ -974,7 +960,6 @@ func TestServerSentEventHub_ClearingTheBackplaneWaitsForAnInFlightPublish(t *tes
         t.Fatalf("clearing the backplane did not return after the publish finished")
     }
 
-    /* what the caller took out is closed by its own hand, now that nothing holds it */
     if closeErr := backplane.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("expected the backplane taken out of the hub to close cleanly, got %v", closeErr)
     }
@@ -984,7 +969,6 @@ func TestServerSentEventHub_ClearingTheBackplaneWaitsForAnInFlightPublish(t *tes
     }
 }
 
-/* the wait for the publishes already past the closed check ends with the teardown's deadline, and answers whether they all finished: the backplane is closed under them only when they did, because a replicate blocked on a broker cannot be cancelled — Publish takes no context — and closing the backplane under it is the send on a closed channel the wait exists to prevent. */
 func TestAwaitPublishesInFlight_EndsWithTheDeadlineAndSaysSo(t *testing.T) {
     var publishesInFlight sync.WaitGroup
 
@@ -998,7 +982,7 @@ func TestAwaitPublishesInFlight_EndsWithTheDeadlineAndSaysSo(t *testing.T) {
     boundedContext, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
     defer cancel()
 
-    /* the call is driven on a goroutine under a timer of its own: a form that stopped observing the deadline would otherwise park this test until the suite timeout instead of failing it, and a probe on blocking has to die on its own timer */
+    /* under a timer of its own: a form ignoring the deadline would park the test until the suite timeout */
     answered := make(chan bool, 1)
     go func() {
         answered <- awaitPublishesInFlight(boundedContext, &publishesInFlight)
@@ -1015,7 +999,6 @@ func TestAwaitPublishesInFlight_EndsWithTheDeadlineAndSaysSo(t *testing.T) {
     }
 }
 
-/* the hub closed under a deadline leaves the backplane open when the publishes did not end, and says which: a hub that reported success there would have closed a backplane a replicate is still holding. */
 func TestServerSentEventHub_CloseWithContext_LeavesTheBackplaneOpenWhenTheDeadlinePasses(t *testing.T) {
     hub := NewServerSentEventHub(ServerSentEventHubConfig{})
 
@@ -1025,7 +1008,6 @@ func TestServerSentEventHub_CloseWithContext_LeavesTheBackplaneOpenWhenTheDeadli
     }
     hub.SetBackplane(backplane)
 
-    /* the publish in flight is created by a BROADCAST, the door a replicate actually travels, rather than by raising the hub's bookkeeping by hand. The hub records a publish in flight in more than one place — a group to wait on and a count to read — and a fixture that writes one of them stops creating the state it names the moment the other is consulted. */
     go hub.Broadcast(newTestRuntime(), "topic", ServerSentEvent{Data: "payload"})
 
     select {
@@ -1039,7 +1021,6 @@ func TestServerSentEventHub_CloseWithContext_LeavesTheBackplaneOpenWhenTheDeadli
     boundedContext, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
     defer cancel()
 
-    /* driven on a goroutine under its own timer, for the reason the sibling probe above carries */
     closed := make(chan error, 1)
     go func() {
         closed <- hub.CloseWithContext(boundedContext)
@@ -1066,7 +1047,6 @@ func TestServerSentEventHub_CloseWithContext_LeavesTheBackplaneOpenWhenTheDeadli
     }
 }
 
-/* countingServerSentEventBackplane counts its closes, and holds each publish until its gate opens when it was given one. The count is atomic because the detached closer the hub hands this backplane to writes it from its own goroutine, after the test that reads it has returned. */
 type countingServerSentEventBackplane struct {
     closeCalls  atomic.Int64
     publishGate chan struct{}
@@ -1094,7 +1074,6 @@ func (instance *countingServerSentEventBackplane) CloseWithContext(closeContext 
     return nil
 }
 
-/* a hub with NOTHING past the closed check is not waited for at all, whatever its deadline says. The wait needs a goroutine to be scheduled before it can answer, and a shutdown reached with its deadline already spent — the normal state once an earlier component has eaten a shared teardown budget — selects on a Done() that is ready before that goroutine has run. So it reported publishes in flight over a hub where there were none, handed the backplane it owns to a detached closer, and answered with a failure that put the hub in the operator's map and the process on a non-zero exit. The sibling above is the arm that still has to refuse. */
 func TestServerSentEventHub_CloseWithContextClosesTheBackplaneInPlaceWhenNothingIsInFlight(t *testing.T) {
     hub := NewServerSentEventHub(ServerSentEventHubConfig{})
 
@@ -1113,7 +1092,6 @@ func TestServerSentEventHub_CloseWithContextClosesTheBackplaneInPlaceWhenNothing
     }
 }
 
-/* the same answer by the other door: a cancellation carrying no deadline at all, which is what a caller asserting its way to CloseWithContext hands over. */
 func TestServerSentEventHub_CloseWithContextClosesTheBackplaneInPlaceUnderACancellationWithoutADeadline(t *testing.T) {
     hub := NewServerSentEventHub(ServerSentEventHubConfig{})
 
@@ -1190,7 +1168,6 @@ func (instance *generationProbeBackplane) CloseWithContext(closeContext context.
     return nil
 }
 
-/* a clear waits on the backplane it removed alone: with one group for every backplane, a publish on the NEXT backplane could Add while the previous clear's waiter was still leaving Wait, which the WaitGroup refuses with a panic on the waiter's goroutine — a process death on a backplane swap under publish load. The storm below reproduced it on the first iteration before the generation record. */
 func TestServerSentEventHub_AClearWaitsOnTheBackplaneItRemovedAloneUnderNewPublishes(t *testing.T) {
     deadline := time.Now().Add(3 * time.Second)
 
@@ -1226,7 +1203,6 @@ func TestServerSentEventHub_AClearWaitsOnTheBackplaneItRemovedAloneUnderNewPubli
             clearDone <- hub.ClearBackplane(clearContext)
         }()
 
-        /* the storm starts once the clear has removed the blocking generation and is waiting on it, so every SetBackplane below installs the next backplane or finds it installed */
         for {
             hub.mutex.RLock()
             removed := nil == hub.generation

@@ -186,7 +186,6 @@ func TestNewRunnerCommand_TheRunnersTimeoutAndWindowReachAnEntryThatNamesNone(t 
     }
 }
 
-/* a command that watches its context under an entry naming no timeout is cancelled by the runner's, here shortened so the test does not wait the hour the default gives */
 func TestRunnerCommand_TheRunnersTimeoutCancelsAnEntryThatNamesNone(t *testing.T) {
     job := newContextWatchingCommand("job:top")
 

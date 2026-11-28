@@ -20,7 +20,6 @@ import (
     melodymessagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
 )
 
-/* sendingBus hands every message to the transport as the routed dispatch bus does, without the handler chain the command does not read; skip drops the messages another consumer would have taken, by their one-based position, and twice sends each message a second time, as an at-least-once redelivery */
 type sendingBus struct {
     transport melodymessagebuscontract.Transport
     skip      map[int]bool
@@ -56,7 +55,6 @@ func (instance *sendingBus) dispatchedOptions() []melodymessagebuscontract.Dispa
     return append([]melodymessagebuscontract.DispatchOptions{}, instance.dispatched...)
 }
 
-/* acceptingBus is the consume bus: it handles every envelope, answering handleErr, and tells handled about each one */
 type acceptingBus struct {
     handleErr error
     handled   chan melodymessagebuscontract.Envelope
@@ -71,7 +69,6 @@ func (instance *acceptingBus) Dispatch(runtimeInstance melodycontainercontract.R
     return envelope, instance.handleErr
 }
 
-/* recordingTransport is the in-process transport with its acks, nacks and receives counted and the context of the last Receive kept; closedStreamErr, when closed is set, makes Receive answer a stream that is already closed */
 type recordingTransport struct {
     *melodymessagebus.InMemoryTransport
 
@@ -145,7 +142,6 @@ func (instance *closedSubscription) Err() error {
     return instance.err
 }
 
-/* manualClock answers timers that fire only when the test fires them, since the frozen clock's timers run on wall time */
 type manualClock struct {
     mutex     sync.Mutex
     durations []time.Duration
@@ -201,7 +197,6 @@ func (instance *manualTimer) Reset(duration time.Duration) bool {
     return true
 }
 
-/* dispatchCommandContext parses the arguments against the command's own flags, so a flag left out reads its declared default */
 func dispatchCommandContext(command *MessageBusDispatchCommand, arguments []string, writer io.Writer) *melodyclicontract.CommandContext {
     commandContext, parseErr := parseCommandFlags(command, arguments, writer)
     if nil != parseErr {
@@ -244,7 +239,6 @@ func TestMessageBusDispatchCommandReportsOnTheCommandWriter(t *testing.T) {
     }
 }
 
-/* the subscription ends with the run, so a longer-lived process running the command keeps no consumer on the queue */
 func TestMessageBusDispatchCommand_EndsItsSubscriptionWhenTheRunReturns(t *testing.T) {
     fixture := newCommandFixture(t)
     transport := newRecordingTransport(t)
@@ -347,7 +341,6 @@ func TestMessageBusDispatchCommand_EndsAtTheTimeoutWhenAnotherConsumerTookItsEnv
     consumeBus := &acceptingBus{handled: make(chan melodymessagebuscontract.Envelope, 8)}
     captured := &bytes.Buffer{}
 
-    /* messages two and three never reach this run's queue, as when another consumer took them */
     command := NewMessageBusDispatchCommand(&sendingBus{transport: transport, skip: map[int]bool{2: true, 3: true}}, consumeBus, transport, clockInstance)
     commandContext := dispatchCommandContext(command, []string{"--timeout", "5s"}, captured)
 

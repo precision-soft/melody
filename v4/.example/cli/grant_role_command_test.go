@@ -15,7 +15,6 @@ import (
     melodyeventcontract "github.com/precision-soft/melody/v4/event/contract"
 )
 
-/* the grant is a real write: the assertion is on what the directory holds afterwards, not on the line the command prints, since a command that only printed "granted role ... to user ..." would satisfy an assertion on its output while the directory answered the same roles as before. */
 func TestGrantRoleCommandGrantsTheRole(t *testing.T) {
     fixture := newCommandFixture(t)
     command := NewGrantRoleCommand(fixture.lazyUserService())
@@ -34,8 +33,6 @@ func TestGrantRoleCommandGrantsTheRole(t *testing.T) {
         t.Fatalf("expected the account to hold the granted role, it holds %v", after)
     }
 
-    /* the role is ADDED, never substituted: the update door takes the whole set, so a command that passed
-       the one role would strip every other the account holds. */
     for _, held := range before {
         if false == slices.Contains(after, held) {
             t.Fatalf("expected the granted role to be added to %v, but the account now holds %v", before, after)
@@ -43,8 +40,6 @@ func TestGrantRoleCommandGrantsTheRole(t *testing.T) {
     }
 }
 
-/* a second run must be a no-op rather than a second entry in the comma-joined column and a second line in
-   the audit trail. */
 func TestGrantRoleCommandIsANoOpWhenTheRoleIsAlreadyHeld(t *testing.T) {
     fixture := newCommandFixture(t)
     command := NewGrantRoleCommand(fixture.lazyUserService())
@@ -82,9 +77,6 @@ func TestGrantRoleCommandRefusesAnAccountThatDoesNotExist(t *testing.T) {
     }
 }
 
-/* the roles column is one comma-joined value, so a role carrying a comma comes back as several on the next
-   read — an account granted "ROLE_X,ROLE_ADMIN" reads back holding ROLE_ADMIN. Both admin doors refuse it;
-   this is the only other door that writes roles, and it refuses before it resolves anything. */
 func TestGrantRoleCommandRefusesARoleCarryingAComma(t *testing.T) {
     fixture := newCommandFixture(t)
     command := NewGrantRoleCommand(fixture.lazyUserService())
@@ -103,7 +95,6 @@ func TestGrantRoleCommandRefusesARoleCarryingAComma(t *testing.T) {
     }
 }
 
-/* the roles are read from the repository, not through the service. The service memoizes what it read, and the entry is cleared by the invalidation listener the application registers on the update event, which this fixture deliberately does not, since the subject here is the command and not the wiring; read through the service, every assertion below would be about the memo. */
 func storedRoles(t *testing.T, fixture *commandFixture, username string) []string {
     t.Helper()
 
@@ -119,7 +110,6 @@ func storedRoles(t *testing.T, fixture *commandFixture, username string) []strin
     return append([]string{}, user.Roles...)
 }
 
-/* the grant's listeners drop the account's cache entries in the process that dispatched, and the fixture's cache is the in-process map: the command has to say so, because a session opened against a server on the same fallback keeps the roles it cached until that server restarts. Read off the command's writer, which is where the command's own line goes. */
 func TestGrantRoleCommandSaysWhenTheCacheIsThisProcessOwn(t *testing.T) {
     fixture := newCommandFixture(t)
     command := NewGrantRoleCommand(fixture.lazyUserService())
@@ -137,8 +127,6 @@ func TestGrantRoleCommandSaysWhenTheCacheIsThisProcessOwn(t *testing.T) {
     }
 }
 
-/* the flag is stored as the admin doors store a role — trimmed — so a re-run finds the role held instead of
-   appending it again with its space */
 func TestGrantRoleCommandTrimsTheRoleBeforeStoringIt(t *testing.T) {
     fixture := newCommandFixture(t)
     command := NewGrantRoleCommand(fixture.lazyUserService())
@@ -172,8 +160,6 @@ func TestGrantRoleCommandRefusesABlankRole(t *testing.T) {
     }
 }
 
-/* the voter compares a role's spelling exactly, so a spelling outside the application's vocabulary would be
-   stored, reported granted and grant nothing */
 func TestGrantRoleCommandRefusesARoleTheApplicationDoesNotKnow(t *testing.T) {
     fixture := newCommandFixture(t)
     command := NewGrantRoleCommand(fixture.lazyUserService())
@@ -195,7 +181,6 @@ func TestGrantRoleCommandRefusesARoleTheApplicationDoesNotKnow(t *testing.T) {
     }
 }
 
-/* the repository is the arbiter, not the read the command made: two grants of different roles on one account, each reading the account before either wrote, both land, where a read, an append and a whole-set write would let the last writer take the other's role with it */
 func TestGrantRoleCommandGrantsThroughTheRepositorysAtomicDoor(t *testing.T) {
     fixture := newCommandFixture(t)
 
@@ -206,8 +191,6 @@ func TestGrantRoleCommandGrantsThroughTheRepositorysAtomicDoor(t *testing.T) {
         t.Fatalf("the first grant answered %d, %v", outcome, grantErr)
     }
 
-    /* the command's read is the pre-grant account (the fixture's cache was never told), and the repository
-       still answers the truth */
     command := NewGrantRoleCommand(fixture.lazyUserService())
     if runErr := command.Run(fixture.runtime, newFlagContext(entity.RoleEditor, "user")); nil != runErr {
         t.Fatalf("a grant of a role held since the command's read failed: %v", runErr)
@@ -228,12 +211,10 @@ func TestGrantRoleCommandGrantsThroughTheRepositorysAtomicDoor(t *testing.T) {
     }
 }
 
-/* the other direction of the arbiter: the command's read says the role is held, a memo from before an admin door removed it, and the directory says it is not. The repository grants, because it is the only judge; a short-cut on the cached roles would answer "already holds" and leave the row unchanged. */
 func TestGrantRoleCommandGrantsARoleTheCachedReadWronglySaysIsHeld(t *testing.T) {
     fixture := newCommandFixture(t)
     userService := fixture.lazyUserService()
 
-    /* the service reads the account once so its memo holds the roles as seeded, editor included */
     account, _, _ := fixture.userRepository.FindByUsername(context.Background(), "user")
     if _, _, grantErr := fixture.userRepository.GrantRole(context.Background(), account.Id, entity.RoleEditor); nil != grantErr {
         t.Fatalf("seed the editor role: %v", grantErr)
@@ -242,7 +223,6 @@ func TestGrantRoleCommandGrantsARoleTheCachedReadWronglySaysIsHeld(t *testing.T)
         t.Fatalf("warm the memo: %v", findErr)
     }
 
-    /* the directory drops the role behind the memo's back, through a door that dispatches nothing */
     if _, _, updateErr := fixture.userRepository.Update(context.Background(), account.Id, repository.UserChange{Roles: []string{entity.RoleUser}}, nil); nil != updateErr {
         t.Fatalf("remove the role in the directory: %v", updateErr)
     }
@@ -256,7 +236,6 @@ func TestGrantRoleCommandGrantsARoleTheCachedReadWronglySaysIsHeld(t *testing.T)
     }
 }
 
-/* the repository's own answer that the role is held is the one the command reports as nothing to do */
 func TestGrantRoleCommandReportsTheRepositorysAlreadyHeld(t *testing.T) {
     fixture := newCommandFixture(t)
 
@@ -282,7 +261,6 @@ func TestGrantRoleCommandReportsTheRepositorysAlreadyHeld(t *testing.T) {
     }
 }
 
-/* a grant whose write committed and whose listeners then refused is not a failed grant: the role is in the directory and the account's cache entries are not dropped, and the operator reads both; the output says the role is granted and names the listeners, the exit names the entries that stand, and a re-run would find the role held. */
 func TestGrantRoleCommandSaysTheRoleWasGrantedWhenTheListenersRefuse(t *testing.T) {
     fixture := newCommandFixtureWithDispatcher(t, func(dispatcher melodyeventcontract.EventDispatcher) melodyeventcontract.EventDispatcher {
         return &refusingDispatcher{EventDispatcher: dispatcher}

@@ -56,7 +56,6 @@ func TestRollbackCommand_RollsBackLastGroupUnderLock(t *testing.T) {
     }
 }
 
-/* bun hands the group back beside the failure, so a rollback that fails part way names the group it walks on the way out: with only the failing migration, which schema changes are already undone could only be reconstructed from the migrations table by hand */
 func TestRollbackCommand_AFailedRollbackNamesTheGroupItWasWalking(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = appliedMigrationRowsHook("20240101000000")
@@ -91,7 +90,6 @@ func TestRollbackCommand_AFailedRollbackNamesTheGroupItWasWalking(t *testing.T) 
     }
 }
 
-/* the count of the group a failed rollback was walking is promised on BOTH renderings, and the text block draws a fixed set of keys: a key of the caller's own naming reaches the machine document and is dropped from the block a person reads, silently and with no fallthrough. */
 func TestRollbackCommand_TheFailedGroupCountRendersOnBothRenderings(t *testing.T) {
     newFailingRollback := func(t *testing.T) (containercontract.Runtime, *migrate.Migrations) {
         t.Helper()
@@ -199,7 +197,6 @@ func TestRollbackCommand_FailedUnlockFailsTheCommand(t *testing.T) {
     }
 }
 
-/* the same remedy-naming refusal the migrate sibling proves: bun's bare lock error names neither the database nor db:unlock, so rollback wraps it */
 func TestRollbackCommand_LockFailureNamesTheRemedy(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = lockCountHook(1)
@@ -288,7 +285,6 @@ func TestRollbackCommand_HandsItsPostureToTheMigrationsThroughTheContext(t *test
     }
 }
 
-/* the rollback asks the locks table the same question: a missing table is not answered with the unlock command */
 func TestRollbackCommand_ALockRefusedByAMissingLocksTableDoesNotNameTheUnlockCommand(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     missingTable := errors.New("Error 1146 (42S02): Table 'melody.bun_migration_locks' doesn't exist")

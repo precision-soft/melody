@@ -9,7 +9,6 @@ import (
     "time"
 )
 
-/* admitWithoutRelease admits a session before the grace, so the next admission asks the storage whether it still holds it */
 func admitWithoutRelease(t *testing.T, repositoryInstance UserSessionRepository, userId string, previousSessionId string, sessionId string) {
     t.Helper()
 
@@ -18,7 +17,6 @@ func admitWithoutRelease(t *testing.T, repositoryInstance UserSessionRepository,
     }
 }
 
-/* past the cap the oldest session of the account is released, oldest first, and the sessions of another account are not */
 func TestInMemoryUserSessionRepositoryAdmit_ReleasesTheOldestPastTheCap(t *testing.T) {
     repositoryInstance := newInMemoryUserSessionRepository()
 
@@ -45,7 +43,6 @@ func TestInMemoryUserSessionRepositoryAdmit_ReleasesTheOldestPastTheCap(t *testi
     }
 }
 
-/* the id the rotation retired leaves the index, so it holds no place of the account */
 func TestInMemoryUserSessionRepositoryAdmit_DropsTheRetiredId(t *testing.T) {
     repositoryInstance := newInMemoryUserSessionRepository()
 
@@ -68,7 +65,6 @@ func TestInMemoryUserSessionRepositoryAdmit_DropsTheRetiredId(t *testing.T) {
     }
 }
 
-/* a release that fails refuses the admission with the index unchanged */
 func TestInMemoryUserSessionRepositoryAdmit_AReleaseFailureRecordsNothing(t *testing.T) {
     repositoryInstance := newInMemoryUserSessionRepository()
     for index := range UserSessionCap {
@@ -86,7 +82,6 @@ func TestInMemoryUserSessionRepositoryAdmit_AReleaseFailureRecordsNothing(t *tes
     }
 }
 
-/* a release frees the session's place; a session the index never held is not an error */
 func TestInMemoryUserSessionRepositoryRelease_FreesThePlace(t *testing.T) {
     repositoryInstance := newInMemoryUserSessionRepository()
     for index := range UserSessionCap {
@@ -115,7 +110,6 @@ func TestInMemoryUserSessionRepositoryRelease_FreesThePlace(t *testing.T) {
     }
 }
 
-/* concurrent sign-ins of one account never leave it more than the cap */
 func TestInMemoryUserSessionRepositoryAdmit_ConcurrentAdmissionsKeepTheCap(t *testing.T) {
     repositoryInstance := newInMemoryUserSessionRepository()
 
@@ -135,7 +129,6 @@ func TestInMemoryUserSessionRepositoryAdmit_ConcurrentAdmissionsKeepTheCap(t *te
     }
 }
 
-/* sessionsEndedElsewhere answers every session but the ended ones as still stored */
 func sessionsEndedElsewhere(endedSessionIds ...string) func(sessionId string) (bool, error) {
     return func(sessionId string) (bool, error) {
         for _, endedSessionId := range endedSessionIds {
@@ -148,7 +141,6 @@ func sessionsEndedElsewhere(endedSessionIds ...string) func(sessionId string) (b
     }
 }
 
-/* a session that ended elsewhere keeps no place: its row goes at the next sign-in without a release, and the cap counts the live sessions, so no live one is ended for it */
 func TestInMemoryUserSessionRepositoryAdmit_DropsTheRowsOfEndedSessionsBeforeTheCap(t *testing.T) {
     repositoryInstance := newInMemoryUserSessionRepository()
 
@@ -175,7 +167,6 @@ func TestInMemoryUserSessionRepositoryAdmit_DropsTheRowsOfEndedSessionsBeforeThe
     }
 }
 
-/* a liveness read that fails refuses the admission with nothing recorded, as a failed release does */
 func TestInMemoryUserSessionRepositoryAdmit_AFailedLivenessReadRefusesTheAdmission(t *testing.T) {
     repositoryInstance := newInMemoryUserSessionRepository()
     admitWithoutRelease(t, repositoryInstance, "user-1", "", "s1")
@@ -192,12 +183,10 @@ func TestInMemoryUserSessionRepositoryAdmit_AFailedLivenessReadRefusesTheAdmissi
     }
 }
 
-/* noSessionStored answers every session as absent from the storage, as it reads while the kernel has not yet saved the sessions the sign-ins rotated to */
 func noSessionStored(sessionId string) (bool, error) {
     return false, nil
 }
 
-/* concurrent sign-ins whose sessions the kernel has not stored yet keep their places: a row within the grace counts as live whatever the storage answers, so the cap releases the oldest instead of dropping the newer rows unreleased */
 func TestInMemoryUserSessionRepositoryAdmit_ARowWithinTheGraceCountsWhateverTheStorageAnswers(t *testing.T) {
     repositoryInstance := newInMemoryUserSessionRepository()
     now := time.Now()
@@ -224,7 +213,6 @@ func TestInMemoryUserSessionRepositoryAdmit_ARowWithinTheGraceCountsWhateverTheS
     }
 }
 
-/* a row admitted the grace ago or earlier is read from the storage again: an absent session's row is dropped without a release */
 func TestInMemoryUserSessionRepositoryAdmit_ARowAtTheGraceIsReadFromTheStorage(t *testing.T) {
     repositoryInstance := newInMemoryUserSessionRepository()
     now := time.Now()

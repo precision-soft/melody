@@ -51,7 +51,6 @@ func TestExclusiveTickCommand_RefusesAHoldThatIsNotADurationAtTheParse(t *testin
     }
 }
 
-/* the declared 2s is the one default the help prints, the usage text stating none of its own */
 func TestExclusiveTickCommand_TheHelpPrintsTheDeclaredHoldOnce(t *testing.T) {
     help := renderCommandHelp(t, &ExclusiveTickCommand{})
 

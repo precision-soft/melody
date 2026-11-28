@@ -62,7 +62,6 @@ func TestApiDeleteHandler_RefusesACallerWithoutTheRole(t *testing.T) {
     }
 }
 
-/* the in-use check compares the identifier as given and the in-memory delete trims it, so only the trimmed identifier keeps a padded one from deleting a category a product sits in */
 func TestApiDeleteHandler_TrimsThePathIdentifier(t *testing.T) {
     fixture := newCategoryDoorFixture(t)
 

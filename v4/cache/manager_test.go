@@ -268,7 +268,6 @@ func TestManager_Many_SkipsCorruptEntriesAndNamesThem(t *testing.T) {
     }
 }
 
-/* the items come as a map, so a refusal naming whichever entry the iteration reached first would differ between calls; fifty rounds make a first-refusal-wins rule visible */
 func TestManager_SetMultipleNamesTheRefusedKeysDeterministically(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
@@ -303,11 +302,6 @@ func TestManager_SetMultipleNamesTheRefusedKeysDeterministically(t *testing.T) {
     }
 }
 
-/* Serializer is a PUBLIC contract, so the refusal SetMultiple reads to build its per-key reasons is the
-   application's error. Reading its text bare turned a failure this door ANSWERS into a panic nothing on
-   the request path contains — the sibling Set, which hands the same error to NewError without reading it,
-   answered an error for the same input on every major. The text is read the way the repository reads every
-   foreign error's text, under a recover, and the marker takes the place of the reason. */
 func TestManager_SetMultipleAnswersARefusalWhenTheSerializersErrorTextPanics(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
@@ -352,9 +346,6 @@ func TestManager_SetMultipleAnswersARefusalWhenTheSerializersErrorTextPanics(t *
     }
 }
 
-/* an error of the application's whose Error() panics — typically on the very field that made the
-   serialization fail — is the value this whole class is about; it is not producible through any shipped
-   serializer, so the double is what makes the guard observable */
 type panickingTextError struct{}
 
 func (instance *panickingTextError) Error() string {
@@ -531,7 +522,6 @@ func TestManager_GetCounterRejectsANonCounterPayload(t *testing.T) {
     }
 }
 
-/* GetCounter refuses a payload that is not a counter with the key and the payload's length, never the payload, which strconv's own refusal quotes whole. */
 func TestManager_GetCounterKeepsThePayloadOutOfTheChain(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
     manager := NewManager(NewInMemoryBackend(InMemoryBackendConfig{CleanupInterval: bound.Of(time.Hour), Clock: clockInstance}), NewJsonSerializer(), ManagerConfig{OwnsBackend: true})
@@ -585,7 +575,6 @@ func TestManager_DecrementCountsDownAndLeavesACounterGetCounterCanRead(t *testin
         t.Fatalf("expected the stored counter to be 7, got %d", storedValue)
     }
 
-    /* a counter written by Decrement crosses zero into the negatives rather than clamping: a remaining-quota counter that stopped at zero would report the same value for "exactly used up" and "overdrawn by a thousand" */
     newValue, decrementErr = manager.Decrement(testRuntime(), "remaining", 10, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()})
     if nil != decrementErr {
         t.Fatalf("unexpected decrement error: %v", decrementErr)
@@ -708,7 +697,6 @@ func (instance *cacheTestCountingSerializer) Deserialize(payload []byte, target 
     return instance.inner.Deserialize(payload, target)
 }
 
-/* typedNilBackend and typedNilSerializer embed their interfaces, so a nil pointer of either is a typed nil that still satisfies the contract the constructor is handed */
 type typedNilBackend struct {
     cachecontract.Backend
 }
@@ -717,7 +705,6 @@ type typedNilSerializer struct {
     cachecontract.Serializer
 }
 
-/* a typed nil passes the plain comparison, is stored as a live collaborator and dereferences its nil receiver on the first cache call — on the request path, in place of the construction-time refusal. The refusal above is pinned with an UNTYPED nil on every major, which a plain comparison answers identically, so the interface-aware half was unpinned until here. */
 func TestNewManager_RefusesATypedNilBackendAndATypedNilSerializer(t *testing.T) {
     var nilBackend *typedNilBackend
     var nilSerializer *typedNilSerializer
@@ -747,7 +734,6 @@ func TestNewManager_RefusesATypedNilBackendAndATypedNilSerializer(t *testing.T) 
     }()
 }
 
-/* the reasons are as many as the refused keys, and one of them can be the error's: a batch refused for several reasons reported one cause under a list of keys, leaving the operator to say which key it belonged to. The empty key is the one the sorted list names first whenever the batch carries it, which is a key the backend contract calls malformed — so "key" alone is not the whole answer. */
 func TestManager_SetMultipleCarriesTheReasonOfEveryRefusedKey(t *testing.T) {
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: &cacheTestClock{now: time.Unix(10, 0)}})
     defer backend.CloseWithContext(context.Background())

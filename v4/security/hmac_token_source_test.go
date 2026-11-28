@@ -119,7 +119,6 @@ func TestHmacTokenSource_MatchingAudienceAuthenticates(t *testing.T) {
     }
 }
 
-/* an envelope minted for a different callee must not authenticate here, even though this service trusts the same caller and serves the same endpoint — this is the cross-service replay the audience binding closes. */
 func TestHmacTokenSource_MismatchedAudienceIsAnonymous(t *testing.T) {
     signer := NewHmacEnvelopeSigner(hmacTestRuntime(), hmacTestSecrets(), "wms-service", HmacEnvelopeSignerConfig{Audience: "billing-service"})
 
@@ -136,7 +135,6 @@ func TestHmacTokenSource_MismatchedAudienceIsAnonymous(t *testing.T) {
     }
 }
 
-/* backward compatible: a verifier that configures no ServiceIdentity does not check the audience, so an envelope signed before callers opted into audiences still authenticates. */
 func TestHmacTokenSource_AudienceUnenforcedWhenNoServiceIdentity(t *testing.T) {
     signer := NewHmacEnvelopeSigner(hmacTestRuntime(), hmacTestSecrets(), "wms-service", HmacEnvelopeSignerConfig{})
 
@@ -150,7 +148,6 @@ func TestHmacTokenSource_AudienceUnenforcedWhenNoServiceIdentity(t *testing.T) {
     }
 }
 
-/* negative control: a tampered envelope must not authenticate. */
 func TestHmacTokenSource_TamperedSignatureIsAnonymous(t *testing.T) {
     signer := NewHmacEnvelopeSigner(hmacTestRuntime(), hmacTestSecrets(), "wms-service", HmacEnvelopeSignerConfig{})
 
@@ -196,7 +193,6 @@ func TestHmacTokenSource_ReplayedNonceIsRejected(t *testing.T) {
 }
 
 func TestHmacTokenSource_UnknownApplicationIsAnonymous(t *testing.T) {
-    /* the signer's key is legitimately bound to ghost-service and it claims ghost-service, so the key-id↔application binding passes; the verifier knows that key id too, but its application registry does not list ghost-service, so no roles can be granted and the envelope resolves to anonymous. This isolates the unknown-app branch, which now runs after the binding check. */
     ghostKeys := map[string]HmacKey{"key-ghost": {Application: "ghost-service", Secret: []byte("ghost-shared-secret-value-00001-padded-to-the-hs256-minimum")}}
 
     signer := NewHmacEnvelopeSigner(hmacTestRuntime(), NewStaticHmacSecretProvider(HmacKeyRing{CurrentKeyId: "key-ghost", Keys: ghostKeys}), "ghost-service", HmacEnvelopeSignerConfig{})
@@ -212,16 +208,14 @@ func TestHmacTokenSource_UnknownApplicationIsAnonymous(t *testing.T) {
     }
 }
 
-/* negative control: the strongest internal-auth threat. An attacker who holds a valid shared secret (here the secret issued to key-current / wms-service) signs an envelope claiming a different, higher-privileged application. The signature verifies and the claimed application is registered, but the key id is bound to wms-service, not admin-service, so the verifier refuses it. This is what closes the cross-app privilege-escalation vector: a secret is only ever as privileged as the single application its key id is issued to. */
 func TestHmacTokenSource_CrossApplicationClaimWithValidKeyIsAnonymous(t *testing.T) {
-    /* the verifier knows both applications, so a rejection can only come from the key-id↔application binding, not from an unknown application */
     applications := NewStaticHmacApplicationRegistry(map[string][]string{
         "wms-service":   {"ROLE_SERVICE"},
         "admin-service": {"ROLE_ADMIN"},
     })
     source := NewHmacTokenSource(hmacTestSecrets(), applications, HmacTokenSourceConfig{NonceGuard: NewMemoryNonceGuard(MemoryNonceGuardConfig{})})
 
-    /* forge the envelope directly: the real signer refuses to sign for an application its key is not bound to, but an attacker would not use it. key-current's secret is bound to wms-service in the verifier. */
+    /* forged directly: the real signer refuses to sign for an application its key is not bound to */
     forged := craftHmacHeaderValue(t, "key-current", []byte("current-shared-secret-value-0001"), "admin-service", "GET", "/internal/ping", nil)
 
     token, _ := source.Resolve(testRuntime(), hmacRequest("GET", "/internal/ping", nil, DefaultHmacHeaderName, forged))
@@ -231,7 +225,6 @@ func TestHmacTokenSource_CrossApplicationClaimWithValidKeyIsAnonymous(t *testing
     }
 }
 
-/* craftHmacHeaderValue builds a fully valid signed envelope for an arbitrary key id and claimed application, bypassing the signer's own app-binding guard — it models an attacker who holds a secret and signs whatever application it likes. */
 func craftHmacHeaderValue(t *testing.T, keyId string, secret []byte, application string, method string, path string, body []byte) string {
     t.Helper()
 
@@ -243,7 +236,6 @@ func craftHmacHeaderValue(t *testing.T, keyId string, secret []byte, application
     return craftHmacHeaderValueWithNonce(t, keyId, secret, application, method, path, body, nonce)
 }
 
-/* craftHmacHeaderValueWithNonce is craftHmacHeaderValue with a caller-chosen nonce — it models an attacker who fully controls the envelope's nonce field (for example to spell another component's guard key). */
 func craftHmacHeaderValueWithNonce(t *testing.T, keyId string, secret []byte, application string, method string, path string, body []byte, nonce string) string {
     t.Helper()
 
@@ -275,20 +267,17 @@ func TestHmacTokenSource_EndpointMismatchIsAnonymous(t *testing.T) {
 
     source := hmacTestSource(NewMemoryNonceGuard(MemoryNonceGuardConfig{}))
 
-    /* same envelope replayed against a different path */
     wrongPath, _ := source.Resolve(testRuntime(), hmacRequest("POST", "/internal/refunds", nil, signer.HeaderName(), headerValue))
     if true == wrongPath.IsAuthenticated() {
         t.Fatal("expected a path mismatch to be rejected")
     }
 
-    /* and against a different method */
     wrongMethod, _ := source.Resolve(testRuntime(), hmacRequest("GET", "/internal/orders", nil, signer.HeaderName(), headerValue))
     if true == wrongMethod.IsAuthenticated() {
         t.Fatal("expected a method mismatch to be rejected")
     }
 }
 
-/* the signed path is bound to the spelling the router matched: an envelope signed for the two-segment resource "/internal/files/a/b" authenticated a request for "/internal/files/a%2Fb" — the one-segment resource "a/b" the router serves elsewhere — because the decoded URL.Path read both alike; the routed spelling keeps them apart, and a caller names the encoded separator as it sends it */
 func TestHmacTokenSource_EndpointIsBoundToTheSpellingTheRouterRoutes(t *testing.T) {
     signer := NewHmacEnvelopeSigner(hmacTestRuntime(), hmacTestSecrets(), "wms-service", HmacEnvelopeSignerConfig{})
     source := hmacTestSource(NewMemoryNonceGuard(MemoryNonceGuardConfig{}))
@@ -368,7 +357,6 @@ func TestHmacTokenSource_QueryIsSignedAndMatched(t *testing.T) {
     }
 }
 
-/* negative control: the query string is covered by the signature, so tampering with it (as the body and path already are) is rejected. */
 func TestHmacTokenSource_QueryTamperingIsAnonymous(t *testing.T) {
     signer := NewHmacEnvelopeSigner(hmacTestRuntime(), hmacTestSecrets(), "wms-service", HmacEnvelopeSignerConfig{})
     headerValue, _ := signer.Sign(newTestRuntime(), "GET", "/internal/orders?status=open", nil, SignOptions{})
@@ -381,7 +369,6 @@ func TestHmacTokenSource_QueryTamperingIsAnonymous(t *testing.T) {
     }
 }
 
-/* negative control: an envelope whose acceptance window has lapsed yields a residual lifetime the nonce guard refuses, so guardNonce rejects it as the envelope's own failure before reaching the guard. */
 func TestHmacTokenSource_RejectsEnvelopeTooCloseToExpiryForReplayGuard(t *testing.T) {
     source := hmacStrictTestSource(NewMemoryNonceGuard(MemoryNonceGuardConfig{}))
 
@@ -392,7 +379,6 @@ func TestHmacTokenSource_RejectsEnvelopeTooCloseToExpiryForReplayGuard(t *testin
     }
 }
 
-/* the HMAC replay guard records envelope nonces under an "hmac:"-namespaced key, so a caller-chosen nonce can never collide with the TOTP replay guard's "2fa:" key space when one shared NonceGuard backs both components. An attacker holding a valid key signs an envelope whose nonce spells the TOTP guard key of alice's next code and sends it to an HMAC endpoint; the genuine second factor that follows must still find that key unseen (unburned), so the namespacing is what closes the targeted two-factor lockout. */
 func TestHmacTokenSource_NonceIsNamespacedAwayFromTotpGuard(t *testing.T) {
     guard := NewMemoryNonceGuard(MemoryNonceGuardConfig{})
     source := NewHmacTokenSource(hmacTestSecrets(), hmacTestApplications(), HmacTokenSourceConfig{NonceGuard: guard})
@@ -400,7 +386,6 @@ func TestHmacTokenSource_NonceIsNamespacedAwayFromTotpGuard(t *testing.T) {
     /* the exact key the TOTP authenticator would record for alice's next accepted code */
     totpGuardKey := "2fa:alice:000000"
 
-    /* the attacker forges a fully valid envelope whose nonce spells that TOTP key (key-current is bound to wms-service in the verifier) */
     forged := craftHmacHeaderValueWithNonce(t, "key-current", []byte("current-shared-secret-value-0001"), "wms-service", "GET", "/internal/ping", nil, totpGuardKey)
 
     token, _ := source.Resolve(testRuntime(), hmacRequest("GET", "/internal/ping", nil, DefaultHmacHeaderName, forged))
@@ -408,7 +393,6 @@ func TestHmacTokenSource_NonceIsNamespacedAwayFromTotpGuard(t *testing.T) {
         t.Fatal("expected the crafted envelope to authenticate: it carries a valid key bound to the claimed application")
     }
 
-    /* the shared guard now holds the HMAC nonce; the TOTP authenticator's key of the same string must still be fresh */
     seen, rememberErr := guard.Remember(testRuntime(), totpGuardKey, bound.Of(time.Minute))
     if nil != rememberErr {
         t.Fatalf("remember: %v", rememberErr)
@@ -420,7 +404,6 @@ func TestHmacTokenSource_NonceIsNamespacedAwayFromTotpGuard(t *testing.T) {
 }
 
 func TestHmacTokenSource_AcceptsPreviousActiveKey(t *testing.T) {
-    /* a signer pinned to the previous key id still verifies while that key stays active (rotation overlap) */
     previousSigner := NewHmacEnvelopeSigner(hmacTestRuntime(), NewStaticHmacSecretProvider(HmacKeyRing{CurrentKeyId: "key-previous", Keys: map[string]HmacKey{"key-previous": {Application: "wms-service", Secret: []byte("previous-shared-secret-value-002")}}}), "wms-service", HmacEnvelopeSignerConfig{})
     headerValue, _ := previousSigner.Sign(newTestRuntime(), "GET", "/internal/ping", nil, SignOptions{})
 
@@ -479,7 +462,6 @@ func TestHmacTokenSource_RestoresBodyForDownstreamHandler(t *testing.T) {
     }
 }
 
-/* an envelope whose expiry sits beyond the configured MaxFutureExpiry is rejected, so a holder of a valid secret can not mint a far-future-expiry envelope that pins unbounded memory in an in-process nonce guard (which remembers each nonce until its envelope expires). */
 func TestHmacTokenSource_RejectsExpiryBeyondMaxFutureExpiry(t *testing.T) {
     signer := NewHmacEnvelopeSigner(hmacTestRuntime(), hmacTestSecrets(), "wms-service", HmacEnvelopeSignerConfig{Ttl: bound.Of(time.Hour)})
     headerValue, _ := signer.Sign(newTestRuntime(), "GET", "/internal/ping", nil, SignOptions{})
@@ -515,7 +497,6 @@ func TestHmacTokenSource_TheDefaultHorizonIsAnHour(t *testing.T) {
     }
 }
 
-/* with body-before-nonce verification an on-path party who replays the cleartext envelope header with a mutated body is rejected WITHOUT consuming the nonce, so the genuine request that follows still authenticates instead of failing as a replay. */
 func TestHmacTokenSource_BodyBeforeNonceSurvivesNonceBurn(t *testing.T) {
     signer := NewHmacEnvelopeSigner(hmacTestRuntime(), hmacTestSecrets(), "wms-service", HmacEnvelopeSignerConfig{})
     body := []byte(`{"sku":"X-1"}`)
@@ -537,7 +518,6 @@ func TestHmacTokenSource_BodyBeforeNonceSurvivesNonceBurn(t *testing.T) {
     }
 }
 
-/* contrast/negative control: under the default nonce-first order the mutated-body replay burns the nonce, so the genuine request that follows is denied as a replay — the denial the body-before-nonce toggle exists to close. */
 func TestHmacTokenSource_NonceFirstBurnDeniesGenuineRequest(t *testing.T) {
     signer := NewHmacEnvelopeSigner(hmacTestRuntime(), hmacTestSecrets(), "wms-service", HmacEnvelopeSignerConfig{})
     body := []byte(`{"sku":"X-1"}`)
@@ -562,7 +542,6 @@ func hmacRequestUnderRoute(method string, path string, body []byte, headerName s
     return request
 }
 
-/* a body-first order rejects the mutated replay without burning the nonce, so the genuine request still authenticates; nonce-first burns it */
 func hmacGenuineSurvivesAMutatedReplay(t *testing.T, sourceBodyFirst bool, hmacCheckOrder httpcontract.HmacCheckOrder) bool {
     t.Helper()
 
@@ -612,7 +591,6 @@ func TestHmacTokenSource_AnInheritedOrderIsTheSources(t *testing.T) {
     }
 }
 
-/* tamperHmacPayload flips a character in the signed payload, the middle base64 segment, so the HMAC over `header.payload` does not match the signature; flipping the signature's trailing character may decode to the same bytes. */
 func tamperHmacPayload(headerValue string) string {
     parts := strings.SplitN(headerValue, ".", 3)
 
@@ -626,7 +604,6 @@ func tamperHmacPayload(headerValue string) string {
     return parts[0] + "." + parts[1] + "." + parts[2]
 }
 
-/* hmacE2EFirewall wires a real HmacTokenSource into a compiled firewall + the kernel security resolution listener, exercising the exact path a product uses (not Resolve in isolation). */
 func hmacE2EFirewall(source securitycontract.TokenSource) *FirewallRegistry {
     firewall := NewCompiledFirewall(CompiledFirewallConfig{
         Name:               "internal",
@@ -664,7 +641,6 @@ func TestHmacTokenSource_EndToEndResolvesServiceWithActorThroughFirewall(t *test
     kernel := newTestKernel()
     RegisterKernelSecurityResolutionListener(kernel, hmacE2EFirewall(source))
 
-    /* first dispatch: the signed envelope resolves to the service principal carrying the actor */
     runtimeInstance := newTestRuntime()
     request := newSecurityTestRequest("GET", "/internal/ping", map[string]string{signer.HeaderName(): headerValue}, runtimeInstance)
 
@@ -687,7 +663,6 @@ func TestHmacTokenSource_EndToEndResolvesServiceWithActorThroughFirewall(t *test
         t.Fatalf("expected the originating actor to reach the security context, present=%v", present)
     }
 
-    /* second dispatch on a fresh runtime: the SAME envelope is a replay and must not authenticate */
     replayRuntime := newTestRuntime()
     replayRequest := newSecurityTestRequest("GET", "/internal/ping", map[string]string{signer.HeaderName(): headerValue}, replayRuntime)
 
@@ -705,7 +680,6 @@ func TestHmacTokenSource_EndToEndResolvesServiceWithActorThroughFirewall(t *test
     }
 }
 
-/* key ids carry no charset restriction, so the guard key must be injective: with a plain colon join, key "a" signing nonce "b:<n>" would pre-burn key "a:b"'s nonce "<n>" and force rejection of that key's legitimate requests */
 func TestHmacNonceGuardKey_ColonExtensionKeyIdsCannotCollide(t *testing.T) {
     if hmacNonceGuardKey("a", "b:nonce") == hmacNonceGuardKey("a:b", "nonce") {
         t.Fatalf("expected the guard keys of colon-extension key ids to differ")
@@ -724,7 +698,6 @@ func TestHmacNonceGuardKey_ColonExtensionKeyIdsCannotCollide(t *testing.T) {
     }
 }
 
-/* the pre-typ wire format: a header carrying alg and kid alone, signed correctly. The decoder must refuse it — requiring the envelope's own typ is the structural half of the domain separation from every other HS256 credential. */
 func TestHmacTokenSource_RejectsAnEnvelopeWithoutTheInternalAuthType(t *testing.T) {
     secret := []byte("current-shared-secret-value-0001")
     now := time.Now()
@@ -757,7 +730,6 @@ func TestHmacTokenSource_RejectsAnEnvelopeWithoutTheInternalAuthType(t *testing.
     }
 }
 
-/* failingNonceGuard models the shared guard's backend being down. */
 type failingNonceGuard struct {
     failure error
 }
@@ -843,7 +815,6 @@ func TestHmacTokenSource_ForgedEnvelopeStaysAtInfo(t *testing.T) {
     }
 }
 
-/* both query strings carry whatever the caller put in the url; only the parameter NAMES may reach the journal. */
 func TestHmacTokenSource_QueryMismatchContextCarriesNamesButNoValues(t *testing.T) {
     signer := NewHmacEnvelopeSigner(hmacTestRuntime(), hmacTestSecrets(), "wms-service", HmacEnvelopeSignerConfig{})
     headerValue, signErr := signer.Sign(newTestRuntime(), "GET", "/internal/ping?api_key=SIGNEDSECRETVALUE", nil, SignOptions{})
@@ -877,7 +848,7 @@ func TestHmacTokenSource_QueryMismatchContextCarriesNamesButNoValues(t *testing.
     }
 }
 
-/* the frozen instant sits decades from the real clock, so the envelope verifies ONLY if the signer stamps and the source measures on the injected clocks — and stops verifying when that clock alone advances past the window. */
+/* decades from the real clock, so the envelope verifies only on the injected clocks */
 func TestHmacTokenSource_TimeWindowRunsOnTheInjectedClock(t *testing.T) {
     frozen := clock.NewFrozenClock(time.Unix(1000, 0))
 
@@ -990,12 +961,11 @@ func TestHmacTokenSource_TheGuardRefusesTheEnvelopeAtTheEndOfTheLeeway(t *testin
     }
 }
 
-/* the expiry refusal and the nonce guard's ttl refusal cover overlapping windows — anything past the deadline trips both — so through Resolve either mutant is answered by its sibling and both read as an anonymous token. The two doors are asked here directly, each asserted on the message it writes, which is the only thing that says WHICH refused. The instant that separates them is the deadline itself: the time window deliberately admits it, and the nonce guard deliberately refuses it, because a nonce it cannot record is a nonce that can be replayed. */
 func TestHmacTokenSource_TheTimeWindowAdmitsTheDeadlineTheNonceGuardRefuses(t *testing.T) {
     now := time.Unix(1_700_000_000, 0)
     frozen := clock.NewFrozenClock(now)
 
-    /* the clock is injected because guardNonce measures the ttl against the SOURCE's clock, not against the instant handed to verifyTimeWindow: with the system clock the ttl lands hours out and the boundary this test is named for is never reached — the refusal comes from being far past expiry, which a window written one unit narrower produces just as well */
+    /* injected: guardNonce measures the ttl against the source's clock, not the instant verifyTimeWindow is handed */
     source := NewHmacTokenSource(hmacTestSecrets(), hmacTestApplications(), HmacTokenSourceConfig{
         NonceGuard:   NewMemoryNonceGuard(MemoryNonceGuardConfig{Clock: frozen}),
         Clock:        frozen,
@@ -1062,7 +1032,6 @@ func TestHmacTokenSource_AnEnvelopePastTheDeadlineIsRefusedByTheTimeWindow(t *te
     }
 }
 
-/* an envelope stamped in the future is refused: that is the half of the window that stops a caller minting credentials ahead of a rotation. */
 func TestHmacTokenSource_AnEnvelopeIssuedInTheFutureIsRefused(t *testing.T) {
     source := hmacTestSource(NewMemoryNonceGuard(MemoryNonceGuardConfig{}))
 
@@ -1083,7 +1052,6 @@ func TestHmacTokenSource_AnEnvelopeIssuedInTheFutureIsRefused(t *testing.T) {
     }
 }
 
-/* IssuedAt carries whole seconds truncated down, so a receiver two milliseconds behind a sender that signed one millisecond past a second boundary reads the claim as a second in its future: the claim's own resolution is tolerated, with a zero leeway */
 func TestHmacTokenSource_AMillisecondSkewAcrossASecondBoundaryIsAccepted(t *testing.T) {
     source := hmacStrictTestSource(NewMemoryNonceGuard(MemoryNonceGuardConfig{}))
 
@@ -1102,7 +1070,6 @@ func TestHmacTokenSource_AMillisecondSkewAcrossASecondBoundaryIsAccepted(t *test
     }
 }
 
-/* the tolerance is the claim's resolution and no more: an envelope whose second starts more than a second ahead of the receiver is still refused, with a zero leeway */
 func TestHmacTokenSource_AnEnvelopeIssuedMoreThanTheResolutionAheadIsRefused(t *testing.T) {
     source := hmacStrictTestSource(NewMemoryNonceGuard(MemoryNonceGuardConfig{}))
 
@@ -1119,7 +1086,7 @@ func TestHmacTokenSource_AnEnvelopeIssuedMoreThanTheResolutionAheadIsRefused(t *
     }
 }
 
-/* the tolerance is exactly one second: an envelope whose second starts one second ahead is accepted at the start of the receiver's second, and refused a millisecond before it */
+/* the tolerance is exactly one second: accepted at the start of the receiver's second, refused a millisecond before */
 func TestHmacTokenSource_TheIssuedAtToleranceIsExactlyOneSecond(t *testing.T) {
     source := hmacStrictTestSource(NewMemoryNonceGuard(MemoryNonceGuardConfig{}))
 
@@ -1140,7 +1107,6 @@ func TestHmacTokenSource_TheIssuedAtToleranceIsExactlyOneSecond(t *testing.T) {
     }
 }
 
-/* the tolerance widens the not-before check alone: an envelope a second past its expiry is still refused */
 func TestHmacTokenSource_TheIssuedAtToleranceDoesNotWidenTheExpiry(t *testing.T) {
     source := hmacStrictTestSource(NewMemoryNonceGuard(MemoryNonceGuardConfig{}))
 
@@ -1157,7 +1123,6 @@ func TestHmacTokenSource_TheIssuedAtToleranceDoesNotWidenTheExpiry(t *testing.T)
     }
 }
 
-/* the refusal fires only when the two queries differ byte for byte, so a reordered pair renders as two different strings in the journal */
 func TestHmacTokenSource_QueryMismatchByReorderingRendersTwoDifferentQueries(t *testing.T) {
     signer := NewHmacEnvelopeSigner(hmacTestRuntime(), hmacTestSecrets(), "wms-service", HmacEnvelopeSignerConfig{})
     headerValue, signErr := signer.Sign(newTestRuntime(), "GET", "/internal/ping?b=2&a=1", nil, SignOptions{})

@@ -47,7 +47,6 @@ func TestAccessTokenReleaseSubscriber_DeletesTheDeviceTokensOfTheDeletedAccountO
         }
     }
 
-    /* the account-wide epoch at the deletion's instant refuses the tokens no store holds — the bearer tokens — and is written for the deleted account alone */
     deletedEpoch, deletedErr := store.RevocationEpoch(runtimeInstance, "user-4", melodysecuritycontract.RevocationOptions{})
     if nil != deletedErr || false == deletedEpoch.Equal(deleted.Timestamp()) {
         t.Fatalf("expected the deleted account revoked up to the deletion's instant %v, got %v (%v)", deleted.Timestamp(), deletedEpoch, deletedErr)

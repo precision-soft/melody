@@ -197,7 +197,6 @@ func TestRegisterBackendService_RefusesAtTheCall(t *testing.T) {
     }
 }
 
-/* registerConnectionOver registers the connection service the rueidis module would, over a client the test holds */
 func registerConnectionOver(serviceContainer containercontract.Container, client rueidis.Client) {
     serviceContainer.MustRegister(
         melodyrueidis.ServiceConnection,

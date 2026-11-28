@@ -81,7 +81,6 @@ func (instance *closeSignalReader) Close() error {
     return nil
 }
 
-/* When a middleware outer to compression panics after next() returned, the kernel dropped the pipe-backed response without closing it, so the gzip goroutine blocked forever in pipe.Write and its deferred close of the original body reader (and its descriptor) never ran; tying the pipe reader to request-context cancellation must release it. */
 func TestCompressionMiddleware_ReleasesGzipGoroutineWhenRequestUnwinds(t *testing.T) {
     config := CompressionConfig{Level: 6, MinSize: bound.Of(16)}
     middleware := CompressionMiddleware(config)
@@ -119,7 +118,7 @@ func TestCompressionMiddleware_ReleasesGzipGoroutineWhenRequestUnwinds(t *testin
         t.Fatalf("expected the response to be compressed, got encoding %q", resultResponse.Headers().Get("Content-Encoding"))
     }
 
-    /* the pipe-backed body is deliberately never read, mirroring an outer-middleware panic that abandons the response; cancelling the request context must unblock the gzip goroutine so its deferred close of the original reader runs */
+    /* the pipe-backed body is deliberately never read, as an outer-middleware panic abandons the response */
     cancel()
 
     select {
@@ -285,7 +284,6 @@ func TestCompressionMiddleware_ALevelOutsideGzipsRangeIsRefused(t *testing.T) {
     }
 }
 
-/* serveCompressibleBodyThrough runs one gzip-accepting request with a large compressible body through the middleware built from config and answers the resulting response. */
 func serveCompressibleBodyThrough(t *testing.T, config CompressionConfig) httpcontract.Response {
     t.Helper()
 
@@ -539,7 +537,6 @@ func TestCompressionMiddleware_AMinSizeTheRuleRefusesIsRefused(t *testing.T) {
     assertPanicsNamingField(t, func() { CompressionMiddleware(CompressionConfig{MinSize: bound.UnlimitedCount()}) }, "the limit does not admit unlimited", "CompressionConfig.MinSize")
 }
 
-/* A response another layer already encoded is one of several encodings of its URL just as a gzip one is, so a shared cache that stored it under the URL alone would replay a brotli body to a client that never asked for brotli. The already-encoded response is exactly the negotiated case where the Vary header decides correctness. */
 func TestCompressionMiddleware_AddsVaryWhenResponseIsAlreadyEncoded(t *testing.T) {
     config := CompressionConfig{Level: 6, MinSize: bound.Of(10)}
     middleware := CompressionMiddleware(config)
@@ -580,7 +577,6 @@ func TestCompressionMiddleware_AddsVaryWhenResponseIsAlreadyEncoded(t *testing.T
     }
 }
 
-/* An excluded path is still negotiated against Accept-Encoding by every other layer in front of it, so the response must still tell a cache that the URL has more than one representation. */
 func TestCompressionMiddleware_AddsVaryOnExcludedPath(t *testing.T) {
     config := CompressionConfig{Level: 6, MinSize: bound.Of(10), ExcludedPaths: []string{"/assets"}}
     middleware := CompressionMiddleware(config)
@@ -619,7 +615,6 @@ func TestCompressionMiddleware_AddsVaryOnExcludedPath(t *testing.T) {
     }
 }
 
-/* the exclusion list is read against the spelling the router matched: "/assets%2Fapp.js" is the one-segment resource "assets/app.js", which an exclusion of "/assets/app" does not name — read decoded it did, so the list and the firewall matcher selected different requests */
 func TestCompressionMiddleware_ReadsTheExclusionListAgainstTheSpellingTheRouterRoutes(t *testing.T) {
     config := CompressionConfig{Level: 6, MinSize: bound.Of(10), ExcludedPaths: []string{"/assets/app"}}
     middleware := CompressionMiddleware(config)
@@ -657,7 +652,6 @@ func TestCompressionMiddleware_ReadsTheExclusionListAgainstTheSpellingTheRouterR
     }
 }
 
-/* An excluded content type is skipped because compressing it is pointless, not because the URL has a single representation; the header still has to be there. */
 func TestCompressionMiddleware_AddsVaryOnExcludedContentType(t *testing.T) {
     config := CompressionConfig{Level: 6, MinSize: bound.Of(10), ExcludedContentTypes: []string{"image/"}}
     middleware := CompressionMiddleware(config)
@@ -697,14 +691,12 @@ type stalledBodyReader struct {
     readCount int
 }
 
-/* Read answers the shape io.Reader permits but callers must not loop on: no bytes, no error, with room left in the destination. */
 func (instance *stalledBodyReader) Read(p []byte) (int, error) {
     instance.readCount++
 
     return 0, nil
 }
 
-/* A body reader answering (0, nil) forever pinned the peek loop, and with it a request goroutine, at full processor for the lifetime of the process. io.Reader makes tolerating a zero-byte read the caller's obligation, so the loop has to give up and let the request fail. */
 func TestCompressionMiddleware_StalledBodyReaderDoesNotSpin(t *testing.T) {
     config := CompressionConfig{Level: 6, MinSize: bound.Of(1024)}
     middleware := CompressionMiddleware(config)
@@ -769,7 +761,6 @@ func TestCompressionMiddleware_CopiesTheExclusionListsWhenBuilt(t *testing.T) {
     }
 }
 
-/* the shipped defaults are a policy, not an implementation detail: they decide what a deployment that configures nothing compresses. The media types are excluded because they are already compressed, and re-compressing them spends processor time to make the body larger. */
 func TestCompressionConfig_TheZeroValueExcludesTheAlreadyCompressedMediaTypes(t *testing.T) {
     settings := resolveCompressionConfig(CompressionConfig{})
 
@@ -830,7 +821,6 @@ func TestCompressionMiddleware_ANilContentTypeListIsTheDefaultFamilyAndAnEmptyOn
     }
 }
 
-/* the zero config is the default configuration wired through — a middleware that compressed nothing, or one that ignored the shipped minimum size, would read as working on every response large enough to compress. */
 func TestCompressionMiddleware_TheZeroConfigCompressesAboveTheDefaultMinimumSize(t *testing.T) {
     middleware := CompressionMiddleware(CompressionConfig{})
 
@@ -982,7 +972,7 @@ func TestCompressionMiddleware_AnOversizedMinSizeDoesNotAllocateItUpfront(t *tes
     var after runtime.MemStats
     runtime.ReadMemStats(&after)
 
-    /* TotalAlloc is monotonic and precise: the upfront allocation this guard forbids was the full GiB threshold, three orders of magnitude above this bound */
+    /* TotalAlloc is monotonic and precise: the forbidden upfront allocation was the full GiB threshold */
     if allocatedDelta := after.TotalAlloc - before.TotalAlloc; 100*1024*1024 < allocatedDelta {
         t.Fatalf("expected the oversized threshold not to be allocated upfront, allocated %d bytes", allocatedDelta)
     }
@@ -1034,7 +1024,6 @@ func TestCompressionMiddleware_TheGrowingPeekStillCompressesABodyAtTheThreshold(
     }
 }
 
-/* compressThroughStream runs one response through the streaming compressor the middleware uses and returns what a client would have decompressed */
 func compressThroughStream(t *testing.T, payload string, level int) string {
     t.Helper()
 
@@ -1063,7 +1052,6 @@ func compressThroughStream(t *testing.T, payload string, level int) string {
     return string(decompressed)
 }
 
-/* the writers are pooled, so the second response is served by the writer the first one finished with: the reset onto the new pipe is the whole of what separates them, and without it the second body is written into a pipe nobody is reading any more */
 func TestCompressionMiddleware_APooledGzipWriterServesTheNextResponseFromItsOwnBody(t *testing.T) {
     first := strings.Repeat("first-response-payload ", 64)
     second := strings.Repeat("second-response-payload ", 64)
@@ -1077,7 +1065,6 @@ func TestCompressionMiddleware_APooledGzipWriterServesTheNextResponseFromItsOwnB
     }
 }
 
-/* a writer goes back to the pool only once Close has returned: a writer returned while its response is still being written would be handed to another response in flight and the two bodies would interleave into one stream. Sixteen at once is what makes that observable, and each body is distinct so a crossed pair is named rather than merely detected. */
 func TestCompressionMiddleware_ConcurrentResponsesDoNotShareAPooledWriter(t *testing.T) {
     var waitGroup sync.WaitGroup
 
@@ -1098,7 +1085,6 @@ func TestCompressionMiddleware_ConcurrentResponsesDoNotShareAPooledWriter(t *tes
     waitGroup.Wait()
 }
 
-/* a level gzip refuses has no pool and must still be reported where it is made, rather than silently falling back to a default the caller never asked for */
 func TestCompressionMiddleware_AnInvalidCompressionLevelIsRefused(t *testing.T) {
     if _, acquireErr := acquireGzipWriter(io.Discard, highestGzipLevel+1); nil == acquireErr {
         t.Fatalf("expected a level above BestCompression to be refused")
@@ -1109,7 +1095,6 @@ func TestCompressionMiddleware_AnInvalidCompressionLevelIsRefused(t *testing.T) 
     }
 }
 
-/* a gzip body is shorter than the plain one the handler sized, so a Content-Length that survived the compression names bytes that are never sent: a client reading that many either truncates the frame or waits for a remainder that never arrives, and a shared cache stores the mismatch. The header describes what is actually on the wire, so compressing has to drop it. */
 func TestCompressionMiddleware_DropsTheContentLengthTheUncompressedBodyDeclared(t *testing.T) {
     config := CompressionConfig{Level: 6, MinSize: bound.Of(10)}
     middleware := CompressionMiddleware(config)
@@ -1169,7 +1154,6 @@ func TestCompressionMiddleware_DropsTheContentLengthTheUncompressedBodyDeclared(
     }
 }
 
-/* the short circuit takes the length the handler declared and passes the response through without buffering a byte of it, which is the whole reason it sits above the peek loop. For a body that really is that small the peek loop reaches the same verdict, so the two are indistinguishable there; the input that separates them is a header that under-declares, where the short circuit answers on the handler's word and the peek loop reads the body and compresses it. */
 func TestCompressionMiddleware_ADeclaredLengthBelowTheMinimumIsTakenWithoutReadingTheBody(t *testing.T) {
     config := CompressionConfig{Level: 6, MinSize: bound.Of(4096)}
     middleware := CompressionMiddleware(config)
@@ -1223,7 +1207,6 @@ func TestCompressionMiddleware_ADeclaredLengthBelowTheMinimumIsTakenWithoutReadi
     }
 }
 
-/* a Vary field is a comma-separated list, so the token this middleware needs can already be sitting beside another one that some other layer added. Comparing the whole field against the single token misses it and appends a second entry naming Accept-Encoding twice — a shared cache reads the repeated key as a different set of dimensions than the one the response was stored under. */
 func TestAddVaryAcceptEncoding_ReadsAnExistingFieldTokenByToken(t *testing.T) {
     headers := nethttp.Header{}
     headers.Set("Vary", "Origin, Accept-Encoding")
@@ -1239,7 +1222,6 @@ func TestAddVaryAcceptEncoding_ReadsAnExistingFieldTokenByToken(t *testing.T) {
     }
 }
 
-/* header field names are case-insensitive, so a layer that wrote the token in another case named the same dimension. The lowercase spelling is the one the comparison already carries, so it separates nothing; an upper-case one is recognised only if the case is folded, and nothing else in this package writes it. */
 func TestAddVaryAcceptEncoding_ReadsAnExistingTokenInAnyCase(t *testing.T) {
     headers := nethttp.Header{}
     headers.Set("Vary", "ACCEPT-ENCODING")
@@ -1278,7 +1260,6 @@ func (instance *panickingResponseBodyReader) Read(destination []byte) (int, erro
     panic("the application's body reader panicked")
 }
 
-/* the copy runs on a goroutine this middleware starts, where neither of the kernel's recovery defers nor net/http's own per-connection recovery stands: a panic raised by the application's body reader took the whole process down, every in-flight request with it. It is contained and reported through the pipe the reader of this response already fails on. */
 func TestStreamGzipCompressInto_ContainsAPanicFromTheResponseBodyReader(t *testing.T) {
     pipeReader, pipeWriter := io.Pipe()
     compressionDone := make(chan struct{})
@@ -1301,7 +1282,6 @@ func TestStreamGzipCompressInto_ContainsAPanicFromTheResponseBodyReader(t *testi
     }
 }
 
-/* listWithTailPast builds a header of one head member, filler members and one tail member; with more members than the split cap the tail is what the cap cuts off. */
 func listWithTailPast(head string, fillers int, tail string) string {
     members := []string{head}
     for index := 0; index < fillers; index++ {
@@ -1311,7 +1291,6 @@ func listWithTailPast(head string, fillers int, tail string) string {
     return strings.Join(append(members, tail), ", ")
 }
 
-/* the sister list one member short of the cap still honours the refusal */
 func TestAcceptsGzip_AHeaderCutAtTheCapIsReadAsUnparsable(t *testing.T) {
     if true == acceptsGzip(listWithTailPast("*;q=1", 63, "gzip;q=0")) {
         t.Fatalf("expected a header cut at the member cap to switch compression off")
@@ -1339,7 +1318,6 @@ func TestCompressionMiddleware_LevelZeroReadsAsTheDefaultLevel(t *testing.T) {
     }
 }
 
-/* stallingSourceReader serves a head and then blocks, as an upstream body that stopped sending does, until it is closed */
 type stallingSourceReader struct {
     head        []byte
     offset      atomic.Int64
@@ -1410,7 +1388,6 @@ func TestCompressionMiddleware_ClosesAStalledSourceOnceTheClientLeaves(t *testin
         t.Fatalf("expected the response to be compressed, got encoding %q", resultResponse.Headers().Get("Content-Encoding"))
     }
 
-    /* the client drains what gzip writes, so the goroutine reaches the source's stall instead of parking on the pipe */
     go func() {
         _, _ = io.Copy(io.Discard, resultResponse.BodyReader())
     }()
@@ -1438,7 +1415,6 @@ func (instance *closePanickingBodyReader) Close() error {
     panic("the application's body reader panicked in Close")
 }
 
-/* a body shorter than the minimum size is closed on the request goroutine, where a panic in the application's Close reaches the kernel's recovery as a handler panic, not swallowed by the quiet close of the gzip goroutine. */
 func TestCompressionMiddleware_AnApplicationCloseThatPanicsOnTheRequestGoroutineReachesTheKernel(t *testing.T) {
     config := CompressionConfig{Level: 6, MinSize: bound.Of(8192)}
     middleware := CompressionMiddleware(config)
@@ -1468,7 +1444,6 @@ func TestCompressionMiddleware_AnApplicationCloseThatPanicsOnTheRequestGoroutine
     _, _ = handler(nil, httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(request))
 }
 
-/* the application's Close runs on the gzip goroutine and on the unwind watcher, where a panic had no handler but the process: it is contained by the quiet close, so the response is read to its end and the process lives. */
 func TestCompressionMiddleware_AnApplicationCloseThatPanicsOnTheGzipGoroutineIsContained(t *testing.T) {
     config := CompressionConfig{Level: 6, MinSize: bound.Of(10)}
     middleware := CompressionMiddleware(config)
@@ -1499,7 +1474,6 @@ func TestCompressionMiddleware_AnApplicationCloseThatPanicsOnTheGzipGoroutineIsC
     }
 }
 
-/* a handler answering a typed nil reaches the kernel as nil, which answers it with its empty 204; the middleware never dereferences it */
 func TestCompressionMiddleware_HandsATypedNilResponseOnAsNil(t *testing.T) {
     middleware := CompressionMiddleware(CompressionConfig{Level: 6, MinSize: bound.Of(10)})
 
@@ -1528,7 +1502,6 @@ func TestCompressionMiddleware_HandsATypedNilResponseOnAsNil(t *testing.T) {
     }
 }
 
-/* net/http sniffs the type of an identity body that carries none but never of an encoded one, so the middleware sniffs it from the peeked bytes before compressing, and a client that negotiates gzip receives the type a client that does not would */
 func TestCompressionMiddleware_SniffsTheTypeOfAnUntypedBodyBeforeCompressing(t *testing.T) {
     body := "<html><body>" + strings.Repeat("melody ", 200) + "</body></html>"
 
@@ -1564,7 +1537,6 @@ func TestCompressionMiddleware_SniffsTheTypeOfAnUntypedBodyBeforeCompressing(t *
     }
 }
 
-/* a sniffed type the configuration excludes goes out uncompressed, whole, with the type set, and the application's reader is still closed */
 func TestCompressionMiddleware_ASniffedExcludedTypeGoesOutUncompressedAndWhole(t *testing.T) {
     body := "\x89PNG\r\n\x1a\n" + strings.Repeat("x", 2048)
     source := newCloseSignalReader(body)
@@ -1619,7 +1591,6 @@ func TestCompressionMiddleware_ASniffedExcludedTypeGoesOutUncompressedAndWhole(t
     }
 }
 
-/* the sniff reads the 512 bytes net/http reads for an identity body even when MinSize is smaller, so both representations of a page carry the same type */
 func TestCompressionMiddleware_SniffsFromTheBytesNetHttpReadsUnderASmallMinSize(t *testing.T) {
     body := "<!DOCTYPE html>" + strings.Repeat("melody ", 100)
 
@@ -1661,7 +1632,6 @@ func TestCompressionMiddleware_SniffsFromTheBytesNetHttpReadsUnderASmallMinSize(
     }
 }
 
-/* the longer sniff read does not raise the threshold: an untyped body over MinSize and under 512 bytes is still compressed */
 func TestCompressionMiddleware_TheSniffReadKeepsTheMinSizeThreshold(t *testing.T) {
     body := strings.Repeat("melody ", 20)
 

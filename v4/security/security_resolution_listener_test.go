@@ -582,7 +582,6 @@ func TestSecurityResolutionListener_MarksTheRecordItWrites(t *testing.T) {
     }
 }
 
-/* the twin above hands back an UNWRAPPED nil, which a bare comparison catches just as well — so the guard this listener carries, which reads the interface rather than the word nil, has no test of its own. A token source is the application's code, and a nil pointer of its own token type arrives here as a non-nil interface: read as live, it is published into the security context every voter then reads, and the first Roles() call dereferences it. */
 func TestSecurityResolutionListener_WhenTokenSourceReturnsATypedNilToken_SetsAnonymousToken(t *testing.T) {
     kernel := newTestKernel()
     runtimeInstance := newTestRuntime()
@@ -619,7 +618,6 @@ func TestSecurityResolutionListener_WhenTokenSourceReturnsATypedNilToken_SetsAno
         t.Fatalf("expected security context to be set on runtime")
     }
 
-    /* the anonymous token answers Roles without panicking, which the typed nil would not: this is the assertion the bare-nil twin cannot make */
     if 0 != len(securityContext.Token().Roles()) {
         t.Fatalf("expected the anonymous token to carry no roles")
     }
@@ -629,7 +627,6 @@ func TestSecurityResolutionListener_WhenTokenSourceReturnsATypedNilToken_SetsAno
     }
 }
 
-/* "GET http://host" reaches the kernel with an empty path: the firewall on "/" resolves it and its token source runs, where the path read as nothing selected no firewall and the request went through with no security context */
 func TestSecurityResolutionListener_AnAbsoluteFormTargetIsResolvedByTheRootFirewall(t *testing.T) {
     kernel := newTestKernel()
     runtimeInstance := newTestRuntime()

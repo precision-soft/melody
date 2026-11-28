@@ -70,7 +70,6 @@ func boundTokenStoreDoorNames(t *testing.T, contractType reflect.Type) map[strin
 func TestBoundTokenStore_ForwardsEveryRuntimeDoorOfTheContract(t *testing.T) {
     composedDoors := boundTokenStoreDoorNames(t, reflect.TypeFor[securitycontract.EpochRevocableTokenStore]())
 
-    /* a door added to one half only must still be seen by the composed contract the view binds */
     unionDoors := map[string]bool{}
     for _, halfType := range []reflect.Type{reflect.TypeFor[securitycontract.RevocableTokenStore](), reflect.TypeFor[securitycontract.RevocationEpochStore]()} {
         for doorName := range boundTokenStoreDoorNames(t, halfType) {
@@ -221,7 +220,6 @@ func TestBoundTokenStore_EveryMethodReachesItsDoorWithTheBoundRuntimeAndAnswersW
         }
     }
 
-    /* a count removed before a failure is answered beside the error */
     if 3 != deletedCount || boundTokenStoreRecordedErr != deleteByUserErr {
         t.Fatalf("expected DeleteByUser to answer 3 beside the store's error, got %d %v", deletedCount, deleteByUserErr)
     }
@@ -294,7 +292,6 @@ func TestTokenStoreFromRuntime_BindsTheStoreRegisteredUnderTheApplicationsName(t
     secondStore := NewInMemoryTokenStore(InMemoryTokenStoreConfig{})
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
-    /* the narrower registration a redis module makes, resolved as the composed contract */
     if registerErr := serviceContainer.Register(
         "app.first.token_store",
         func(resolver containercontract.Resolver) (securitycontract.RevocableTokenStore, error) {
@@ -350,7 +347,6 @@ func TestTokenStoreFromRuntime_BindsTheStoreRegisteredUnderTheApplicationsName(t
         t.Fatalf("register: %v", registerErr)
     }
 
-    /* a store without the epoch half is called through its contract; the view refuses it at the bind */
     revocableOnlyPanicked := func() (recovered bool) {
         defer func() {
             recovered = nil != recover()

@@ -14,7 +14,6 @@ import (
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
-/* fixedRevocationEpochStore answers one revocation instant for every account */
 type fixedRevocationEpochStore struct {
     epoch time.Time
 }
@@ -49,7 +48,6 @@ func signedTestJwt(t *testing.T, secret []byte, claims map[string]any) string {
     return signingInput + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
-/* a revoke-all drawn at an instant refuses a token issued up to two seconds after it, the skew the replicas' clocks may differ by, and accepts one issued past that */
 func TestExampleJwtConfig_RefusesATokenIssuedInsideTheSkewAfterARevocation(t *testing.T) {
     revokedAt := time.Unix(1700000000, 0).UTC()
 

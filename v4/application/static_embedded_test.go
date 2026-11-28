@@ -68,7 +68,6 @@ func newStaticExclusionTestEmbeddedFiles() fs.FS {
 }
 
 func TestNewStaticFileServerConfig_ExcludedPrefixReachesTheMiddlewareRegisteredWithUse(t *testing.T) {
-    /* the built-in file server is the outermost middleware, so a path it answers is a path the application's own chain never sees. The exclusion is the only channel this instance has, because it is built inside the application rather than registered by it. */
     configuration := newStaticExclusionTestConfiguration(t, map[string]string{
         config.StaticExcludedPathsKey: "/private",
         config.StaticCacheDisabledKey: "true",
@@ -187,7 +186,6 @@ func (instance *staticTestTypedNilFs) Open(name string) (fs.File, error) {
     return nil, fs.ErrNotExist
 }
 
-/* the assertion is on the refusal's own message, because a typed nil that passes the guard still panics downstream as an anonymous nil dereference — a test satisfied by any panic could not tell the named refusal from the crash it exists to replace */
 func TestNewStaticFileServerConfig_RefusesATypedNilFs(t *testing.T) {
     configuration := newStaticExclusionTestConfiguration(t, map[string]string{})
 

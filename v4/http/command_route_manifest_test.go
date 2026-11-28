@@ -93,7 +93,6 @@ func runRouteManifestCommand(
     return output.String(), runErr
 }
 
-/* the documented invocation is relative; anchored at whatever directory the process happened to start in, the manifest landed in a different tree per launcher while the command reported success */
 func TestRouteManifestCommand_AnchorsARelativeOutAtTheProjectDirectory(t *testing.T) {
     projectDirectory := t.TempDir()
     runtimeInstance := newManifestCommandRuntime(t, projectDirectory)
@@ -146,7 +145,6 @@ func TestRouteManifestCommand_RefusesToOverwriteAForeignFile(t *testing.T) {
     }
 }
 
-/* an unrecognised zone matches nothing, so writing would put an empty manifest over the good one and report success, and the frontend would fail to resolve every route it asks for with the build green; the probe seeds a good manifest and misspells the zone */
 func TestRouteManifestCommand_RefusesAZoneThatIsNotDeclared(t *testing.T) {
     projectDirectory := t.TempDir()
     runtimeInstance := newManifestCommandRuntime(t, projectDirectory)
@@ -194,7 +192,6 @@ func TestRouteManifestCommand_ReadsAZoneMadeOnlyOfSpaceTheWayTheDoorDoes(t *test
         t.Fatalf("the previous manifest was replaced: %q", string(survived))
     }
 
-    /* the declared zone surrounded by space stays the zone it names, which is what the trim is for */
     if _, spacedErr := runRouteManifestCommand(t, runtimeInstance, "--zone", " public ", "--out", "routes.json"); nil != spacedErr {
         t.Fatalf("expected a declared zone surrounded by space to be that zone, got: %v", spacedErr)
     }
@@ -203,7 +200,6 @@ func TestRouteManifestCommand_ReadsAZoneMadeOnlyOfSpaceTheWayTheDoorDoes(t *test
 func TestRouteManifestCommand_PrintsTheManifestToTheCommandWriterWhenOutIsEmpty(t *testing.T) {
     runtimeInstance := newManifestCommandRuntime(t, t.TempDir())
 
-    /* a raw print escapes the writer the cli layer redirects, and in json mode it splices the document into the machine-readable stream from the first byte */
     output, runErr := runRouteManifestCommand(t, runtimeInstance)
     if nil != runErr {
         t.Fatalf("run: %v", runErr)

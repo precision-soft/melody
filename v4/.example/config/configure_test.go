@@ -75,7 +75,6 @@ func TestRegisterHubShutdown_RegistersTheHubsShutdownAloneAndItClosesTheBackplan
     }
 }
 
-/* blockingBackplane holds a publish inside until released, the shape of a backplane whose network round trip outlives the shutdown */
 type blockingBackplane struct {
     entered  chan struct{}
     released chan struct{}
@@ -95,7 +94,6 @@ func (instance *blockingBackplane) CloseWithContext(closeContext context.Context
     return nil
 }
 
-/* the hook closes the hub under the shutdown's context: a publish still inside the backplane when the budget is gone does not hold the hook, the hub hands the backplane to its own closer and answers the error, which the hook journals at warning */
 func TestRegisterHubShutdown_ReturnsWithinTheShutdownsBudgetWhileAPublishIsInside(t *testing.T) {
     journal := &bytes.Buffer{}
     previous := hubShutdownWarningLogger
@@ -181,7 +179,6 @@ func TestMigrateModuleConfig_PinsTheBaseFamilyToTheCatalogueAndTheArchiveToItsCo
     }
 }
 
-/* the hook closes the hub the provider built: before the provider ran there is none, and the hook returns without one */
 func TestRegisterHubShutdown_ClosesNothingBeforeTheProviderBuiltTheHub(t *testing.T) {
     moduleInstance := &Module{}
 

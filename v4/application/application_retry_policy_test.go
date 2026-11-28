@@ -19,7 +19,6 @@ func retryPolicyServiceWarningsOf(applicationInstance *Application) []internal.B
     return warnings
 }
 
-/* the fourth major reads the consume command's policy from ApplicationConfig.MessageBus.Retry alone, so a policy a deployment still registers under the third major's name is named at boot rather than ignored in silence */
 func TestBoot_ARetryPolicyRegisteredUnderTheThirdMajorsNameIsNamedInABootWarning(t *testing.T) {
     applicationInstance := newEnvironmentKeyBootApplication(t, nil)
     applicationInstance.RegisterService("service.messagebus.retry_policy", func(resolver containercontract.Resolver) (messagebus.RetryPolicy, error) {

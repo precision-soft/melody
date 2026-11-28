@@ -22,22 +22,19 @@ import (
     melodysecurity "github.com/precision-soft/melody/v4/security"
 )
 
-/* the budget is per client, as its own comment and the shipped .env promise; read from the peer address it would be per proxy, so one script could spend the hour of everyone behind the balancer, and this listener runs ahead of authentication, so what it spends is everyone's ability to log in. */
 func TestRequestBudgetConfig_ChargesTheForwardedClientRatherThanTheProxy(t *testing.T) {
     if key := resolvedBudgetKey(t, []string{balancerAddress}, balancerAddress, "203.0.113.7"); "203.0.113.7" != key {
         t.Fatalf("expected the forwarded client to be charged, got %q", key)
     }
 }
 
-/* the sister case: the header is only believed from a peer this example trusts, so a client that sends one
-   itself cannot pick which budget it spends. */
 func TestRequestBudgetConfig_IgnoresAForwardedHeaderFromAnUntrustedPeer(t *testing.T) {
     if key := resolvedBudgetKey(t, []string{balancerAddress}, "198.51.100.4", "203.0.113.7"); "198.51.100.4" != key {
         t.Fatalf("expected a header from an untrusted peer to be ignored, got %q", key)
     }
 }
 
-/* every host client of the compose stack enters through the docker bridge gateway, which nginx appends to the chain: with the whole private space trusted, the gateway would read as one more hop and the key would fall back onto the balancer, so the whole host population would share one budget. Trusting the balancer alone, the gateway is the client the balancer attested. */
+/* every host client enters through the docker bridge gateway, which nginx appends to the chain */
 func TestRequestBudgetConfig_ReadsTheDockerGatewayAsTheClientRatherThanAsAHop(t *testing.T) {
     if key := resolvedBudgetKey(t, []string{balancerAddress}, balancerAddress, "172.18.0.1"); "172.18.0.1" != key {
         t.Fatalf("expected the gateway the balancer forwarded to be the client, got %q", key)
@@ -48,21 +45,18 @@ func TestRequestBudgetConfig_ReadsTheDockerGatewayAsTheClientRatherThanAsAHop(t 
     }
 }
 
-/* a neighbouring container of the deployment is not a proxy: with the whole private space trusted, any process beside the example could name its own key per request, a fresh budget each time or a victim's, on the listener that refuses at the door. */
 func TestRequestBudgetConfig_DoesNotBelieveANeighbouringContainer(t *testing.T) {
     if key := resolvedBudgetKey(t, []string{balancerAddress}, "172.18.0.11", "203.0.113.7"); "172.18.0.11" != key {
         t.Fatalf("expected a header from a neighbouring container to be ignored, got %q", key)
     }
 }
 
-/* an empty list trusts nobody: the budget keys on the peer even when a header is present, which is the closed side of the switch. */
 func TestRequestBudgetConfig_AnEmptyListChargesThePeer(t *testing.T) {
     if key := resolvedBudgetKey(t, nil, balancerAddress, "203.0.113.7"); balancerAddress != key {
         t.Fatalf("expected an empty trusted list to charge the peer, got %q", key)
     }
 }
 
-/* the release of a second factor with its account is a subscriber the composition root installs; its own tests pin what it does once installed, and this one pins that it is installed. Read off a real dispatcher: with a database, one more owner on the deletion event, and it is this one. */
 func TestRegisterSubscribers_InstallsTheTwoFactorEnrollmentReleaseWhenThereIsADatabase(t *testing.T) {
     ownersOnDeletion := func(moduleInstance *Module) []string {
         eventDispatcher := melodyevent.NewEventDispatcher(melodyevent.EventDispatcherConfig{Clock: melodyclock.NewSystemClock()})
@@ -104,7 +98,6 @@ func TestRegisterSubscribers_InstallsTheTwoFactorEnrollmentReleaseWhenThereIsADa
     }
 }
 
-/* the composition root registers the cache subscriber before the release, so the order the two run in when nothing fails is set by priority: read off the dispatcher the root fills, on the deletion event the release outranks the cache subscriber's listener, whatever order they are registered in. */
 func TestRegisterSubscribers_TheEnrollmentReleaseOutranksTheCacheClearOnUserDeleted(t *testing.T) {
     moduleInstance := moduleWithEnvironment(t, map[string]string{})
     moduleInstance.catalogueWired = true
@@ -137,7 +130,6 @@ func TestRegisterSubscribers_TheEnrollmentReleaseOutranksTheCacheClearOnUserDele
     }
 }
 
-/* the composition root declares the deletion's cleanup tags, and the three listeners of the deletion carry one of them, so each runs after a failure ahead of it; read off the dispatcher the root fills */
 func TestRegisterSubscribers_DeclaresTheDeletionsCleanupTags(t *testing.T) {
     moduleInstance := moduleWithEnvironment(t, map[string]string{})
     moduleInstance.catalogueWired = true
@@ -170,8 +162,6 @@ func TestRegisterSubscribers_DeclaresTheDeletionsCleanupTags(t *testing.T) {
     t.Fatalf("expected %s among the registered events", event.EventUserDeleted)
 }
 
-/* the budget is the switch's number of requests per HOUR: the limiter admits exactly that many from one
-   client inside the window and refuses the next */
 func TestRequestBudgetLimiter_AdmitsTheBudgetPerHourAndRefusesTheNext(t *testing.T) {
     if time.Hour != requestBudgetWindow {
         t.Fatalf("expected the budget counted per hour, got %s", requestBudgetWindow)
@@ -217,7 +207,6 @@ func TestRegisterRateLimitRequestListener_TheArmedDoorRefusesTheRequestPastTheSw
     }
 }
 
-/* the switch arms the door on a positive integer, spaces around it tolerated, and refuses any other value by name rather than reading it as unset, since a swallowed typo would disarm the global budget with no signal anywhere */
 func TestRegisterRateLimitRequestListener_ArmsOnAPositiveBudgetAndRefusesAnyOtherValueByName(t *testing.T) {
     kernelRequestListeners := func(moduleInstance *Module) int {
         eventDispatcher := melodyevent.NewEventDispatcher(melodyevent.EventDispatcherConfig{Clock: melodyclock.NewSystemClock()})

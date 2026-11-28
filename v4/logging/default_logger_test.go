@@ -10,7 +10,6 @@ import (
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
 
-/* captureStandardLog redirects the standard log package — the writer this logger prints through — for the duration of the callback and returns everything it wrote. The default logger holds no writer of its own, so the process-wide destination is the only place its records can be read back from. */
 func captureStandardLog(callback func()) string {
     buffer := &bytes.Buffer{}
 
@@ -139,7 +138,6 @@ func TestNewDefaultLogger_CopiesTheLabelsTheCallerKeeps(t *testing.T) {
 
     logger := NewDefaultLogger(DefaultLoggerConfig{Labels: labels})
 
-    /* the caller mutates the map it still holds, exactly what the copy exists to survive */
     labels[loggingcontract.LevelError] = loggingcontract.LevelLabelFromString("MUTATED")
 
     written := captureStandardLog(func() {
@@ -203,7 +201,6 @@ func TestNewDefaultLogger_RefusesACauseChainDepthOutsideItsRuleByName(t *testing
     }
 }
 
-/* one record stays one line: an unescaped line break would end the record and start a fully-formed fake one at whatever level the payload names, and a line-oriented shipper would ingest it as genuine. */
 func TestDefaultLogger_KeepsOneRecordOneLine(t *testing.T) {
     logger := NewDefaultLogger(DefaultLoggerConfig{})
 

@@ -9,7 +9,6 @@ import (
     "github.com/precision-soft/melody/v4/serializer"
 )
 
-/* the framework's general serializer has the cache serializer's signature, so it serves as one with no adapter */
 var _ cachecontract.Serializer = serializer.NewJsonSerializer()
 
 type jsonSerializerTestRecord struct {

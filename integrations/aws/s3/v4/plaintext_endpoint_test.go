@@ -20,7 +20,6 @@ import (
     storagecontract "github.com/precision-soft/melody/v4/storage/contract"
 )
 
-/* warningCapturingLogger keeps the message and the context of every warning */
 type warningCapturingLogger struct {
     mutex    sync.Mutex
     warnings []loggingcontract.Context
@@ -65,7 +64,6 @@ func newRuntimeWithLogger(logger loggingcontract.Logger) containercontract.Runti
     return newRuntimeOver(logger, nil)
 }
 
-/* a nil logger registers none, a nil configuration none, so each half of what the first-use writer reads can be left out */
 func newRuntimeOver(logger loggingcontract.Logger, configuration configcontract.Configuration) containercontract.Runtime {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
@@ -285,7 +283,6 @@ func TestNewStorage_TheFirstUseHonoursTheIgnoreKeyAndTheModulesRecord(t *testing
     }
 }
 
-/* the runtime's context is done before the door is called, so the HEAD never leaves for the endpoint; the warning is written first all the same */
 func TestStorage_StatWritesThePlaintextEndpointWarning(t *testing.T) {
     forgetJudgedPlaintextEndpoints(t)
 

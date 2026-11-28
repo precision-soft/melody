@@ -59,7 +59,6 @@ func TestEncryptedDeterministicStringFor_RedactsString(t *testing.T) {
     }
 }
 
-/* the searchable compartment-bound column carries the same marker, pinned here for the reason written on its EncryptedStringFor sibling. */
 var _ EncryptedColumn = EncryptedDeterministicStringFor[crmCipherReference]("")
 
 func TestEncryptedDeterministicStringFor_UnmarshalJSONRefusesTheRedactionPlaceholder(t *testing.T) {
@@ -94,7 +93,6 @@ func TestEncryptedDeterministicStringFor_UnmarshalJSONDecodesAPlaintextString(t 
     }
 }
 
-/* the generic instantiation cannot be asserted in the source file — see the sibling assertion on EncryptedStringFor */
 var _ json.Unmarshaler = (*EncryptedDeterministicStringFor[crmCipherReference])(nil)
 
 func TestEncryptedDeterministicStringFor_FormatRedactsNumericVerbs(t *testing.T) {
@@ -110,7 +108,6 @@ func TestEncryptedDeterministicStringFor_FormatRedactsNumericVerbs(t *testing.T)
     }
 }
 
-/* a column an attacker can write and later read back must not decrypt a seal handed to it as data: the seal of another row's secret, stored through this column, is read back as that seal and never as the secret */
 func TestEncryptedDeterministicStringFor_ASealWrittenAsDataIsSealedAndReadBackAsTheSeal(t *testing.T) {
     useCompartmentCiphers(t)
 
@@ -143,7 +140,6 @@ func TestEncryptedDeterministicStringFor_ASealWrittenAsDataIsSealedAndReadBackAs
     }
 }
 
-/* the deterministic column refuses an interface marker the same way */
 func TestEncryptedDeterministicStringFor_AnInterfaceMarkerIsRefusedWithoutAPanic(t *testing.T) {
     defer func() {
         if recovered := recover(); nil != recovered {

@@ -124,7 +124,6 @@ func TestLinkTtlOf_RefusesASecondsValueThatWrapsPastTheBound(t *testing.T) {
     }
 }
 
-/* the object store refuses a key with a ".." segment by name, so every door answers it as the client's error, before the store is asked */
 func TestHandlers_AnswerAKeyWithAParentSegmentWith400BeforeTheStore(t *testing.T) {
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     runtimeInstance := melodyruntime.NewRequest(context.Background(), containerInstance.NewScope())
@@ -142,7 +141,6 @@ func TestHandlers_AnswerAKeyWithAParentSegmentWith400BeforeTheStore(t *testing.T
     }
 }
 
-/* objectServer answers the n-th HEAD with the n-th of headStatuses, the last one repeated, and a GET with getStatus, serving "stored" on a 200 GET: a download is the object's one stat, a HEAD, then its GET */
 func objectServer(t *testing.T, headStatuses []int, getStatus int) *melodyawss3.Storage {
     t.Helper()
 
@@ -159,7 +157,6 @@ func objectServerServing(t *testing.T, headStatuses []int, getStatus int, body [
     return storage
 }
 
-/* objectRequestCount is what an object server was asked, by method */
 type objectRequestCount struct {
     mutex sync.Mutex
     heads int
@@ -179,7 +176,6 @@ func objectServerCounting(t *testing.T, headStatuses []int, getStatus int, body 
     count := &objectRequestCount{}
 
     server := httptest.NewServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, httpRequest *nethttp.Request) {
-        /* the bucket the storage asks after an object's 404 exists, and is not counted among the object's requests */
         if "/melody-test" == strings.TrimSuffix(httpRequest.URL.Path, "/") {
             writer.WriteHeader(nethttp.StatusOK)
 
@@ -215,7 +211,6 @@ func objectServerCounting(t *testing.T, headStatuses []int, getStatus int, body 
     return melodyawss3.NewStorage(client, "melody-test", melodyawss3.StorageConfig{}), count
 }
 
-/* errorRecordingLogger keeps the server-error records the presenter filed through the runtime's logger; the presenter's fallback records of a container without a serializer are not the door's */
 type errorRecordingLogger struct {
     melodyloggingcontract.Logger
     mutex   sync.Mutex
@@ -272,7 +267,6 @@ func answerOf(t *testing.T, handler melodyhttpcontract.Handler, target string) (
     return response.StatusCode(), logger.recorded()
 }
 
-/* lastGetBody is the body the last getObject answered */
 var lastGetBody []byte
 
 func TestGetHandler_AnswersAStoreRefusalWith500AndJournalsIt(t *testing.T) {
@@ -394,7 +388,6 @@ func TestLinkHandler_AnswersAStoreRefusalWith500AndJournalsIt(t *testing.T) {
     }
 }
 
-/* lazyStorageOf publishes the storage under the application storage's name and answers the handle the routes are handed */
 func lazyStorageOf(t *testing.T, storage storagecontract.Storage) *melodycontainer.LazyService[storagecontract.Storage] {
     t.Helper()
 
@@ -407,7 +400,6 @@ func lazyStorageOf(t *testing.T, storage storagecontract.Storage) *melodycontain
     return melodycontainer.Lazy[storagecontract.Storage](containerInstance, melodystorage.ServiceStorage)
 }
 
-/* the storage is resolved at each request: one that cannot be built answers 503, and the next request builds it again, so a bucket check that failed at boot heals at the next use */
 func TestGetHandler_ResolvesTheStorageAtEachRequestAndAnswers503WhileItCannotBeBuilt(t *testing.T) {
     built := objectServerServing(t, []int{nethttp.StatusOK}, nethttp.StatusOK, []byte("stored"))
 

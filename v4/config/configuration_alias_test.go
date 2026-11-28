@@ -24,7 +24,6 @@ func TestFrameworkEnvironmentKeys_EachKeyFeedsOneKernelParameter(t *testing.T) {
     }
 }
 
-/* a keyless kernel parameter answers its own name */
 func frameworkParameter(key string) string {
     if declared, isFrameworkKey := frameworkEnvironmentKeyIndex[key]; true == isFrameworkKey {
         return declared.Parameter

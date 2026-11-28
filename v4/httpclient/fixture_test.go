@@ -23,7 +23,6 @@ func testRuntimeUnder(ctx context.Context) containercontract.Runtime {
     return runtime.NewRun(ctx, container.NewContainer(container.ContainerConfig{}).NewScope())
 }
 
-/* contextlessTestRuntime carries no context, which no constructor of the runtime package builds */
 type contextlessTestRuntime struct {
     containercontract.Runtime
 }
@@ -87,7 +86,6 @@ func assertTimedOut(t *testing.T, err error) {
     }
 }
 
-/* recordingRoundTripper keeps every request the chain hands it before passing it on */
 type recordingRoundTripper struct {
     next     http.RoundTripper
     requests []*http.Request

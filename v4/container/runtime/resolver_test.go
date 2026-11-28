@@ -60,7 +60,7 @@ func TestFromRuntime_UsesScopeWhenPresentAndUsesContainerWhenScopeDoesNotHaveIns
     }
 }
 
-/* the name is registered without a type on purpose: a name registered under a type refuses an unassignable override at the install line now, so the mismatch a scope override can still carry lives on a name with no registered types — and the typed read must surface it rather than skip the bad override and answer the container's value */
+/* registered without a type on purpose: a typed name already refuses the unassignable override at install */
 func TestFromRuntime_DoesNotMaskScopeOverrideTypeMismatch(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
@@ -111,7 +111,6 @@ func TestMustFromRuntime_PanicsWhenMissingEverywhere(t *testing.T) {
     }, "service is not registered")
 }
 
-/* typedNilScopeRuntime yields a typed-nil scope, the shape a custom Runtime implementation can legally produce */
 type typedNilScopeRuntime struct{}
 
 func (instance *typedNilScopeRuntime) Context() context.Context {
@@ -126,7 +125,6 @@ func (instance *typedNilScopeRuntime) Kind() containercontract.Kind {
     return containercontract.KindRun
 }
 
-/* a typed-nil scope handed back as the resolver would dereference its nil receiver inside the container package; the runtime resolves through its scope only, so there is no container to fall back to */
 func TestFromRuntime_RefusesATypedNilScopeRatherThanResolvingThrough(t *testing.T) {
     _, resolveErr := FromRuntime[string](&typedNilScopeRuntime{}, "service.test")
     if nil == resolveErr {
@@ -138,7 +136,6 @@ func TestFromRuntime_RefusesATypedNilScopeRatherThanResolvingThrough(t *testing.
     }
 }
 
-/* typedNilRuntime is a typed-nil Runtime implementation: the guard must read through the interface */
 type typedNilRuntime struct{}
 
 func (instance *typedNilRuntime) Context() context.Context {
@@ -153,7 +150,6 @@ func (instance *typedNilRuntime) Kind() containercontract.Kind {
     return containercontract.KindRun
 }
 
-/* a runtime that is itself present but carries no scope has nothing to resolve through, and says so: handing back a nil resolver would move the failure into the container call, where the message names a service instead of the wiring that has no resolver at all */
 func TestFromRuntime_RefusesARuntimeWithNoScope(t *testing.T) {
     runtimeInstance := &typedNilRuntime{}
 

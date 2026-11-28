@@ -66,7 +66,6 @@ func TestRegisterConnectionAndTransportService_AreNotWalkedAndTheTransportCloses
     }
 }
 
-/* containerRegistrar hands RegisterService to a real container, as the application's registrar does */
 type containerRegistrar struct {
     serviceContainer containercontract.Container
 }

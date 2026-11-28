@@ -60,7 +60,6 @@ func TestNewRequirements_RefusesARequirementWithNoParameterName(t *testing.T) {
 }
 
 func TestNewRequirements_RefusesARequirementWithNoPattern(t *testing.T) {
-    /* dropping the requirement would fail OPEN: the parameter would keep no constraint at all, so a segment the developer declared numeric would match anything */
     testhelper.AssertPanicsWithError(
         t,
         func() {

@@ -11,7 +11,6 @@ import (
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
-/* a device token is honoured only while its account exists, with the roles the account holds now: a token naming an account that is gone is refused, one whose account was demoted carries the account's roles and not the ones frozen at issue, and a directory that cannot answer refuses rather than honours */
 func TestDeviceAccountEnricher_HoldsTheTokenToItsAccount(t *testing.T) {
     directory := map[string]*entity.User{
         "user-2": entity.NewUser("user-2", "editor", "hash", []string{entity.RoleUser}),
@@ -31,7 +30,6 @@ func TestDeviceAccountEnricher_HoldsTheTokenToItsAccount(t *testing.T) {
         t.Fatalf("expected the account's current roles in place of the token's, got %v (%v)", enriched.Roles, enrichErr)
     }
 
-    /* only the directory that cannot answer is an infrastructure failure, which the bearer source files at Error; an account that is gone is the routine refusal */
     for userIdentifier, infrastructureFailure := range map[string]bool{"user-9": false, "user-broken": true} {
         _, refusal := enricher.Enrich(nil, melodysecuritycontract.Claims{UserIdentifier: userIdentifier, Roles: []string{entity.RoleAdmin}})
         if nil == refusal {

@@ -282,7 +282,6 @@ func TestBound_BindingAndCallingAllocateNothing(t *testing.T) {
         t.Fatalf("expected a bind and a call to allocate nothing, got %v", allocations)
     }
 
-    /* the typed read's target escapes into the contract's call whichever way it is reached, so the view is pinned at adding nothing to the direct call */
     boundAllocationCache = counter
     directAllocations := testing.AllocsPerRun(1000, func() {
         var value int

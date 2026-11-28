@@ -81,7 +81,6 @@ func newStaticExclusionTestPublicDirectory(t *testing.T) string {
 }
 
 func TestNewStaticFileServerConfig_ExcludedPrefixReachesTheMiddlewareRegisteredWithUse(t *testing.T) {
-    /* the built-in file server is the outermost middleware, so a path it answers is a path the application's own chain never sees. The exclusion is the only channel this instance has, because it is built inside the application rather than registered by it. */
     publicDirectory := newStaticExclusionTestPublicDirectory(t)
 
     configuration := newStaticExclusionTestConfiguration(t, map[string]string{

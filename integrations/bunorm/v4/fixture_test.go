@@ -15,7 +15,6 @@ import (
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
 
-/* testRuntime is the runtime the registry tests call under: a run over a scope of an empty container, on a context that never ends */
 func testRuntime() containercontract.Runtime {
     return testRuntimeUnder(context.Background())
 }
@@ -24,7 +23,6 @@ func testRuntimeUnder(ctx context.Context) containercontract.Runtime {
     return melodyruntime.NewRun(ctx, container.NewContainer(container.ContainerConfig{}).NewScope())
 }
 
-/* the connection every definition of these tests declares: the registry refuses an empty host and an empty database, and none of the fake providers dials it */
 var testConnectionParameters = ConnectionParameters{Host: "127.0.0.1", Database: "melody"}
 
 func expectErrorNamingField(t *testing.T, err error, field string) {
@@ -56,9 +54,6 @@ func expectPanicNamingField(t *testing.T, field string, callback func()) {
     callback()
 }
 
-/* capturingDiagnosticLogger is the journal double the routing probes read, shared by the tests of the diagnostics sink and of the registry door that replaces it. Every method DEREFERENCES the receiver, which is what lets a typed-nil guard die: a double tolerating a nil receiver would pass with the guard removed.
-
-   It lives here rather than beside either of them because it is the shared material of two mirrors, and the layout rule keeps that in one fixture. */
 type capturingDiagnosticLogger struct {
     mutex   sync.Mutex
     records []capturedDiagnosticRecord
@@ -112,7 +107,6 @@ func (instance *capturingDiagnosticLogger) captured() []capturedDiagnosticRecord
     return append([]capturedDiagnosticRecord{}, instance.records...)
 }
 
-/* delayedDiagnosticProvider routes bun's channel as a provider does at open, then waits for resume and routes again, the open still in flight when its registry closes or replaces its logger */
 type delayedDiagnosticProvider struct {
     entered chan struct{}
     resume  chan struct{}
@@ -131,7 +125,6 @@ func (instance *delayedDiagnosticProvider) OpenForMigration(runtimeInstance cont
     return instance.Open(runtimeInstance, parameters, logger)
 }
 
-/* routingProvider routes bun's channel with the logger its open receives, as the mysql and pgsql providers do, and answers a stub database */
 type routingProvider struct{}
 
 func (instance *routingProvider) Open(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
@@ -146,7 +139,6 @@ func (instance *routingProvider) OpenForMigration(runtimeInstance containercontr
     return instance.Open(runtimeInstance, parameters, logger)
 }
 
-/* errorOnlyLogger reports only the error level as enabled, the shape of a logger with a threshold */
 type errorOnlyLogger struct {
     capturingDiagnosticLogger
 }

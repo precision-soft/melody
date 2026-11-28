@@ -26,7 +26,6 @@ import (
 
 const fixtureCipherKeyId = "two-factor-test"
 
-/* useFixtureCipher installs the cipher through the encrypt module, as the application does at boot */
 func useFixtureCipher() melodyencrypt.Cipher {
     cipher := melodyencrypt.NewCipher(melodyencrypt.NewStaticKeyProvider(melodyencrypt.KeyRing{
         CurrentKeyId: fixtureCipherKeyId,
@@ -45,7 +44,6 @@ func (instance fixtureServiceRegistrar) RegisterService(serviceName string, prov
     instance.MustRegister(serviceName, provider, options)
 }
 
-/* enrollmentConnector is a database holding one enrolled account: a select answers that account's row only when the statement names that account, and every statement is kept in order, so what a door read and what it wrote is the recorded sequence. bun renders its arguments into the statement text, which is what the assertions read. */
 type enrollmentConnector struct {
     mutex      sync.Mutex
     statements []string
@@ -94,7 +92,6 @@ func (instance *enrollmentConnection) Close() error {
     return nil
 }
 
-/* a transaction is accepted and changes nothing: the recovery door redeems inside one, and what it read and wrote is still the recorded sequence */
 func (instance *enrollmentConnection) Begin() (driver.Tx, error) {
     return enrollmentTransaction{}, nil
 }
@@ -123,7 +120,6 @@ func (instance *enrollmentConnection) QueryContext(ctx context.Context, query st
 
     instance.connector.record(query)
 
-    /* an existence read answers one boolean, for the table and the account it names */
     if true == strings.HasPrefix(query, "SELECT EXISTS") {
         found := false
         if true == strings.Contains(query, "melody_example_v4_two_factor_pending") {
@@ -135,7 +131,6 @@ func (instance *enrollmentConnection) QueryContext(ctx context.Context, query st
         return &enrollmentRows{columns: []string{"exists"}, rows: [][]driver.Value{{found}}}, nil
     }
 
-    /* the confirmation's lock on the active row reads its identifier alone */
     if true == strings.HasPrefix(query, "SELECT `user_identifier` FROM `melody_example_v4_two_factor` ") {
         lockedRow := &enrollmentRows{columns: []string{"user_identifier"}}
         if "" != instance.connector.enrolledIdentifier && true == strings.Contains(query, "'"+instance.connector.enrolledIdentifier+"'") {
@@ -145,7 +140,6 @@ func (instance *enrollmentConnection) QueryContext(ctx context.Context, query st
         return lockedRow, nil
     }
 
-    /* the pending table is answered on its own, its seals bound to its own columns */
     if true == strings.Contains(query, "melody_example_v4_two_factor_pending") {
         pendingRow := &enrollmentRows{columns: []string{"user_identifier", "secret", "recovery_codes", "replaces_factor", "created_at"}}
         if "" != instance.connector.pendingIdentifier && true == strings.Contains(query, "'"+instance.connector.pendingIdentifier+"'") {
@@ -199,7 +193,6 @@ func (instance *enrollmentRows) Next(destination []driver.Value) error {
     return nil
 }
 
-/* enrolledStore answers the real store over a database in which only the given account is enrolled, under the given secret. */
 func enrolledStore(t *testing.T, enrolledIdentifier string, secret string) (*store2fa.Store, *enrollmentConnector) {
     t.Helper()
 
@@ -207,7 +200,6 @@ func enrolledStore(t *testing.T, enrolledIdentifier string, secret string) (*sto
 
     connector := &enrollmentConnector{enrolledIdentifier: enrolledIdentifier}
     if "" != enrolledIdentifier {
-        /* sealed through the column types, as the store writes them: each column refuses a value not bound to it */
         sealedSecret, secretErr := melodyencrypt.EncryptedStringFor[store2fa.SecretColumn](secret).Value()
         if nil != secretErr {
             t.Fatalf("sealing the fixture secret failed: %v", secretErr)
@@ -230,7 +222,6 @@ func enrolledStore(t *testing.T, enrolledIdentifier string, secret string) (*sto
     return store2fa.NewStore(database), connector
 }
 
-/* withPending gives the connector a pending enrollment for the account, sealed through the pending column types */
 func withPending(t *testing.T, connector *enrollmentConnector, pendingIdentifier string, secret string) {
     t.Helper()
 
@@ -249,7 +240,6 @@ func withPending(t *testing.T, connector *enrollmentConnector, pendingIdentifier
     connector.pendingSealedCodes = string(sealedCodes.([]byte))
 }
 
-/* authenticatedTwoFactorRequest builds a request whose runtime carries a token for the given account, the way the firewall leaves it for a caller on the authenticated route. */
 func authenticatedTwoFactorRequest(t *testing.T, target string, userIdentifier string, headers map[string]string) (*melodyhttp.Request, melodycontainercontract.Runtime) {
     t.Helper()
 
@@ -272,8 +262,6 @@ func authenticatedTwoFactorRequest(t *testing.T, target string, userIdentifier s
     return request, runtimeInstance
 }
 
-/* twoFactorRequest builds a request whose runtime carries NO security context, which is what an
-   unauthenticated caller reaches these doors with. */
 func twoFactorRequest(t *testing.T, target string) (*melodyhttp.Request, melodycontainercontract.Runtime) {
     t.Helper()
 
@@ -291,15 +279,12 @@ func twoFactorRequest(t *testing.T, target string) (*melodyhttp.Request, melodyc
     return request, runtimeInstance
 }
 
-/* fixedStore hands a door one store whatever the runtime, the source its tests need where production
-   resolves the store through the container */
 func fixedStore(store *store2fa.Store) store2fa.StoreSource {
     return func(runtimeInstance melodycontainercontract.Runtime) (*store2fa.Store, error) {
         return store, nil
     }
 }
 
-/* insertStatements answers the writes among the statements a door issued, in order */
 func insertStatements(statements []string) []string {
     insertList := make([]string, 0)
     for _, statement := range statements {

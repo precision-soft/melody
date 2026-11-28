@@ -38,7 +38,6 @@ func TestEncryptKeys_FallsBackToTheDevelopmentKeyWithoutAListInDevelopmentOnly(t
     }
 }
 
-/* the keys .env commits are public: outside development a list holding either refuses the boot naming the entry's position and id, never the key, while a list of keys of its own boots and development keeps the committed ones */
 func TestEncryptKeys_RefusesACommittedKeyOutsideDevelopment(t *testing.T) {
     for _, rawKeyList := range []string{
         "example-2026:" + encryptDevelopmentKey,
@@ -68,7 +67,6 @@ func TestEncryptKeys_RefusesACommittedKeyOutsideDevelopment(t *testing.T) {
     }
 }
 
-/* an entry with no separator may be the key itself — a bare key, or the rotation typo id:k,<key> whose second entry is the key — so its refusal carries the position alone; an entry with the separator carries its id, which names a key and is no secret */
 func TestEncryptKeys_AnEntryWithoutTheSeparatorIsRefusedWithoutItsText(t *testing.T) {
     for _, rawKeyList := range []string{encryptDevelopmentKey, "id:k," + encryptDevelopmentKey} {
         refusal := recoveredRefusal(t, func() { encryptKeys(rawKeyList, "id", true) })

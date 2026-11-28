@@ -9,7 +9,6 @@ import (
     "testing"
 )
 
-/* the nil-runtime refusal names its door, one rule for every door: a literal is the enclosing function as <package>.<Type>.<Function>, and a helper refusing for its callers passes the door its caller hands it */
 func TestSourceWalk_EveryNilRuntimeRefusalNamesItsEnclosingDoor(t *testing.T) {
     refusals := 0
 

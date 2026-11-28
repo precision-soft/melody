@@ -6,7 +6,6 @@ import (
     containercontract "github.com/precision-soft/melody/v4/container/contract"
 )
 
-/* runtimeOver is the runtime a caller holding only a context writes for this handle, runtime.WithContext(resolver.Runtime(), ctx): the source's own kind and scope over that context */
 func (instance *LazyService[T]) runtimeOver(ctx context.Context) containercontract.Runtime {
     instance.mutex.Lock()
     source := instance.source

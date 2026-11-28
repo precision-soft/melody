@@ -17,7 +17,6 @@ func TestNewStaticHmacApplicationRegistry_RefusesAnEmptyRegistry(t *testing.T) {
     }, "hmac application registry is empty")
 }
 
-/* an application with no name cannot be matched against an envelope's claimed application, so it would sit in the registry granting nothing while looking like a configured caller */
 func TestNewStaticHmacApplicationRegistry_RefusesAnEmptyApplicationName(t *testing.T) {
     testhelper.AssertPanicsWithError(t, func() {
         _ = NewStaticHmacApplicationRegistry(map[string][]string{"": {"ROLE_SERVICE"}})
@@ -37,7 +36,6 @@ func TestStaticHmacApplicationRegistry_RolesForApplicationAnswersFalseForAnUnkno
     }
 }
 
-/* the registry is the authorization table of every service principal: a caller that kept the slice it handed in, or mutates the slice it is handed back, must not rewrite the roles of a live caller */
 func TestStaticHmacApplicationRegistry_OwnsItsRoles(t *testing.T) {
     callerRoles := []string{"ROLE_SERVICE"}
     registry := NewStaticHmacApplicationRegistry(map[string][]string{"billing": callerRoles})

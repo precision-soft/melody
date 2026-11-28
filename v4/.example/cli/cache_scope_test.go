@@ -12,7 +12,6 @@ import (
     melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
 )
 
-/* sharedBackendDouble stands for a backend that is not the in-process map — the redis one, in production — and it is a distinct type on purpose: what the scope helper reads is the TYPE of the backend the wiring registered, not what the backend answers. */
 type sharedBackendDouble struct {
     melodycachecontract.Backend
 }
@@ -54,7 +53,6 @@ func TestCacheIsProcessLocal_ReadsAnyOtherBackendAsShared(t *testing.T) {
     }
 }
 
-/* a wiring without a backend cannot be shared with anyone, so the helper answers process-local rather than failing the command over a sentence */
 func TestCacheIsProcessLocal_ReadsAMissingBackendAsThisProcessOwn(t *testing.T) {
     if false == cacheIsProcessLocal(newCacheScopeRuntime(nil)) {
         t.Fatalf("expected a runtime without a backend to be read as this process's own")

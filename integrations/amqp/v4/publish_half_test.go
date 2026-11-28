@@ -8,7 +8,6 @@ import (
     "time"
 )
 
-/* a publish whose turn never comes inside the budget is reported lost in the QUEUE, and the write goroutine that finally gets the mutex finds its caller gone and writes nothing */
 func TestPublishHalf_ATurnThatNeverComesIsLostInTheQueueAndTheWriteIsNeverMade(t *testing.T) {
     half := &publishHalf{joinBound: closeJoinTimeout}
     half.publishMutex.Lock()
@@ -19,7 +18,6 @@ func TestPublishHalf_ATurnThatNeverComesIsLostInTheQueueAndTheWriteIsNeverMade(t
     written := make(chan struct{}, 1)
     attempt.run(func() { written <- struct{}{} }, func() {})
 
-    /* the wait is driven on a goroutine under a timer of its own, so a form that waited for a turn that never comes fails here in two seconds instead of parking the suite */
     lost := make(chan bool, 1)
     go func() { lost <- attempt.awaitTurn(context.Background()) }()
 
@@ -43,7 +41,6 @@ func TestPublishHalf_ATurnThatNeverComesIsLostInTheQueueAndTheWriteIsNeverMade(t
     }
 }
 
-/* the write is counted in flight for exactly the write, and after runs once the write returned, still under the mutex */
 func TestPublishHalf_TheWriteIsCountedInFlightAndAfterRunsOnceItReturned(t *testing.T) {
     half := &publishHalf{joinBound: closeJoinTimeout}
     attempt := half.beginPublish(50 * time.Millisecond)
@@ -86,7 +83,6 @@ func TestPublishHalf_TheWriteIsCountedInFlightAndAfterRunsOnceItReturned(t *test
     }
 }
 
-/* the budget expiring and the write ending have no order between them: a write that returned is answered as returned by the re-read, whichever case the timer's select chose */
 func TestPublishHalf_AwaitWriteAnswersAWriteThatReturnedInsideTheBudget(t *testing.T) {
     half := &publishHalf{joinBound: closeJoinTimeout}
     attempt := half.beginPublish(time.Second)
@@ -98,7 +94,6 @@ func TestPublishHalf_AwaitWriteAnswersAWriteThatReturnedInsideTheBudget(t *testi
     }
 }
 
-/* an owned connection the owner has already let go of — nil — is not a caller-owned one: nothing is marked wedged for it, and the write is left to return on its own */
 func TestPublishHalf_AbandonOnAnOwnedConnectionAlreadyGoneMarksNothing(t *testing.T) {
     half := &publishHalf{joinBound: closeJoinTimeout}
     var stateMutex sync.Mutex
@@ -112,7 +107,6 @@ func TestPublishHalf_AbandonOnAnOwnedConnectionAlreadyGoneMarksNothing(t *testin
     }
 }
 
-/* a write on a connection other than the one the owner holds is on one whose shutdown is already under way, since the owner replaces a connection only once it reads closed or a cut let go of it: the connection held now is healthy and is neither cut nor let go of, and the write is waited for under the bound */
 func TestPublishHalf_AbandonOfAWriteOnAConnectionTheOwnerReplacedCutsNothingTheOwnerHolds(t *testing.T) {
     wedge := wedgeAPublishOnAFakeBroker(t)
     wedge.beginClientShutdown(t)
@@ -161,7 +155,6 @@ func TestPublishHalf_AbandonWhileClosingMarksNothingAndCutsNothing(t *testing.T)
     }
 }
 
-/* on a caller-owned connection nothing can cut the socket: the owner is marked wedged under its own mutex, and the mark is lifted by the write returning — by the owner's hand, or never */
 func TestPublishHalf_AbandonOnACallerOwnedConnectionMarksWedgedUntilTheWriteReturns(t *testing.T) {
     half := &publishHalf{joinBound: closeJoinTimeout}
     var stateMutex sync.Mutex
@@ -202,7 +195,6 @@ func TestPublishHalf_AbandonOnACallerOwnedConnectionMarksWedgedUntilTheWriteRetu
     }
 }
 
-/* a failed join is a wedged write only TOGETHER with a write in flight: the publish half is equally held by a confirmation inside its budget or a broadcast queued behind another */
 func TestPublishHalf_AFailedJoinIsAWedgedWriteOnlyWithAWriteInFlight(t *testing.T) {
     half := &publishHalf{joinBound: closeJoinTimeout}
     half.publishMutex.Lock()
@@ -222,7 +214,6 @@ func TestPublishHalf_AFailedJoinIsAWedgedWriteOnlyWithAWriteInFlight(t *testing.
     }
 }
 
-/* a free publish half is joined whatever the bound says, a spent budget included, and the caller owns the mutex afterwards */
 func TestPublishHalf_AFreePublishHalfIsJoinedUnderASpentBudget(t *testing.T) {
     half := &publishHalf{joinBound: closeJoinTimeout}
 
@@ -237,7 +228,6 @@ func TestPublishHalf_AFreePublishHalfIsJoinedUnderASpentBudget(t *testing.T) {
     half.publishMutex.Unlock()
 }
 
-/* the cut of a wedged write on an owned connection returns within its bound even when the client's own shutdown already began: that shutdown waits for the channel mutex the write holds, and a cut made in line, which joins it, would hold the publish until the write returns, which here is never inside the test. The write the cut did not free is told apart, and the owner marked wedged until it returns */
 func TestPublishHalf_AbandonOnAnOwnedConnectionWhoseCutDidNotFreeTheWriteReturnsWithinTheBoundAndMarksItWedged(t *testing.T) {
     wedge := wedgeAPublishOnAFakeBroker(t)
     wedge.beginClientShutdown(t)
@@ -279,7 +269,6 @@ func TestPublishHalf_AbandonOnAnOwnedConnectionWhoseCutDidNotFreeTheWriteReturns
     }
 }
 
-/* the control: with no shutdown of the client's in progress, the cut reaches the socket and the wedged write returns inside the bound, as before */
 func TestPublishHalf_AbandonOnAnOwnedConnectionUnblocksTheWriteWhenNoShutdownIsInProgress(t *testing.T) {
     wedge := wedgeAPublishOnAFakeBroker(t)
 
@@ -309,7 +298,6 @@ func TestPublishHalf_AbandonOnAnOwnedConnectionUnblocksTheWriteWhenNoShutdownIsI
     t.Logf("the cut unblocked the write after %s", time.Since(started))
 }
 
-/* the close of an owned connection returns within the caller's deadline, and reports that the client's close did not, even when the client's own shutdown already began and waits behind the wedged write */
 func TestPublishHalf_CloseOwnedConnectionReturnsWithinTheBoundWhileTheClientShutdownIsStalled(t *testing.T) {
     wedge := wedgeAPublishOnAFakeBroker(t)
     wedge.beginClientShutdown(t)
@@ -345,7 +333,6 @@ func TestPublishHalf_CloseOwnedConnectionReturnsWithinTheBoundWhileTheClientShut
     }
 }
 
-/* the control: with no shutdown of the client's in progress, the cut of the close reaches the socket, the wedged write returns, and what the client answered is what is reported */
 func TestPublishHalf_CloseOwnedConnectionCutsTheWriteWhenNoShutdownIsInProgress(t *testing.T) {
     wedge := wedgeAPublishOnAFakeBroker(t)
 

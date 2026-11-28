@@ -143,7 +143,6 @@ func TestBootCollision_NonStrictTypeRegistrationIsNotRecorded(t *testing.T) {
     }
 }
 
-/* a name claimed at one lifetime and then declared at the other is the same wiring mistake seen from the other side: it joins the aggregated report rather than ending the boot on its own, from either direction */
 func TestBootCollision_ANameClaimedAtTheOtherLifetimeIsRecordedFromBothDirections(t *testing.T) {
     singletonFirst := newCollisionTestApplication(t)
 
@@ -170,7 +169,6 @@ func TestBootCollision_ANameClaimedAtTheOtherLifetimeIsRecordedFromBothDirection
     }
 }
 
-/* the type is claimed across lifetimes too, and reported the same way: a request-scoped service whose type a singleton already declares would otherwise make a by-type lookup answer one of the two at random */
 func TestBootCollision_ATypeClaimedAtTheOtherLifetimeIsRecordedFromBothDirections(t *testing.T) {
     type marker struct{ value string }
 
@@ -205,7 +203,6 @@ func TestBootCollision_ATypeClaimedAtTheOtherLifetimeIsRecordedFromBothDirection
     }
 }
 
-/* a duplicate is the one registration failure that is collected instead of thrown: anything else — a provider that is not a provider at all — ends the boot where it was written, because no later phase can make it valid */
 func TestRegisterService_StaysFailFastForAFailureThatIsNotACollision(t *testing.T) {
     singletonApplication := newCollisionTestApplication(t)
 
@@ -228,7 +225,6 @@ func TestRegisterService_StaysFailFastForAFailureThatIsNotACollision(t *testing.
     }
 }
 
-/* the scoped door closes at boot exactly as the singleton one does: the scopes are built by then, and a registration arriving here would be visible to some requests and not others */
 func TestRegisterScopedService_RefusesAfterBoot(t *testing.T) {
     applicationInstance := newCollisionTestApplication(t)
     applicationInstance.booted = true
@@ -260,7 +256,6 @@ func TestBootCollision_DuplicateParameterIsRecorded(t *testing.T) {
 func TestBootCollision_DuplicateConfigurationIsRecorded(t *testing.T) {
     application := newCollisionTestApplication(t)
 
-    /* the registry accepts exactly one name in this major, so the duplicate path is exercised on it */
     application.RegisterConfiguration(loggingcontract.LoggingConfigurationName, "first")
     application.RegisterConfiguration(loggingcontract.LoggingConfigurationName, "second")
 
@@ -345,7 +340,6 @@ func TestBootCollision_NoCollisionsMeansNoPanic(t *testing.T) {
     application.panicOnBootCollisions()
 }
 
-/* the report exists to say where the duplicate came from; a fixed frame count named whichever delegation layer sat between the user's call and the recording, so the origin must be asserted to land in the caller's file whatever the registration path */
 func TestBootCollision_OriginNamesTheCallerNotTheFrameworkPlumbing(t *testing.T) {
     application := newCollisionTestApplication(t)
 
@@ -367,7 +361,6 @@ func bootCollisionTestHandler() httpcontract.Handler {
     }
 }
 
-/* while the recorder is armed a duplicate route joins the aggregated report, the first registration winning, and its origin is the registration call site, not the router's plumbing */
 func TestBootCollision_ADuplicateRouteJoinsTheAggregatedReportWhileTheRecorderIsArmed(t *testing.T) {
     routeRegistry := http.NewRouteRegistry()
     router := http.NewRouterWithRouteRegistry(routeRegistry)
@@ -398,7 +391,6 @@ func TestBootCollision_ADuplicateRouteJoinsTheAggregatedReportWhileTheRecorderIs
         application.panicOnBootCollisions()
     }, "duplicate registrations detected at boot")
 
-    /* disarming hands the registry back its immediate refusal, which is what anything registering outside the boot window meets */
     application.disarmRouteCollisionRecorder()
 
     testhelper.AssertPanicsWithError(t, func() {

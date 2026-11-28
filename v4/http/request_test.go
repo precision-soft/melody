@@ -22,7 +22,6 @@ import (
     "github.com/precision-soft/melody/v4/session"
 )
 
-/* every attribute the kernel owns carries the framework's prefix, so an application attribute cannot collide with one by name */
 func TestRequestAttributes_TheSessionAndTheSchemeCarryTheFrameworkPrefix(t *testing.T) {
     if "_session" != requestAttributeSession {
         t.Fatalf("expected the session attribute under the framework prefix, got %q", requestAttributeSession)
@@ -62,7 +61,6 @@ func TestNewRequest_ValidHttpRequest(t *testing.T) {
         t.Fatalf("expected query param 'foo' to exist")
     }
 
-    /* a key that appeared once is stored as the string it really is; only a repeated key stays a string slice */
     fooRaw, fooExists := queryBag.Get("foo")
     if false == fooExists {
         t.Fatalf("expected query param 'foo' to exist in bag")
@@ -370,7 +368,6 @@ func TestRequest_Input_DeliversQueryAndPostValues(t *testing.T) {
     }
 }
 
-/* The shape of a request parameter is the client's to choose, so repeating one is not a programming error to refuse loudly: the refusal was a 500 with a full stack record that any client could raise at will. The whole array is still reachable, through bag.StringSlice. */
 func TestRequest_Input_AnswersTheFirstValueOfARepeatedKey(t *testing.T) {
     repeatedRequest := httptest.NewRequest("GET", "/search?a=1&a=2", nil)
     request := NewRequest(repeatedRequest, nil, RequestConfig{})
@@ -397,7 +394,6 @@ func TestRequest_Input_AnswersTheFirstValueOfARepeatedFormKey(t *testing.T) {
     }
 }
 
-/* a form that does not parse answers its error from every read: a handler handed an empty form for a real submission would process it as a blank one */
 func TestRequest_Post_MalformedBody_400AndTheSameErrorOnEveryRead(t *testing.T) {
     formBody := strings.NewReader("a=%zz&csrf=token")
     postRequest := httptest.NewRequest("POST", "/submit", formBody)
@@ -439,7 +435,6 @@ func TestRequest_Post_AnUnparsableFormRefusalBoundsThePathItCarries(t *testing.T
     }
 }
 
-/* the read error is the cause itself, not a parse failure of a body that never arrived */
 func TestRequest_Post_ARawBodyReadFailure_400CarryingTheReadError(t *testing.T) {
     readErr := errors.New("the client vanished mid-upload")
 
@@ -462,8 +457,6 @@ type failingBodyReader struct {
 func (instance *failingBodyReader) Read(buffer []byte) (int, error) {
     return 0, instance.err
 }
-
-/* the cookie accessors, the locale, the route pattern and the two error constructors were all at zero coverage. The cookie pair is the one an authentication middleware reads, and an accessor reading the wrong header would report every client as carrying no session at all. */
 
 func TestRequest_CookieAccessorsReadWhatTheClientSent(t *testing.T) {
     httpRequest := httptest.NewRequest(nethttp.MethodGet, "/articles", nil)
@@ -489,8 +482,6 @@ func TestRequest_CookieAccessorsReadWhatTheClientSent(t *testing.T) {
         t.Fatalf("expected a cookie the client did not send to be reported missing")
     }
 }
-
-/* the locale and the route pattern are read off the route attributes the router published, not off the url — the pattern is what an application groups metrics and audit records by, and reading the concrete path instead would make every identifier its own route. */
 
 func TestRequest_LocaleAndRoutePatternComeFromTheRouteAttributes(t *testing.T) {
     request := NewRequest(httptest.NewRequest(nethttp.MethodGet, "/articles/42", nil), nil, RequestConfig{})
@@ -524,7 +515,6 @@ func TestRequest_LocaleAndRoutePatternComeFromTheRouteAttributes(t *testing.T) {
     }
 }
 
-/* the precedence Input documents was implemented but pinned nowhere: every existing case populates a single source, so none of them would notice the order changing. */
 func TestRequest_Input_PrefersThePostBodyOverTheQuery(t *testing.T) {
     httpRequest := httptest.NewRequest("POST", "/submit?field=fromQuery", strings.NewReader("field=fromBody"))
     httpRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -556,7 +546,6 @@ func TestRequest_Input_FallsThroughToTheRouteParametersOnly(t *testing.T) {
     }
 }
 
-/* a query the client wrote with a legacy semicolon separator is not a form that failed to parse: ParseForm reports the query's failure through the same return value as the body's, and refusing on it answered 400 to a submission whose body was perfectly valid, with the handler's own form emptied on the way there */
 func TestNewRequest_AMalformedQueryDoesNotRefuseAValidForm(t *testing.T) {
     formBody := strings.NewReader("field=value&csrf=token")
     postRequest := httptest.NewRequest("POST", "/submit?a=b;c=d", formBody)
@@ -770,7 +759,6 @@ func TestRequest_Post_OverTheCap_413CarryingTheSentinelAndTheMaxBytesError(t *te
     }
 }
 
-/* a request built by hand carries no MaxBytesReader: the cap is the request's own */
 func TestRequest_Post_OverTheCapWithoutAReaderLimit_413CarryingTheSentinel(t *testing.T) {
     request := NewRequest(newUrlEncodedRequest(io.NopCloser(strings.NewReader("value="+strings.Repeat("a", 11)))), nil, RequestConfig{MaxBodyBytes: bound.Of(16)})
 

@@ -143,7 +143,6 @@ func TestNewChildRun_RefusesAClosedParentScopeAndAForeignScope(t *testing.T) {
     }, "parent runtime may not be nil on child run")
 }
 
-/* a nil context is refused before the child scope opens, so the refusal leaks no scope */
 func TestNewChildRun_RefusesANilContextBeforeOpeningTheChildScope(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     countingScope := &spawnCountingScope{Scope: serviceContainer.NewScope()}
@@ -157,7 +156,6 @@ func TestNewChildRun_RefusesANilContextBeforeOpeningTheChildScope(t *testing.T) 
     }
 }
 
-/* spawnCountingScope counts the child scopes asked of the scope it wraps */
 type spawnCountingScope struct {
     containercontract.Scope
     spawned int
@@ -191,7 +189,6 @@ type nilableScope struct {
     containercontract.Scope
 }
 
-/* typedNilContext is a Context implementation carried as a typed nil, the shape a caller produces by passing an unassigned variable of a concrete context type: it is not equal to nil once it sits in the interface, so a plain comparison lets it through and the first Done() on the request path dereferences it */
 type typedNilContext struct{}
 
 func (instance *typedNilContext) Deadline() (time.Time, bool) {

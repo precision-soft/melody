@@ -27,10 +27,6 @@ import (
     melodyvalidation "github.com/precision-soft/melody/v4/validation"
 )
 
-/* editorRuntime carries what the create door reads BEFORE it reaches the catalogue: the configuration the
-   body limit comes from, the validator the binding runs, the serializer the presenter renders through, and
-   an editor's token. A refused body never reaches the product service, so none is registered — a door that
-   started resolving one would say so by panicking here rather than by rendering something plausible. */
 func editorRuntime(t *testing.T) melodycontainercontract.Runtime {
     t.Helper()
 
@@ -161,9 +157,6 @@ func errorListOf(t *testing.T, body string) []string {
     return decoded.Errors
 }
 
-/* the door is what has to render the per-field detail, not the presenter alone: the responder is an
-   option handed to JsonHandler, so a wiring that stopped passing it would leave every probe on the
-   presenter green while the client went back to reading one sentence. */
 func TestApiCreateDoorAnswersOneErrorPerViolatedField(t *testing.T) {
     status, body := callCreateDoor(t, `{"id":"has space","name":"a","description":"","categoryId":"","price":-1,"currencyId":"","stock":-5}`)
 
@@ -188,8 +181,6 @@ func TestApiCreateDoorAnswersOneErrorPerViolatedField(t *testing.T) {
     }
 }
 
-/* the other half of the same responder: a body the decoder could not read carries a diagnosis that names
-   internals, and this door is reachable by anyone the route lets through. */
 func TestApiCreateDoorKeepsTheDecoderDiagnosisOutOfTheErrorsList(t *testing.T) {
     status, body := callCreateDoor(t, `{"name": not json`)
 
@@ -221,7 +212,6 @@ func TestCreateRefusalStatusAnswersAnyOtherFailureAsTheCatalogues(t *testing.T) 
     }
 }
 
-/* the binding validates the body as sent; the door stores it trimmed, so it validates that spelling too */
 func TestApiCreateDoorValidatesTheTrimmedBody(t *testing.T) {
     status, body := callCreateDoor(t, `{"id":"prod-trim","name":" X","description":"d","categoryId":"cat-1","price":1,"currencyId":"cur-eur","stock":1}`)
     if nethttp.StatusBadRequest != status {
@@ -249,7 +239,6 @@ func productBody(id string, price string) string {
     return `{"id":"` + id + `","name":"Probe","description":"d","categoryId":"cat-1","price":` + price + `,"currencyId":"cur-eur","stock":1}`
 }
 
-/* the read rounds a price to the cent by multiplying it by a hundred, so a stored price near the float64 ceiling turns into +Inf and the list answers 500 for every caller */
 func TestApiCreateDoor_RefusesAPriceAtTheBound(t *testing.T) {
     fixture := newProductDoorFixture(t)
 

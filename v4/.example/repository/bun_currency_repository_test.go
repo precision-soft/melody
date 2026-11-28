@@ -11,7 +11,6 @@ import (
     "github.com/precision-soft/melody/v4/.example/migration"
 )
 
-/* the mysql dialect renders a time.Time in the value's own location and the driver reads the column back as UTC, so an instant stamped with an offset would come back shifted by it: the row is built in UTC, the one place an entity becomes a row */
 func TestNewCurrencyRow_CarriesTheInstantInUtc(t *testing.T) {
     quotedAt := time.Date(2026, time.September, 7, 12, 0, 0, 0, time.FixedZone("EEST", 3*60*60))
 
@@ -26,8 +25,6 @@ func TestNewCurrencyRow_CarriesTheInstantInUtc(t *testing.T) {
     }
 }
 
-/* the write judges the row as the repository contract says, in the one statement: not over a newer reading on
-   this clock unless it names the same reading, and never over the reading it already holds */
 func TestUpdateQuoteQuery_WritesOverTheRowOnlyUnderTheContract(t *testing.T) {
     repositoryInstance := &bunCurrencyRepository{database: newRenderingDatabase()}
 
@@ -44,7 +41,6 @@ func TestUpdateQuoteQuery_WritesOverTheRowOnlyUnderTheContract(t *testing.T) {
     }
 }
 
-/* a rename reads the row before it writes, and a whole-row write would put back the quote it read over one the refresh wrote in between; the statement sets the code and the name and nothing else */
 func TestRenameQuery_WritesTheCodeAndTheNameAlone(t *testing.T) {
     repositoryInstance := &bunCurrencyRepository{database: newRenderingDatabase()}
 

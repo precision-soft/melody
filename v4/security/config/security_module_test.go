@@ -244,10 +244,6 @@ func TestBuilder_AddFirewallRefusesATypedNilOverrideDependencyNamingTheField(t *
     }
 }
 
-/* the two dependencies every firewall must carry are refused at the declaration door, where the
-   composition root can still be pointed at the line that declared them — a typed nil reads as
-   declared, so without this the firewall boots and the first request behind it dereferences a nil
-   receiver inside the resolution listener. */
 func TestBuilder_AddFirewallRefusesATypedNilMatcherAndTokenSource(t *testing.T) {
     var typedNilMatcher securitycontract.Matcher = (*security.PathPrefixMatcher)(nil)
     var typedNilTokenSource securitycontract.TokenSource = (*typedNilTokenSourceProbe)(nil)
@@ -328,7 +324,6 @@ func TestFirewallOverride_GlobalAccessControlDisabledEnforcesOnlyTheFirewallsOwn
     }
 }
 
-/* a nil rule passes the declaration unseen and panics inside the resolution listener on every request behind the firewall, so it is refused where the composition root declared it. */
 func TestBuilder_AddFirewallRefusesANilRule(t *testing.T) {
     var typedNilRule securitycontract.Rule = (*security.ApiKeyHeaderRule)(nil)
 
@@ -354,7 +349,6 @@ func TestBuilder_AddFirewallRefusesANilRule(t *testing.T) {
     }
 }
 
-/* the registry answers the first firewall of a name and the manager the last, so two of one name would be two policies for one firewall. */
 func TestBuilder_AddFirewallRefusesANameAlreadyDeclared(t *testing.T) {
     builder := NewBuilder().AddFirewall(
         "api",

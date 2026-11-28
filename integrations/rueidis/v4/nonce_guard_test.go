@@ -18,7 +18,7 @@ func TestRedisNonceGuard_FirstUseThenReplay(t *testing.T) {
     client := newTokenStoreClient(t)
     guard := NewNonceGuard(newTestConnection(client), NonceGuardConfig{KeyPrefix: "melody:nonce:test"})
 
-    /* the nonce carries the clock so two runs of this package inside the remembered window cannot collide: the guard is doing its job when it reports a fixed nonce as already seen, and a test that reads that as a failure is testing the previous run */
+    /* the nonce carries the clock so two runs inside the remembered window cannot collide */
     nonce := fmt.Sprintf("nonce-replay-%d", time.Now().UnixNano())
 
     seenFirst, firstErr := guard.Remember(newTokenStoreRuntime(), nonce, bound.Of(5*time.Second))
@@ -57,7 +57,6 @@ func TestRedisNonceGuard_RefusesAnAbsentSubMillisecondOrUnlimitedTtl(t *testing.
     }
 }
 
-/* newWedgedNonceGuard hands back a guard over a client whose replies stop arriving from here on, so the Lua record of Remember runs against a store that accepts the command and never answers */
 func newWedgedNonceGuard(t *testing.T, config NonceGuardConfig) (*NonceGuard, *gate) {
     t.Helper()
 
@@ -88,7 +87,6 @@ func TestRedisNonceGuard_RememberIsBoundedByTheCallTimeout(t *testing.T) {
     }))
 }
 
-/* a request that already carries a deadline TIGHTER than the call timeout keeps it: with the call timeout at a second, a runtime carrying ten milliseconds is refused in tens of milliseconds, where a cap that replaced the request context would wait the full second */
 func TestRedisNonceGuard_RememberKeepsATighterRequestDeadline(t *testing.T) {
     guard, _ := newWedgedNonceGuard(t, NonceGuardConfig{CallTimeout: bound.Of(time.Second)})
 

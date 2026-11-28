@@ -50,7 +50,6 @@ func TestRegisterCommands_NilMigrationsIsRefused(t *testing.T) {
     RegisterCommands(nil, CommandConfig{})
 }
 
-/* the module gates its own optional set before calling the registrar, so a binary that registers only migration contexts never reaches the registrar's nil-migrations refusal — the context-only shape is the one legal reading of absent Migrations. */
 func TestModule_WithContextsOnlyDoesNotReachTheRegistrarsRefusal(t *testing.T) {
     module := NewModule(ModuleConfig{
         Migrations: nil,

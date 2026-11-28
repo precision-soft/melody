@@ -10,7 +10,6 @@ import (
     "github.com/precision-soft/melody/v4/.example/migration"
 )
 
-/* the product table's foreign key refusing a category delete is answered as the category in use, not as the driver's failure */
 func TestBunCategoryRepositoryDeleteById_AnswersTheForeignKeyRefusalAsACategoryInUse(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.execErr = func(query string) error {

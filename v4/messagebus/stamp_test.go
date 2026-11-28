@@ -7,7 +7,6 @@ import (
     messagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
 )
 
-/* the stamp names are the wire form every transport and every middleware reads a stamp back by: a name that drifts here is a stamp nobody finds again, and nothing in the type system says so */
 func TestStampNames_AreTheWireNames(t *testing.T) {
     for _, probe := range []struct {
         stamp    messagebuscontract.Stamp
@@ -29,7 +28,6 @@ func TestStampNames_AreTheWireNames(t *testing.T) {
     }
 }
 
-/* an envelope accumulates stamps of the same type as it travels — a redelivery stamps again on every attempt — so the reader must answer the LAST one; answering the first would freeze every count at its opening value */
 func TestLastStampOfType_AnswersTheMostRecentStampOfItsType(t *testing.T) {
     envelopeInstance := NewEnvelope(
         "payload",
@@ -61,7 +59,6 @@ func TestLastStampOfType_AnswersFalseWhenTheTypeIsAbsent(t *testing.T) {
     }
 }
 
-/* the counters answer zero for an unstamped envelope rather than refusing: a message on its first delivery carries no redelivery stamp at all, and every caller treats the answer as an attempt number */
 func TestStampCounters_ReadZeroOnAnUnstampedEnvelope(t *testing.T) {
     bare := NewEnvelope("payload", nil)
 

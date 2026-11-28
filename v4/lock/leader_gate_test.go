@@ -134,7 +134,6 @@ func TestLeaderGate_FailoverOnLeaderShutdown(t *testing.T) {
         secondDone <- second.Run(testRuntimeWithContext(secondContext))
     }()
 
-    /* the second gate keeps campaigning while the first leads */
     time.Sleep(20 * time.Millisecond)
     if true == second.IsLeader() {
         t.Fatalf("expected the second gate to wait while the first leads")
@@ -145,7 +144,6 @@ func TestLeaderGate_FailoverOnLeaderShutdown(t *testing.T) {
         t.Fatalf("expected a clean shutdown from the first gate, got: %v", runErr)
     }
 
-    /* the shutdown released the lock, so failover must not wait out any ttl */
     waitUntil(t, 2*time.Second, second.IsLeader, "expected the second gate to take over after shutdown")
 
     secondCancel()
@@ -155,7 +153,6 @@ func TestLeaderGate_FailoverOnLeaderShutdown(t *testing.T) {
 func TestLeaderGate_DemotesAndReelectsOnRefreshFailure(t *testing.T) {
     innerLocker := NewInMemoryLocker(InMemoryLockerConfig{})
 
-    /* fail refreshes only while enabled, so the gate can lose the lease once and then win it back */
     failing := &switchableRefreshLocker{inner: innerLocker}
     failing.fail.Store(true)
 
@@ -200,7 +197,6 @@ func TestLeaderGate_DemotesAndReelectsOnRefreshFailure(t *testing.T) {
     }
     lostMutex.Unlock()
 
-    /* let refreshes succeed again: the gate must campaign back to leadership */
     failing.fail.Store(false)
     <-elected
 
@@ -233,7 +229,6 @@ func TestLeaderGate_ReleasesOnShutdown(t *testing.T) {
         t.Fatalf("expected the gate to drop leadership on shutdown")
     }
 
-    /* the one-hour ttl must not matter: shutdown releases the lock immediately */
     contender := mustCreateLock(locker.CreateLock("worker:release", lockcontract.CreateLockOptions{Ttl: bound.Of(time.Minute)}))
     acquired, _ := contender.Acquire(testRuntime())
     if false == acquired {
@@ -241,7 +236,6 @@ func TestLeaderGate_ReleasesOnShutdown(t *testing.T) {
     }
 }
 
-/* A gate that can never acquire — a redis locker handed an unlimited ttl fails closed on every Acquire — is otherwise indistinguishable from a healthy follower: it campaigns, backs off and elects nobody, silently, forever. */
 func TestLeaderGate_CampaignErrorsReachTheHook(t *testing.T) {
     runContext, cancel := context.WithCancel(context.Background())
     defer cancel()
@@ -285,7 +279,6 @@ func TestLeaderGate_CampaignErrorsReachTheHook(t *testing.T) {
     }
 }
 
-/* A shutdown cancels the context the backend is called with, so the campaign in flight fails with that cancellation. Reporting it would hand every graceful stop an error indistinguishable from a store outage. */
 func TestLeaderGate_ShutdownDoesNotReportACampaignError(t *testing.T) {
     runContext, cancel := context.WithCancel(context.Background())
     runtimeInstance := testRuntimeWithContext(runContext)
@@ -314,7 +307,6 @@ func TestLeaderGate_ShutdownDoesNotReportACampaignError(t *testing.T) {
         done <- gate.Run(runtimeInstance)
     }()
 
-    /* the campaign must be inside the backend call when the shutdown lands, or the loop simply exits before it ever errors */
     select {
     case <-acquireEntered:
     case <-time.After(2 * time.Second):
@@ -339,7 +331,6 @@ func TestLeaderGate_ShutdownDoesNotReportACampaignError(t *testing.T) {
     }
 }
 
-/* A RetryInterval slower than the one-minute outage cap must not invert into faster-than-healthy retries: doubling the campaign backoff caps at the configured RetryInterval, never below it, so an outage never hammers the store more often than the healthy campaign cadence. */
 func TestLeaderGate_CampaignBackoffNeverFasterThanRetryInterval(t *testing.T) {
     retryInterval := 5 * time.Minute
 
@@ -352,7 +343,6 @@ func TestLeaderGate_CampaignBackoffNeverFasterThanRetryInterval(t *testing.T) {
         }
     }
 
-    /* a RetryInterval at or under the cap still caps at the cap, never runs away */
     fast := 5 * time.Second
     maxCampaignBackoff := leaderGateMaxCampaignBackoffRule.Default
     if capped := nextCampaignBackoff(maxCampaignBackoff, fast, maxCampaignBackoff); capped != maxCampaignBackoff {
@@ -499,7 +489,6 @@ func (instance *countingRefreshLock) Refresh(runtimeInstance containercontract.R
     return instance.inner.Refresh(runtimeInstance, options)
 }
 
-/* contextSensitiveAcquireLocker fails Acquire with the call's context error, as a real backend does once the context is cancelled. */
 type contextSensitiveAcquireLocker struct {
     entered chan struct{}
 }
@@ -518,7 +507,6 @@ func (instance *contextSensitiveAcquireLock) Acquire(runtimeInstance containerco
     default:
     }
 
-    /* block inside the backend call, the way a real round trip does, so the shutdown lands while the campaign is in flight */
     <-runtimeInstance.Context().Done()
 
     return false, exception.NewError("acquire failed", nil, runtimeInstance.Context().Err())
@@ -532,7 +520,6 @@ func (instance *contextSensitiveAcquireLock) Refresh(runtimeInstance containerco
     return nil
 }
 
-/* hangingRefreshLocker acquires and releases through the real locker but never answers a renewal: the store took the call and went quiet, the way a wedged connection or an unresponsive replica does. The call comes back only when the context handed to it is cancelled, which is precisely the deadline a renewal must carry. */
 type hangingRefreshLocker struct {
     inner lockcontract.Locker
 }
@@ -559,7 +546,6 @@ func (instance *hangingRefreshLock) Refresh(runtimeInstance containercontract.Ru
     return exception.NewError("lock refresh never answered", nil, runtimeInstance.Context().Err())
 }
 
-/* A renewal that takes longer than the lease is not the same failure the refresh-interval ceiling refuses: nothing lets the lease lapse in the schedule, the call itself simply never comes back. With leadership derived from "did the last renewal return an error", there is no error to derive it from, so the holder keeps claiming the lock while the lease runs out underneath it and a second instance acquires — two leaders, both certain. */
 func TestLeaderGate_ARenewalThatNeverAnswersNeverYieldsTwoLeaders(t *testing.T) {
     innerLocker := NewInMemoryLocker(InMemoryLockerConfig{})
 
@@ -608,7 +594,6 @@ func TestLeaderGate_ARenewalThatNeverAnswersNeverYieldsTwoLeaders(t *testing.T) 
     waitGroup.Wait()
 }
 
-/* IsLeader and the hooks are two signals for one fact, and LOCK.md tells callers to combine them, so the claim must fall the moment the lease is provably lost — not when the hook that was elected finally unwinds, which is a duration the gate does not control and a hook ignoring its cancelled context never reaches at all. */
 func TestLeaderGate_LeadershipDropsWhileTheElectedHookIsStillRunning(t *testing.T) {
     failing := &switchableRefreshLocker{inner: NewInMemoryLocker(InMemoryLockerConfig{})}
     failing.fail.Store(true)
@@ -626,7 +611,6 @@ func TestLeaderGate_LeadershipDropsWhileTheElectedHookIsStillRunning(t *testing.
         OnElected: func(runtimeInstance containercontract.Runtime) {
             close(hookEntered)
 
-            /* a hook that outlives the lease: the gate cannot campaign again while it runs, so leadership is whatever IsLeader says it is */
             <-releaseHook
         },
     })
@@ -647,7 +631,6 @@ func TestLeaderGate_LeadershipDropsWhileTheElectedHookIsStillRunning(t *testing.
     <-done
 }
 
-/* the budget of one renewal is a deadline on the call, so it must never outlive the cadence it sits inside, or an attempt would still be in flight when its successor starts; sampled below two milliseconds, where the floor engages */
 func TestLeaderGate_TheRenewalBudgetNeverOutlivesTheCadenceItSitsInside(t *testing.T) {
     locker := NewInMemoryLocker(InMemoryLockerConfig{})
 
@@ -680,7 +663,6 @@ func TestLeaderGate_TheRenewalBudgetNeverOutlivesTheCadenceItSitsInside(t *testi
     }
 }
 
-/* countedFailureLocker fails the first failureCount renewals and answers every one after them, which is the shape of a store that dropped a connection and came back. */
 type countedFailureLocker struct {
     inner        lockcontract.Locker
     failureCount int64
@@ -712,7 +694,6 @@ func (instance *countedFailureLock) Refresh(runtimeInstance containercontract.Ru
     return instance.inner.Refresh(runtimeInstance, options)
 }
 
-/* A store that drops a connection and reconnects must not cost a term. The lease the gate last wrote is the store's own promise that nobody else gets this lock until it lapses — which is exactly why the cadence is half the lease — so a renewal lost while the lease runs costs nothing, and the one behind it lands. Leaving on the first failure would turn an eight-second failover into a cancelled term, a re-election, and leader work restarted from the beginning for a lock that is not in danger. */
 func TestLeaderGate_ASingleFailedRenewalDoesNotCostTheTerm(t *testing.T) {
     failing := &countedFailureLocker{inner: NewInMemoryLocker(InMemoryLockerConfig{}), failureCount: 1}
 
@@ -761,7 +742,6 @@ func TestLeaderGate_ASingleFailedRenewalDoesNotCostTheTerm(t *testing.T) {
     <-done
 }
 
-/* the other half: a store that is simply gone must end the term rather than let leader work run out the whole lease. The lease clock cannot see this on its own here — the cadence is far denser than the lease, so the lease still has a minute left — which is precisely the gap the consecutive-failure threshold covers. */
 func TestLeaderGate_ThresholdConsecutiveFailuresEndTheTermWhileTheLeaseIsStillValid(t *testing.T) {
     failing := &switchableRefreshLocker{inner: NewInMemoryLocker(InMemoryLockerConfig{})}
     failing.fail.Store(true)
@@ -810,7 +790,6 @@ func TestLeaderGate_ThresholdConsecutiveFailuresEndTheTermWhileTheLeaseIsStillVa
     <-done
 }
 
-/* the threshold is a knob, and turning it off has to leave the lease clock as the only signal — that is what a deployment asks for when it would rather run out the lease than give up a term early. */
 func TestLeaderGate_AnUnlimitedThresholdLeavesOnlyTheLeaseClock(t *testing.T) {
     gate := NewLeaderGate(
         NewInMemoryLocker(InMemoryLockerConfig{}),
@@ -819,7 +798,6 @@ func TestLeaderGate_AnUnlimitedThresholdLeavesOnlyTheLeaseClock(t *testing.T) {
     )
 
     if false == gate.refreshFailureEndsTheTerm(1000) {
-        /* the lease is unset outside a term, so the lease clock alone already says the term is over; what matters is that the threshold did not decide it */
         t.Fatal("expected the lease clock to answer on its own")
     }
 
@@ -830,7 +808,6 @@ func TestLeaderGate_AnUnlimitedThresholdLeavesOnlyTheLeaseClock(t *testing.T) {
     }
 }
 
-/* the default has to be reachable only where it is meant to be. At the documented cadence of half the ttl, three renewals already outlast the lease, so the lease clock decides and the threshold changes nothing for a gate that did not ask for a denser cadence. */
 func TestLeaderGate_TheDefaultThresholdIsUnreachableAtTheDefaultCadence(t *testing.T) {
     ttl := time.Minute
 
@@ -850,7 +827,6 @@ func TestLeaderGate_TheDefaultThresholdIsUnreachableAtTheDefaultCadence(t *testi
     }
 }
 
-/* alternatingRefreshLocker fails every other renewal: losses that never land back to back, the shape of a lossy link rather than a store that has gone. */
 type alternatingRefreshLocker struct {
     inner    lockcontract.Locker
     attempts atomic.Int64
@@ -881,7 +857,6 @@ func (instance *alternatingRefreshLock) Refresh(runtimeInstance containercontrac
     return instance.inner.Refresh(runtimeInstance, options)
 }
 
-/* The threshold counts failures that are CONSECUTIVE, so a renewal that lands has to clear the count. Without the reset the counter only ever climbs: a lossy link that drops one renewal in two — every one of them survived by the next — still reaches three eventually and ends a term that was never lost, which is the flapping the threshold exists to prevent rather than cause. Over the window below the gate accumulates far more than three individual failures and none of them are adjacent. */
 func TestLeaderGate_ScatteredFailuresNeverAccumulateIntoADemotion(t *testing.T) {
     failing := &alternatingRefreshLocker{inner: NewInMemoryLocker(InMemoryLockerConfig{})}
 
@@ -930,7 +905,6 @@ func TestLeaderGate_ScatteredFailuresNeverAccumulateIntoADemotion(t *testing.T) 
     <-done
 }
 
-/* In session mode there is no lease and no lease clock: the lock lives as long as the backend session does. Before the guard, enterTerm dated a "lease" from the acquire instant with no ttl — a deadline already in the past — so the FIRST failed liveness probe of every term found it beyond recovery and demoted immediately, overriding the documented three-failure tolerance the option promises. */
 func TestLeaderGate_SessionModeToleratesTransientProbeFailures(t *testing.T) {
     failing := &countedFailureLocker{inner: &sessionStyleLocker{inner: NewInMemoryLocker(InMemoryLockerConfig{})}, failureCount: 1}
 
@@ -991,7 +965,6 @@ func TestLeaderGate_SessionModePersistentProbeFailuresEndTheTerm(t *testing.T) {
 
     go gate.Run(testRuntimeWithContext(runContext))
 
-    /* with no lease clock in session mode, the consecutive-failure threshold is the only demotion signal — a store that is plainly gone must still end the term */
     select {
     case <-lost:
     case <-time.After(2 * time.Second):
@@ -1021,7 +994,6 @@ func TestLeaderGate_PanickingOnElectedHookIsShieldedAndLogged(t *testing.T) {
         close(runDone)
     }()
 
-    /* the panic is recovered and recorded, and above all the process survives, where the unshielded form killed it with the lock held for the rest of its ttl on every peer; the term it was leading ends with it, which the sibling tests below pin */
     waitUntil(t, 2*time.Second, func() bool { return logger.hasMessageContaining("leader gate hook panicked") }, "expected the hook panic to be logged")
 
     waitUntil(t, 2*time.Second, func() bool { return false == gate.IsLeader() }, "expected the term to end after the recovered hook panic")
@@ -1034,7 +1006,6 @@ func TestLeaderGate_PanickingOnElectedHookIsShieldedAndLogged(t *testing.T) {
         t.Fatalf("the gate did not shut down cleanly after the recovered panic")
     }
 
-    /* the shutdown released the lock: a fresh campaign must win it immediately */
     acquired, acquireErr := mustCreateLock(locker.CreateLock("worker:hook-panics", lockcontract.CreateLockOptions{Ttl: bound.Of(time.Minute)})).Acquire(testRuntimeWithContext(context.Background()))
     if nil != acquireErr || false == acquired {
         t.Fatalf("expected the lock to be released on shutdown, got acquired=%v err=%v", acquired, acquireErr)
@@ -1051,7 +1022,6 @@ func TestLeaderGate_CampaignErrorIsLoggedWhenNoHookIsWired(t *testing.T) {
 
     go gate.Run(runtimeInstance)
 
-    /* without the record a store outage and a permanent misconfiguration both look exactly like a deployment that quietly elects no leader and does no work */
     waitUntil(t, 2*time.Second, func() bool { return logger.hasMessageContaining("leader gate campaign failed") }, "expected the failed campaign to be logged")
 }
 
@@ -1103,7 +1073,6 @@ func TestLeaderGate_PanickingRefreshDemotesInsteadOfKillingTheProcess(t *testing
 
     go gate.Run(testRuntimeWithContext(runContext))
 
-    /* a panicking backend Refresh unwinds a bare goroutine with no recover of the caller's; recovered, it is the same demotion signal a returned error is — the process survives and the gate re-campaigns */
     select {
     case cause := <-lost:
         if nil == cause || false == strings.Contains(cause.Error(), "leader gate refresh panicked") {
@@ -1128,7 +1097,7 @@ func TestLeaderGate_IsLeaderAnswersFromTheAcquireLeaseBeforeAnyRenewal(t *testin
 
     leaderAtElection := make(chan bool, 1)
 
-    /* the refresh cadence is left at its default — half a one-minute ttl — so no renewal can land before the assertion: what answers inside OnElected is the lease enterTerm dated from the acquire, the only lease that exists in the window between election and the first renewal. A gate that fails to store it reports a leader the fleet cannot see. */
+    /* the cadence stays at its default, half a one-minute ttl, so no renewal lands before the assertion */
     var gate *LeaderGate
     gate = NewLeaderGate(NewInMemoryLocker(InMemoryLockerConfig{}), "worker:first-window", LeaderGateConfig{
         Ttl:           bound.Of(time.Minute),
@@ -1150,7 +1119,6 @@ func TestLeaderGate_IsLeaderAnswersFromTheAcquireLeaseBeforeAnyRenewal(t *testin
     }
 }
 
-/* the shield keeps the process alive, but not the term: a gate parked on a term whose work died would renew a lease under nothing and answer IsLeader */
 func TestLeaderGate_APanickingOnElectedEndsTheTermAndReleasesTheLock(t *testing.T) {
     locker := NewInMemoryLocker(InMemoryLockerConfig{})
 
@@ -1197,7 +1165,6 @@ func TestLeaderGate_APanickingOnElectedEndsTheTermAndReleasesTheLock(t *testing.
         t.Fatalf("expected the gate to have left its term")
     }
 
-    /* the lock is free between the ended term and the next campaign, a whole RetryInterval away: another replica can take it now */
     acquired, acquireErr := mustCreateLock(locker.CreateLock("worker:hook-panics-term", lockcontract.CreateLockOptions{Ttl: bound.Of(time.Minute)})).Acquire(testRuntimeWithContext(context.Background()))
     if nil != acquireErr || false == acquired {
         t.Fatalf("expected the lock to be released with the ended term, got acquired=%v err=%v", acquired, acquireErr)
@@ -1228,7 +1195,6 @@ func TestLeaderGate_APanickingOnElectedIsCampaignedAgainAfterRetryInterval(t *te
     waitUntil(t, 2*time.Second, func() bool { return 2 <= elections.Load() }, "expected the gate to campaign again after the panicking term ended")
 }
 
-/* OnLost runs after the term has already ended and OnCampaignError outside any term, so their panics have no term to end: the shield journals them and the loop goes on — the mutant that would demote on every hook is told apart here */
 func TestLeaderGate_APanickingOnLostDoesNotStopTheCampaigns(t *testing.T) {
     locker := NewInMemoryLocker(InMemoryLockerConfig{})
 
@@ -1274,7 +1240,6 @@ func (instance *typedNilScopeRuntime) Kind() containercontract.Kind {
     return containercontract.KindRun
 }
 
-/* the runtime package's resolution doors tolerate a typed-nil scope, so such a runtime reaches the gate; it is refused before campaigning, since runtime.WithContext would refuse it inside the deferred release, a second panic with the lock held */
 func TestLeaderGateRun_RefusesATypedNilScopeBeforeCampaigning(t *testing.T) {
     locker := NewInMemoryLocker(InMemoryLockerConfig{})
     gate := NewLeaderGate(locker, "worker:typed-nil-scope", LeaderGateConfig{Ttl: bound.Of(time.Minute)})
@@ -1289,7 +1254,6 @@ func TestLeaderGateRun_RefusesATypedNilScopeBeforeCampaigning(t *testing.T) {
     }
 }
 
-/* measures how long before a second gate is elected the first gate's hook, still working, is told to stop; the first gate renews through firstLocker, over the same store the second campaigns on */
 func handoverMarginUnder(t *testing.T, innerLocker lockcontract.Locker, firstLocker lockcontract.Locker, ttl time.Duration) time.Duration {
     t.Helper()
 
@@ -1303,7 +1267,6 @@ func handoverMarginUnder(t *testing.T, innerLocker lockcontract.Locker, firstLoc
     secondElected := make(chan time.Time, 1)
     releaseFirstHook := make(chan struct{})
 
-    /* the hook keeps working after it is told to stop, so the lock is not released and the second gate can only take it once the lease lapses */
     first := NewLeaderGate(firstLocker, "worker:handover", LeaderGateConfig{
         Ttl:             bound.Of(ttl),
         RetryInterval:   bound.Of(time.Minute),
@@ -1356,7 +1319,7 @@ func handoverMarginUnder(t *testing.T, innerLocker lockcontract.Locker, firstLoc
     return electedAt.Sub(stoppedAt)
 }
 
-/* the renewal issued at the cadence never answers; bounded to the lease's demotion instant it is cut there, so an elected hook still working is told to stop a quarter of the ttl before the lease lapses and a second gate takes the lock, rather than at the lapse itself */
+/* cut at the demotion instant, the stop lands a quarter of the ttl before the lapse */
 func TestLeaderGate_AHungRenewalStopsTheElectedHookBeforeASecondGateIsElected(t *testing.T) {
     innerLocker := NewInMemoryLocker(InMemoryLockerConfig{})
     ttl := 400 * time.Millisecond
@@ -1366,7 +1329,6 @@ func TestLeaderGate_AHungRenewalStopsTheElectedHookBeforeASecondGateIsElected(t 
     }
 }
 
-/* every renewal fails at once; the one retry halfway to the demotion instant fails too, and the timer ends the term there instead of the next tick ending it at the lapse */
 func TestLeaderGate_AFailingRenewalStopsTheElectedHookBeforeASecondGateIsElected(t *testing.T) {
     innerLocker := NewInMemoryLocker(InMemoryLockerConfig{})
     ttl := 400 * time.Millisecond
@@ -1379,7 +1341,6 @@ func TestLeaderGate_AFailingRenewalStopsTheElectedHookBeforeASecondGateIsElected
     }
 }
 
-/* parkingReleaseLocker holds every Release until the test lets it go, so the instant between leaving the term and the lock reaching the store can be observed */
 type parkingReleaseLocker struct {
     inner          lockcontract.Locker
     releaseEntered chan struct{}
@@ -1413,7 +1374,6 @@ func (instance *parkingReleaseLock) Refresh(runtimeInstance containercontract.Ru
     return instance.inner.Refresh(runtimeInstance, options)
 }
 
-/* the term is left before the lock is released: while the release is still on its way to the store the lease is valid, and a gate that still claimed leadership then would answer IsLeader for a lock it is handing back */
 func TestLeaderGate_LeavesTheTermBeforeTheReleaseReachesTheStore(t *testing.T) {
     locker := &parkingReleaseLocker{
         inner:          NewInMemoryLocker(InMemoryLockerConfig{}),
@@ -1452,7 +1412,6 @@ func TestLeaderGate_LeavesTheTermBeforeTheReleaseReachesTheStore(t *testing.T) {
     }
 }
 
-/* the renewal ignores its context and answers success only after the demotion instant: the elected hook is still told to stop at the instant, before the lease it was elected under lapses */
 func TestLeaderGate_ARenewalIgnoringItsContextStopsTheElectedHookAtTheDemotionInstant(t *testing.T) {
     ttl := 400 * time.Millisecond
     locker := &contextIgnoringRefreshLocker{inner: NewInMemoryLocker(InMemoryLockerConfig{}), delay: 180 * time.Millisecond}
@@ -1977,7 +1936,6 @@ func TestLeaderGate_ReleasesItsTermOnAContextDetachedFromTheRunWithNoDeadlineOfI
     }
 }
 
-/* decoratedLocker forwards to the locker it embeds, as an application's decorator does */
 type decoratedLocker struct {
     lockcontract.Locker
 }

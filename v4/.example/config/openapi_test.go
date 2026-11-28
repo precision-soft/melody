@@ -20,7 +20,6 @@ func TestOpenApiDocument_CarriesTheApplicationVersion(t *testing.T) {
     }
 }
 
-/* the descriptors are compared whole: a request type dropped or a response bound under the wrong status changes the published document without failing any route */
 func TestOpenApiRegistry_DescribesTheExampleRoutesWithTheirTypes(t *testing.T) {
     module := &Module{applicationVersion: "9.9.9"}
     module.buildOpenApi()

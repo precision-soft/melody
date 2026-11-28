@@ -9,7 +9,6 @@ import (
     "github.com/precision-soft/melody/v4/.example/entity"
 )
 
-/* a row written past the service, as no listener drops the list for it, stays out of the listing until the cached list is dropped */
 func TestApiReadAllHandler_ReadsTheCachedList(t *testing.T) {
     fixture := newCategoryDoorFixture(t)
 

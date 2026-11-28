@@ -4,7 +4,6 @@ import (
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
 )
 
-/* builtAtBootNames answers the names the container builds at boot, in registration order, and the mode each declared */
 func builtAtBootNames(containerInstance any) ([]string, map[string]melodycontainercontract.BootFailureMode) {
     registrations := containerInstance.(interface {
         BuiltAtBootRegistrations() []melodycontainercontract.BuiltAtBootRegistration

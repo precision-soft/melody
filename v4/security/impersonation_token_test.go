@@ -40,7 +40,6 @@ func TestNewImpersonationToken_RefusesEitherSideMissing(t *testing.T) {
     }, "can not impersonate with a nil impersonator token")
 }
 
-/* the visible principal is always the impersonated user — the admin acts in the target's context — and the default role mode takes on the target's rights, which is what makes the session an honest reproduction of what the target sees */
 func TestImpersonationToken_ShowsTheImpersonatedPrincipal(t *testing.T) {
     impersonated, impersonator := impersonationProbeTokens()
     token := NewImpersonationToken(impersonated, impersonator, RoleModeImpersonated)
@@ -62,7 +61,6 @@ func TestImpersonationToken_ShowsTheImpersonatedPrincipal(t *testing.T) {
     }
 }
 
-/* the explicit mode keeps the admin's own rights while the context stays the target's: identity and scope must NOT follow the roles, or the mode would be an ordinary admin session with the target's name on it */
 func TestImpersonationToken_ImpersonatorRoleModeChangesOnlyTheRoles(t *testing.T) {
     impersonated, impersonator := impersonationProbeTokens()
     token := NewImpersonationToken(impersonated, impersonator, RoleModeImpersonator)
@@ -80,7 +78,6 @@ func TestImpersonationToken_ImpersonatorRoleModeChangesOnlyTheRoles(t *testing.T
     }
 }
 
-/* sharingToken hands back its own backing slice and map, as an application's token may; a probe built from the framework's own token, which already copies, would leave this guard unexercised */
 type sharingToken struct {
     roles []string
     scope map[string]any
@@ -94,7 +91,6 @@ func (instance *sharingToken) IsAuthenticated() bool      { return true }
 
 var _ securitycontract.Token = (*sharingToken)(nil)
 
-/* the roles and the scope are handed out as copies: a caller mutating what it read would be rewriting the rights of a live impersonation session */
 func TestImpersonationToken_HandsOutCopies(t *testing.T) {
     shared := &sharingToken{roles: []string{"ROLE_USER"}, scope: map[string]any{"tenant": "acme"}}
     _, impersonator := impersonationProbeTokens()
@@ -122,7 +118,6 @@ func TestImpersonationToken_HandsOutCopies(t *testing.T) {
     }
 }
 
-/* both identities travel downstream: the impersonated user carries the effective roles of the active mode, and the accountable admin rides behind as the impersonator, so an audit two services away can still name who really acted */
 func TestImpersonationToken_OnBehalfOfCarriesBothIdentities(t *testing.T) {
     impersonated, impersonator := impersonationProbeTokens()
     token := NewImpersonationToken(impersonated, impersonator, RoleModeImpersonator)
@@ -140,7 +135,6 @@ func TestImpersonationToken_OnBehalfOfCarriesBothIdentities(t *testing.T) {
         t.Fatalf("expected the effective roles of the active mode on the actor, got %v", actor.Roles())
     }
 
-    /* the impersonator rides on the optional ActorImpersonating capability rather than on Actor itself, so the read is the type assertion a consumer downstream makes */
     impersonating, isImpersonating := actor.(securitycontract.ActorImpersonating)
     if false == isImpersonating {
         t.Fatal("expected the actor to carry the impersonating capability")
@@ -174,7 +168,6 @@ func TestImpersonatorFromToken_AnswersFalseForAnythingElse(t *testing.T) {
     }
 }
 
-/* an admin impersonating a, then as a impersonating b, is carried as b behind a behind the admin, so the root admin stays accountable in the next service */
 func TestImpersonationToken_ANestedImpersonationKeepsTheRootAdminInTheActor(t *testing.T) {
     admin := NewAuthenticatedToken("admin", []string{"ROLE_ADMIN"}, nil)
     first := NewImpersonationToken(NewAuthenticatedToken("a", []string{"ROLE_A"}, nil), admin, RoleModeImpersonated)
@@ -208,7 +201,6 @@ func TestImpersonationToken_ASingleImpersonationCarriesTheAdminAlone(t *testing.
     }
 }
 
-/* an impersonator whose originating actor names somebody else, the user an upstream service acts for, is carried under its own identity */
 func TestImpersonationToken_AnImpersonatorActingForAnotherUserIsCarriedUnderItsOwnIdentity(t *testing.T) {
     service := NewAuthenticatedToken("service", []string{"ROLE_ADMIN"}, NewActor("upstream-user", securitycontract.ActorTypeUser, ActorConfig{}))
     token := NewImpersonationToken(NewAuthenticatedToken("a", []string{"ROLE_A"}, nil), service, RoleModeImpersonated)

@@ -41,7 +41,6 @@ func (instance *stubEnvironmentSource) Load(ctx context.Context) (map[string]str
     return instance.values, nil
 }
 
-/* currencyDoorFixture carries what the three write doors read: the configuration, the validator and the serializer the binding and the presenter reach, and the currency service over the in-memory repository a handleless catalog storage answers, seeded as the application seeds it, so a door is pinned on what it wrote and not only on what it refused */
 type currencyDoorFixture struct {
     container          melodycontainercontract.Container
     currencyRepository repository.CurrencyRepository
@@ -135,7 +134,6 @@ func newCurrencyDoorFixture(t *testing.T) *currencyDoorFixture {
     }
 }
 
-/* runtimeFor answers a runtime whose security context holds a token carrying the roles given */
 func (instance *currencyDoorFixture) runtimeFor(roles ...string) melodycontainercontract.Runtime {
     runtimeInstance := melodyruntime.NewRequest(context.Background(), instance.container.NewScope())
 
@@ -153,7 +151,6 @@ func (instance *currencyDoorFixture) runtimeFor(roles ...string) melodycontainer
     return runtimeInstance
 }
 
-/* call runs a door with the body and the route parameters given and answers the status and the body */
 func (instance *currencyDoorFixture) call(
     t *testing.T,
     handler melodyhttpcontract.Handler,
@@ -218,7 +215,6 @@ func decodeBody(t *testing.T, body string, target any) {
     }
 }
 
-/* holdingCode answers the identifiers of every stored currency whose code is the one given, which is the property the code's unique key holds */
 func (instance *currencyDoorFixture) holdingCode(t *testing.T, code string) []string {
     t.Helper()
 

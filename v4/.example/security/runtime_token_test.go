@@ -63,9 +63,7 @@ func TestTokenFromRuntime_AnswersAbsentWithoutASecurityContext(t *testing.T) {
     }
 }
 
-/* the security context is built here with no token at all, which the framework's
-resolution listener never does -- each of its exits publishes a live token. The
-producer that can is the exported constructor, used exactly as this test uses it. */
+/* built with no token at all, which the framework's resolution listener never does */
 func TestTokenFromRuntime_AnswersAbsentForAContextCarryingNoToken(t *testing.T) {
     token, exists := TokenFromRuntime(runtimeCarryingToken(t, nil))
 

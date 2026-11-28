@@ -60,7 +60,6 @@ func TestReopenableFileWriter_ReopenFollowsARenameToTheFreshFile(t *testing.T) {
         t.Fatalf("unexpected rename error: %v", renameErr)
     }
 
-    /* without the reopen this write lands in the renamed inode — that is the defect the writer exists for */
     reopenErr := writer.Reopen()
     if nil != reopenErr {
         t.Fatalf("unexpected reopen error: %v", reopenErr)
@@ -178,7 +177,6 @@ func TestReopenableFileWriter_ArmRefusesADoubleArmAndAnEmptySignalSet(t *testing
     }
 }
 
-/* the live half: a real SIGHUP delivered to this process reopens the journal. The probe polls by writing markers — every write flows through whatever descriptor is current, so the marker appears at the path exactly when the watcher's reopen has swapped it. The signal is only ever sent while the watcher is armed: an armed Notify holds the process's default SIGHUP action off, and Close disarms before this test returns. */
 func TestReopenableFileWriter_ASighupReopensTheJournalWhileArmed(t *testing.T) {
     directory := t.TempDir()
     logPath := filepath.Join(directory, "application.log")
@@ -224,7 +222,6 @@ func TestReopenableFileWriter_ASighupReopensTheJournalWhileArmed(t *testing.T) {
     }
 }
 
-/* the swap is committed before the replaced descriptor is closed and is never rolled back, so a refused close reports a rotation that HAPPENED: sharing a headline with a failed open would tell the operator the journal is stuck on the renamed file while it is in fact healthy on the fresh one. */
 func TestReopenableFileWriter_ARefusedCloseOfTheReplacedDescriptorIsStillARotation(t *testing.T) {
     directory := t.TempDir()
     logPath := filepath.Join(directory, "application.log")
@@ -243,7 +240,7 @@ func TestReopenableFileWriter_ARefusedCloseOfTheReplacedDescriptorIsStillARotati
         t.Fatalf("unexpected rename error: %v", renameErr)
     }
 
-    /* surrender the descriptor under the writer so the rotation's own close of it refuses — the shape a deferred write surfacing at close(2) takes on a remote or failing device */
+    /* surrender the descriptor under the writer so the rotation's own close of it refuses */
     writer.mutex.Lock()
     _ = writer.file.Close()
     writer.mutex.Unlock()
@@ -257,7 +254,6 @@ func TestReopenableFileWriter_ARefusedCloseOfTheReplacedDescriptorIsStillARotati
         t.Fatalf("expected the refused close to be told apart from a failed rotation, got %v", reopenErr)
     }
 
-    /* the writer is on the fresh file and healthy, which is exactly what the sentinel promises the caller */
     _, writeErr := writer.Write([]byte("after rotation\n"))
     if nil != writeErr {
         t.Fatalf("expected the rotated writer to keep writing, got %v", writeErr)
@@ -277,7 +273,6 @@ func TestReopenableFileWriter_ARefusedCloseOfTheReplacedDescriptorIsStillARotati
     }
 }
 
-/* the negative half: a rotation that did NOT happen must never carry the sentinel, or the caller announces a healthy journal while the writer is still on the renamed inode */
 func TestReopenableFileWriter_AFailedOpenDoesNotCarryTheRotatedDescriptorSentinel(t *testing.T) {
     directory := t.TempDir()
     logPath := filepath.Join(directory, "application.log")
@@ -322,7 +317,6 @@ func TestReopenableFileWriter_AFailedOpenDoesNotCarryTheRotatedDescriptorSentine
     }
 }
 
-/* the writer and the reopener leave one release channel together and run to the end side by side, so writes land while the descriptor is swapped and closed under them: every record reaches the file whole and no write meets a closed descriptor. */
 func TestReopenableFileWriter_WritesStayWholeWhileReopenSwapsTheDescriptor(t *testing.T) {
     const recordCount = 2000
     const reopenCount = 200

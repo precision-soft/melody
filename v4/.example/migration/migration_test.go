@@ -6,7 +6,6 @@ import (
     "testing"
 )
 
-/* the set is one migration because the example has one state, so what is pinned is the content of that migration, which statements it emits and in what order; a count of steps cannot see a set emitted in the wrong order. */
 func TestMigrationsHoldOneSchemaMigration(t *testing.T) {
     sorted := Migrations.Sorted()
     if 1 != len(sorted) {
@@ -45,7 +44,6 @@ func TestUpSchemaCreatesEveryTableTolerantly(t *testing.T) {
     })
 }
 
-/* a product's currency and category are held by the schema: a delete of either is refused while a product names it, and a product cannot name one that does not exist */
 func TestUpSchemaHoldsAProductsReferences(t *testing.T) {
     for _, wanted := range []string{
         "CONSTRAINT `" + ProductCurrencyForeignKeyName + "` FOREIGN KEY (`currency_id`) REFERENCES `melody_example_v4_currency` (`id`) ON DELETE RESTRICT",
@@ -57,7 +55,6 @@ func TestUpSchemaHoldsAProductsReferences(t *testing.T) {
     }
 }
 
-/* the username's identity is the column the application folds, held unique byte for byte */
 func TestUpSchemaHoldsTheFoldedUsernameUnique(t *testing.T) {
     for _, wanted := range []string{
         "`username_normalized` VARCHAR(255) COLLATE utf8mb4_bin NOT NULL",
@@ -69,17 +66,12 @@ func TestUpSchemaHoldsTheFoldedUsernameUnique(t *testing.T) {
     }
 }
 
-/* a session row goes with its account */
 func TestUpSchemaTiesASessionRowToItsAccount(t *testing.T) {
     if false == strings.Contains(createUserSessionTableSql, "FOREIGN KEY (`user_identifier`) REFERENCES `melody_example_v4_user` (`id`) ON DELETE CASCADE") {
         t.Fatalf("expected the session index to cascade with the account, got %s", createUserSessionTableSql)
     }
 }
 
-/* the enrollment goes with its account by the SCHEMA: a tagged listener releases it on the deletion event too, even
-   after a listener ahead of it failed, but the release's own store can fail, and a row left behind starts the next
-   holder of the recycled identifier enrolled with the previous holder's secret. The key is declared on the DDL the up migration emits,
-   and it can only be declared over a user table that already exists, which the order of the statements pins. */
 func TestUpSchemaTiesATwoFactorRowToItsAccount(t *testing.T) {
     if false == strings.Contains(createTwoFactorTableSql, "FOREIGN KEY (`user_identifier`) REFERENCES `melody_example_v4_user` (`id`) ON DELETE CASCADE") {
         t.Fatalf("expected the two-factor table to cascade its rows with the account, got %s", createTwoFactorTableSql)
@@ -120,7 +112,6 @@ func TestDownSchemaDropsTheTablesInReverse(t *testing.T) {
     })
 }
 
-/* every column that holds an entity identifier is compared under utf8mb4_bin: the identity of an id is exact everywhere else, in the in-memory repositories and the cache keys, and under the table's default collation a lookup by id would fold case and accents, so an alias spelling would find the row and be cached under a key nothing invalidates */
 func TestUpSchemaComparesEveryIdentifierColumnByteForByte(t *testing.T) {
     database, recorder := newFakeBunDatabase()
 

@@ -25,7 +25,6 @@ import (
     melodysession "github.com/precision-soft/melody/v4/session"
 )
 
-/* routedRequestAs is a request the router matched to the route named, for a caller the firewall authenticated with the roles given */
 func routedRequestAs(t *testing.T, routeName string, target string, roles []string) (*melodyhttp.Request, melodycontainercontract.Runtime) {
     t.Helper()
 
@@ -35,14 +34,12 @@ func routedRequestAs(t *testing.T, routeName string, target string, roles []stri
     return request, runtimeInstance
 }
 
-/* revisionDisabled is the configuration of the pins about everything but the revision */
 var revisionDisabled = StreamRevisionConfig{Disabled: true}
 
 const streamAccountPasswordHash = "password-hash-1"
 
 var errDirectoryUnavailable = errors.New("the directory is unavailable")
 
-/* streamAccount is the directory and the session storage an open stream's revision re-reads, each changeable while the stream is open */
 type streamAccount struct {
     mutex       sync.Mutex
     user        *entity.User
@@ -103,7 +100,6 @@ func (instance *streamAccount) revision(interval time.Duration) StreamRevisionCo
     return StreamRevisionConfig{Interval: interval, LookupUser: instance.lookup, SessionLive: instance.live}
 }
 
-/* signedInStream is a stream request the main firewall authenticated from a signed-in session of the account, with the hub and a recording logger on its container, and the cancel of its request context */
 type signedInStream struct {
     request         *melodyhttp.Request
     runtimeInstance melodycontainercontract.Runtime
@@ -169,7 +165,6 @@ func signedInStreamRequest(t *testing.T, target string, account *streamAccount, 
     return stream
 }
 
-/* awaitClosed waits for a handler run in the background to return */
 func awaitClosed(t *testing.T, done <-chan struct{}, within time.Duration, what string) {
     t.Helper()
 
@@ -180,7 +175,6 @@ func awaitClosed(t *testing.T, done <-chan struct{}, within time.Duration, what 
     }
 }
 
-/* awaitReads waits for the open stream's re-reads to reach the count, so a re-read that never comes fails the pin instead of hanging the package */
 func awaitReads(t *testing.T, account *streamAccount, count int, within time.Duration) {
     t.Helper()
 
@@ -194,7 +188,6 @@ func awaitReads(t *testing.T, account *streamAccount, count int, within time.Dur
     }
 }
 
-/* awaitHanded waits for the request the middleware handed its handler */
 func awaitHanded(t *testing.T, handed *atomic.Pointer[melodyhttpcontract.Request], within time.Duration) melodyhttpcontract.Request {
     t.Helper()
 

@@ -15,7 +15,7 @@ import (
     melodymessagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
 )
 
-/* The transport dials nothing at boot. The dsn below points at an address no broker answers on, and the transport is built over it without a packet leaving the process; a dsn this application cannot dial surfaces at the first publish, through the transport's own retry loop. The test is written as a deadline rather than as an assertion on the return, because the failure it guards against is a dial: the address is a discard port on a host that does not resolve, so a boot-time dial would spend the resolver's own timeout before it panicked. */
+/* an address no broker answers on: the transport dials nothing at boot */
 func TestBuildMessageBusTransport_DoesNotDialAtBoot(t *testing.T) {
     moduleInstance := moduleWithEnvironment(t, map[string]string{
         "AMQP_DSN": "amqp://guest:guest@broker.invalid:5672/",
@@ -43,7 +43,6 @@ func TestBuildMessageBusTransport_DoesNotDialAtBoot(t *testing.T) {
     }
 }
 
-/* Without a dsn the example runs the whole message bus in process, which is what makes a checkout without a broker functional rather than merely bootable. */
 func TestBuildMessageBusTransport_FallsBackToTheInProcessTransportWithoutADsn(t *testing.T) {
     moduleInstance := moduleWithEnvironment(t, map[string]string{})
 
@@ -54,7 +53,6 @@ func TestBuildMessageBusTransport_FallsBackToTheInProcessTransportWithoutADsn(t 
     }
 }
 
-/* the notification handler resolves the hub through the runtime at each message: the hub the container publishes is the one that broadcasts, not the one the composition root held when the bus was built, and a capture would leave the hub's provider, its logger swap and its teardown edge unrun. The module's own hub and the registered one are two hubs here, so a capture broadcasts where nobody listens. */
 func TestBuildMessageBus_TheNotificationHandlerResolvesTheHubAtEachMessage(t *testing.T) {
     moduleInstance := moduleWithEnvironment(t, map[string]string{})
     moduleInstance.buildMessageBus()
@@ -99,8 +97,6 @@ func TestBuildMessageBus_TheNotificationHandlerResolvesTheHubAtEachMessage(t *te
     }
 }
 
-/* the dispatch bus claims the Bus contract on the type index and the consume bus is asked for by name only:
-   both are the same contract, and a second registration by type is refused by the container */
 func TestRegisterMessageBusServices_TheDispatchBusOwnsTheTypeAndTheConsumeBusIsByName(t *testing.T) {
     moduleInstance := moduleWithEnvironment(t, map[string]string{})
     moduleInstance.buildMessageBus()

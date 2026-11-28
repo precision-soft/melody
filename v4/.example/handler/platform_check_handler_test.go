@@ -143,7 +143,6 @@ func assertPlatformCheckLockIsFree(t *testing.T, locker melodylockcontract.Locke
     }
 }
 
-/* cancellingLocker hangs the client up once the lock is taken, and, as a networked backend does, fails a release handed a context already done. */
 type cancellingLocker struct {
     locker        melodylockcontract.Locker
     cancelRequest context.CancelFunc

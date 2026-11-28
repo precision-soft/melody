@@ -36,7 +36,6 @@ func productionMetricsModule(t *testing.T, token string) *Module {
     return moduleWithEnvironment(t, map[string]string{melodyconfig.EnvironmentNameKey: melodyconfig.EnvironmentProduction, environmentKeyMetricsToken: token})
 }
 
-/* outside development the committed token, padded or not, refuses the boot naming the key and never the value */
 func TestBuildMetricsAuth_RefusesTheCommittedTokenOutsideDevelopment(t *testing.T) {
     for _, value := range []string{developmentMetricsToken, " " + developmentMetricsToken + " "} {
         moduleInstance := productionMetricsModule(t, value)
@@ -62,7 +61,6 @@ func TestBuildMetricsAuth_RefusesTheCommittedTokenOutsideDevelopment(t *testing.
     }
 }
 
-/* the refused constant is the value .env commits, so the refusal cannot drift from the file */
 func TestDevelopmentMetricsToken_IsTheValueEnvCommits(t *testing.T) {
     content, readErr := os.ReadFile(filepath.Join("..", ".env"))
     if nil != readErr {
@@ -106,7 +104,6 @@ func TestBuildMetricsAuth_AcceptsTheCommittedTokenInDevelopment(t *testing.T) {
     }
 }
 
-/* a whitespace token is read as empty in both environments: public, never a "Bearer   " credential */
 func TestBuildMetricsAuth_ReadsAWhitespaceTokenAsEmpty(t *testing.T) {
     for _, moduleInstance := range []*Module{
         productionMetricsModule(t, "   "),
@@ -128,7 +125,6 @@ func TestBuildMetricsAuth_ReadsAWhitespaceTokenAsEmpty(t *testing.T) {
     }
 }
 
-/* no committed default: an empty key in development stays empty, /metrics public */
 func TestBuildMetricsAuth_TakesNoFallbackInDevelopmentWhenEmpty(t *testing.T) {
     moduleInstance := moduleWithEnvironment(t, map[string]string{environmentKeyMetricsToken: ""})
     moduleInstance.buildMetricsAuth()
@@ -138,7 +134,6 @@ func TestBuildMetricsAuth_TakesNoFallbackInDevelopmentWhenEmpty(t *testing.T) {
     }
 }
 
-/* the code is declared, written in cli, in every environment; one warning names the key and the path, never a value, for an empty token outside development */
 func TestRegisterBootWarnings_WarnsOfAPublicExpositionOutsideDevelopmentOnly(t *testing.T) {
     if "example.metrics.public" != MetricsPublicBootWarningName {
         t.Fatalf("expected the code example.metrics.public, got %q", MetricsPublicBootWarningName)

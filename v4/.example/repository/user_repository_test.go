@@ -50,7 +50,7 @@ func TestNextUserIdContinuesTheSeededNumbering(t *testing.T) {
     }
 }
 
-/* the example's accounts sign in with their names as passwords: a directory on a handle nobody marked starts empty, in memory and in the database, and one marked by the development composition root starts from the three */
+/* the example's accounts sign in with their names as passwords */
 func TestNewUserRepository_SeedsTheAccountsOnlyOnAMarkedStorage(t *testing.T) {
     unmarked, unmarkedErr := NewUserRepository(persistence.NewCatalogStorage(nil), &persistence.CatalogSchema{})
     if nil != unmarkedErr {

@@ -388,7 +388,6 @@ func TestWithdrawMintedToken_ACancelledRequestStillWithdrawsTheToken(t *testing.
     }
 }
 
-/* contextRefusingTokenStore refuses a revocation whose runtime's context is done, as a store over the network does */
 type contextRefusingTokenStore struct {
     *melodysecurity.InMemoryTokenStore
 }

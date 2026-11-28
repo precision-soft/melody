@@ -124,7 +124,6 @@ func TestApiSuccessKeepsTheSerializerRenderingForATextPlainClient(t *testing.T) 
     }
 }
 
-/* a refusal that tells the client how to go on keeps it for a text/plain client, beneath the status line, as the json client reads it in the envelope's payload */
 func TestApiErrorWithPayloadWritesThePayloadBeneathTheStatusLine(t *testing.T) {
     runtimeInstance, request := textNegotiatingRequest(t)
 

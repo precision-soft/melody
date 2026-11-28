@@ -12,7 +12,6 @@ import (
     "github.com/precision-soft/melody/v4/exception"
 )
 
-/* the view is the plan the teardown would run, read without running it: the dependencies of a node are listed sorted, and its wave is the one the drain gives it. */
 func TestContainer_TeardownPlan_ListsEachNodeWithItsSortedDependenciesAndItsWave(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -135,7 +134,6 @@ func TestContainer_TeardownPlan_AServiceFiledUnderItsNameAndTypeHoldingItselfLis
     }
 }
 
-/* the verification of a closed container is refused with the cause Register answers on the same condition. */
 func TestContainer_VerifyDeclaredTeardownDependencies_RefusesAClosedContainer(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -160,13 +158,11 @@ func TestContainer_VerifyDeclaredTeardownDependencies_RefusesAClosedContainer(t 
         t.Fatalf("expected the verification of a closed container to be refused as closed, got %v", verifyErr)
     }
 
-    /* the refusal names the door it refused, not a service in creation */
     if "VerifyDeclaredTeardownDependencies" != exception.LogContext(verifyErr, exception.LogContextOptions{})["door"] {
         t.Fatalf("expected the refusal to name the door, got %v", exception.LogContext(verifyErr, exception.LogContextOptions{}))
     }
 }
 
-/* the remainder the drain leaves holds the ring and the pure dependencies of its members alike; the flag names the ring: a resolves b, b resolves c, and an edge b → a no door admits is written past them — c is closed with the remainder and is on no ring */
 func TestTeardownPlan_APureDependencyOfARingMemberIsNotFlaggedAsACycle(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -218,7 +214,6 @@ func TestTeardownPlan_APureDependencyOfARingMemberIsNotFlaggedAsACycle(t *testin
     }
 }
 
-/* a bridge between two rings — a service one ring member depends on, that depends on a member of the other ring — is on no ring: it is released once the first ring closes and closed before the second, in the order the graph proves, so it is not flagged */
 func TestTeardownPlan_ABridgeBetweenTwoRingsIsNotFlaggedAsACycle(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 

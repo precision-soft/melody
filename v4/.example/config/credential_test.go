@@ -18,7 +18,6 @@ import (
 
 const ownJwtSecret = "an-operator-chosen-signing-secret-of-its-own"
 
-/* in development a blank key takes the committed value and a value of its own is kept */
 func TestCredential_DevelopmentTakesTheCommittedValueForABlankKey(t *testing.T) {
     if exampleJwtSecret != moduleWithEnvironment(t, map[string]string{}).credential(environmentKeyJwtSecret, parameterJwtSecret, exampleJwtSecret) {
         t.Fatal("expected a blank key to take the committed value in development")
@@ -30,7 +29,6 @@ func TestCredential_DevelopmentTakesTheCommittedValueForABlankKey(t *testing.T) 
     }
 }
 
-/* outside development the two signing secrets refuse the boot blank or committed, naming the key and never a value, and boot with a value of their own */
 func TestCredential_OutsideDevelopmentRefusesABlankOrCommittedValueNamingOnlyTheKey(t *testing.T) {
     for _, credentialCase := range []struct {
         environmentKey   string
@@ -61,7 +59,6 @@ func TestCredential_OutsideDevelopmentRefusesABlankOrCommittedValueNamingOnlyThe
     }
 }
 
-/* the token firewall outside development verifies with the configured secret: a token signed with the committed constant, carrying the roles a scope grants, is refused, and one signed with the configured secret is accepted */
 func TestBuildTokenAuth_OutsideDevelopmentRefusesATokenSignedWithTheCommittedSecret(t *testing.T) {
     moduleInstance := moduleWithEnvironment(t, map[string]string{melodyconfig.EnvironmentNameKey: melodyconfig.EnvironmentProduction, environmentKeyJwtSecret: ownJwtSecret})
     moduleInstance.buildTokenAuth()
@@ -89,7 +86,6 @@ func TestBuildTokenAuth_OutsideDevelopmentRefusesATokenSignedWithTheCommittedSec
         t.Fatalf("expected a token signed with the configured secret accepted, got %v", validateErr)
     }
 
-    /* the module's own validator: a token without iat stops before its runtime-bound epoch store, so only the signature tells the two secrets apart */
     tokenWithoutIssuedAt := func(secret string) string {
         return signedTestJwt(t, []byte(secret), map[string]any{"sub": "user-1", "exp": time.Now().Add(time.Hour).Unix()})
     }
@@ -103,7 +99,6 @@ func TestBuildTokenAuth_OutsideDevelopmentRefusesATokenSignedWithTheCommittedSec
     }
 }
 
-/* the internal firewall verifies under the configured key id, application and secret; blank names take the example's own */
 func TestBuildInternalAuth_ReadsTheKeyIdApplicationAndSecretFromConfiguration(t *testing.T) {
     moduleInstance := moduleWithEnvironment(t, map[string]string{
         melodyconfig.EnvironmentNameKey:       melodyconfig.EnvironmentProduction,

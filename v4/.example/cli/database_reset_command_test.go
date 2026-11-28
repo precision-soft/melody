@@ -25,10 +25,6 @@ import (
     "github.com/uptrace/bun/dialect/mysqldialect"
 )
 
-/* refusingResetConnector is a driver that refuses every connection, which is what makes the pair of tests
-   below a proof rather than a pair of green runs: without --force the command must answer nil over this
-   handle, and WITH --force it must fail, because the first statement has to dial. The failing arm is the
-   sister that says the nil of the other one came from the guard and not from a fixture that cannot fail. */
 type refusingResetConnector struct{}
 
 func (instance *refusingResetConnector) Connect(ctx context.Context) (driver.Conn, error) {
@@ -39,7 +35,6 @@ func (instance *refusingResetConnector) Driver() driver.Driver {
     return nil
 }
 
-/* recordingResetConnector accepts every statement and keeps their text in order: a count select answers zero, which is what a fresh volume holds and what lets the seed and the migration's tolerant steps run, every other select answers no rows, and every exec succeeds. What the reset DID over it is then the recorded sequence, which is what the ordering pins read. */
 type recordingResetConnector struct {
     mutex      sync.Mutex
     statements []string
@@ -79,7 +74,6 @@ func (instance *recordingResetConnection) Close() error {
     return nil
 }
 
-/* the audited reseed writes each row and its trail entry in one transaction, so the recording driver opens one and keeps its boundaries in the recorded sequence */
 func (instance *recordingResetConnection) Begin() (driver.Tx, error) {
     instance.recorder.record("BEGIN")
 
@@ -173,14 +167,12 @@ func newUndialedResetStorage() *persistence.CatalogStorage {
     return persistence.NewCatalogStorage(bun.NewDB(sql.OpenDB(&refusingResetConnector{}), mysqldialect.New()))
 }
 
-/* the recording storage is the development composition root's: marked to seed the example's accounts, so a reset over it reseeds them as a development reset does */
 func newRecordingResetStorage(location string) (*persistence.CatalogStorage, *recordingResetConnector) {
     connector := &recordingResetConnector{}
 
     return persistence.NewCatalogStorageAt(bun.NewDB(sql.OpenDB(connector), mysqldialect.New()), location).WithAccountSeed(), connector
 }
 
-/* the refusal is for the environment that wired NEITHER database: an archive wired alone is reset alone, which the test after this one proves */
 func TestDatabaseResetCommandRefusesWhenNoDatabaseIsConfigured(t *testing.T) {
     runtimeInstance := newResetRuntime(t, persistence.NewCatalogStorage(nil))
 
@@ -196,9 +188,6 @@ func TestDatabaseResetCommandRefusesWhenNoDatabaseIsConfigured(t *testing.T) {
     }
 }
 
-/* the plan is read from the schema rather than written a second time beside it, so a table added to the
-   migration and forgotten here would fail this; the trail is named too, because emptying rows of a table
-   the set does not own is the half of the reset an operator has to be told about. */
 func TestDatabaseResetCommandWithoutForceNamesWhatItWouldDropAndTouchesNothing(t *testing.T) {
     buffer := &bytes.Buffer{}
 
@@ -227,7 +216,6 @@ func TestDatabaseResetCommandWithoutForceNamesWhatItWouldDropAndTouchesNothing(t
     }
 }
 
-/* over the same handle as TestDatabaseResetCommandWithoutForceNamesWhatItWouldDropAndTouchesNothing, --force reaches the database and fails on the dial, so a fixture that could never fail cannot let the guard be deleted with both green; the refusal is the drop step's, on the catalogue, and an error from anywhere else, a --force that touched nothing and fabricated a failure, does not satisfy it */
 func TestDatabaseResetCommandWithForceReachesTheDatabase(t *testing.T) {
     runErr := NewDatabaseResetCommand().Run(
         newResetRuntime(t, persistence.NewCatalogStorageAt(newUndialedResetStorage().Database(), "mysql:3306/melody_example_v4")),
@@ -246,7 +234,6 @@ func TestDatabaseResetCommandWithForceReachesTheDatabase(t *testing.T) {
     }
 }
 
-/* the catalogue is brought whole in one order: the schema dropped and recreated, then BOTH tables of the audit trail emptied, then the nomenclature reseeded. A trail emptied before the drop, or not at all, leaves the history of the rows the reset removed; a seed before the drop is dropped with the schema. */
 func TestDatabaseResetCommandWithForceDropsThenEmptiesTheTrailThenReseeds(t *testing.T) {
     storage, recorder := newRecordingResetStorage("mysql:3306/melody_example_v4")
     runtimeInstance, _ := newResetRuntimeWithArchive(t, storage, persistence.NewArchiveStorage(nil))
@@ -296,10 +283,6 @@ func TestDatabaseResetCommandWithForceDropsThenEmptiesTheTrailThenReseeds(t *tes
     }
 }
 
-/* the plan names the archive's tables when there is an archive, and does not when there is not. Both arms
-   matter and for different reasons: a plan silent about a database it is about to drop is the failure this
-   refusal exists to prevent, and a plan promising to drop a table on a database this environment never
-   wired is a lie in the direction an operator would act on. */
 func TestDatabaseResetPlanNamesTheArchiveOnlyWhenThereIsOne(t *testing.T) {
     catalogue := newUndialedResetStorage()
     archive := persistence.NewArchiveStorage(newUndialedResetStorage().Database())
@@ -317,8 +300,6 @@ func TestDatabaseResetPlanNamesTheArchiveOnlyWhenThereIsOne(t *testing.T) {
         }
     }
 
-    /* the catalogue's own tables are named on BOTH arms, which is what says the archive half was added
-       rather than swapped in */
     for _, table := range migration.SchemaTableNameList() {
         if false == strings.Contains(withoutArchive, table) {
             t.Fatalf("expected the plan to name the catalogue table %s on either arm, got %q", table, withoutArchive)
@@ -326,8 +307,6 @@ func TestDatabaseResetPlanNamesTheArchiveOnlyWhenThereIsOne(t *testing.T) {
     }
 }
 
-/* the command prints the archive's tables through the same door, over a runtime that carries a wired
-   archive: the list reaching the plan is what a mutant can cut, and this is what sees it cut. */
 func TestDatabaseResetCommandWithoutForceNamesTheArchiveWhenOneIsWired(t *testing.T) {
     buffer := &bytes.Buffer{}
 
@@ -348,7 +327,6 @@ func TestDatabaseResetCommandWithoutForceNamesTheArchiveWhenOneIsWired(t *testin
     }
 }
 
-/* the archive-only environment (MYSQL_HOST blank, PGSQL_HOST set), one of the four combinations the readme promises, is not refused: the plan names the archive alone, and --force reaches the archive; over an undialed archive handle the refusal is the dial, which is what says the archive half ran. */
 func TestDatabaseResetCommandArchiveOnlyEnvironmentResetsTheArchiveAlone(t *testing.T) {
     buffer := &bytes.Buffer{}
     runtimeInstance, _ := newResetRuntimeWithArchive(t, persistence.NewCatalogStorage(nil), persistence.NewArchiveStorageAt(newUndialedResetStorage().Database(), "postgres:5432/melody_example_v4_archive"))
@@ -377,7 +355,6 @@ func TestDatabaseResetCommandArchiveOnlyEnvironmentResetsTheArchiveAlone(t *test
     }
 }
 
-/* the catalogue is brought whole (dropped, recreated, trail emptied, reseeded) before the archive is touched: with the archive refusing, every catalogue statement is recorded, the seed's inserts among them, and the failure names the archive step, so an archive refusal cannot leave an empty catalogue behind the exit code. */
 func TestDatabaseResetCommandReseedsTheCatalogueBeforeTouchingTheArchive(t *testing.T) {
     buffer := &bytes.Buffer{}
     storage, recorder := newRecordingResetStorage("mysql:3306/melody_example_v4")
@@ -408,7 +385,6 @@ func TestDatabaseResetCommandReseedsTheCatalogueBeforeTouchingTheArchive(t *test
         }
     }
 
-    /* the cache is the catalogue's and is cleared as the catalogue's last step, so an archive that refuses after the reseed does not leave every stale entry standing behind a non-zero exit, the account the reset removed still authenticating from the cache */
     if 1 != cacheInstance.clears() {
         t.Fatalf("expected the cache to be cleared once before the archive was reached, got %d clears", cacheInstance.clears())
     }
@@ -418,7 +394,6 @@ func TestDatabaseResetCommandReseedsTheCatalogueBeforeTouchingTheArchive(t *test
     }
 }
 
-/* the state a fresh volume holds includes an empty cache, and the clear comes AFTER the reseed: a clear before it would let a reader parked between the two re-cache the rows the reset was about to replace. */
 func TestDatabaseResetCommandClearsTheCacheOnceAfterTheReseed(t *testing.T) {
     storage, recorder := newRecordingResetStorage("mysql:3306/melody_example_v4")
     runtimeInstance, cacheInstance := newResetRuntimeWithArchive(t, storage, persistence.NewArchiveStorage(nil))
@@ -447,7 +422,6 @@ func TestDatabaseResetCommandClearsTheCacheOnceAfterTheReseed(t *testing.T) {
     }
 }
 
-/* the drops run under the runtime's context: cancelled, the first statement is refused and nothing is recorded, so a reset honours the signal every other command honours. */
 func TestDatabaseResetCommandHonoursTheRuntimeContext(t *testing.T) {
     storage, recorder := newRecordingResetStorage("mysql:3306/melody_example_v4")
     runtimeInstance, _ := newResetRuntimeWithArchive(t, storage, persistence.NewArchiveStorage(nil))
@@ -464,7 +438,7 @@ func TestDatabaseResetCommandHonoursTheRuntimeContext(t *testing.T) {
         t.Fatalf("expected the cancelled context to refuse the reset")
     }
 
-    /* the dialect's own version discovery runs on the handle's construction, under a context of its own, so it is the one statement a cancelled reset still records */
+    /* the dialect's version discovery runs at the handle's construction under its own context, so a cancelled reset still records it */
     for _, statement := range recorder.recorded() {
         if false == strings.Contains(statement, "version()") {
             t.Fatalf("expected no statement of the reset under a cancelled context, recorded %v", recorder.recorded())
@@ -472,8 +446,6 @@ func TestDatabaseResetCommandHonoursTheRuntimeContext(t *testing.T) {
     }
 }
 
-/* the archive-only environment has no catalogue to reseed and nothing of its own in the cache, and the cache is
-   cleared all the same: a reset leaves the same state whichever halves are wired */
 func TestDatabaseResetCommandArchiveOnlyEnvironmentClearsTheCacheToo(t *testing.T) {
     archiveStorage, _ := newRecordingResetStorage("postgres:5432/melody_example_v4_archive")
     runtimeInstance, cacheInstance := newResetRuntimeWithArchive(t, persistence.NewCatalogStorage(nil), persistence.NewArchiveStorageAt(archiveStorage.Database(), "postgres:5432/melody_example_v4_archive"))
@@ -488,7 +460,6 @@ func TestDatabaseResetCommandArchiveOnlyEnvironmentClearsTheCacheToo(t *testing.
     }
 }
 
-/* a clear that fails after the catalogue was reset names what it left undone: the archive after it was not touched */
 func TestDatabaseResetCommandNamesTheUntouchedArchiveWhenTheClearFails(t *testing.T) {
     storage, _ := newRecordingResetStorage("mysql:3306/melody_example_v4")
     archiveStorage, archiveRecorder := newRecordingResetStorage("postgres:5432/melody_example_v4_archive")
@@ -566,7 +537,6 @@ func TestDatabaseResetCommandRefusesBeforeTouchingAnythingWhenTheCacheCannotBeRe
         t.Fatalf("expected the reset to refuse a cache it cannot resolve")
     }
 
-    /* the driver's own version probe on connect writes nothing; every statement of the reset does */
     for _, statement := range recorder.recorded() {
         if "SELECT version()" != statement {
             t.Fatalf("expected nothing touched before the cache was resolved, got %q", recorder.recorded())
@@ -614,7 +584,6 @@ func TestDatabaseResetCommandGroupsTheReseedUnderOneAuditTransaction(t *testing.
     }
 }
 
-/* the accounts go with their table through no door that publishes a deletion, so the plan names what happens to the tokens that name them: released from the shared redis when the store lives there, and said to stay in the server's own memory when it does not */
 func TestDatabaseResetPlanNamesWhatHappensToTheDeviceTokens(t *testing.T) {
     catalogue := newUndialedResetStorage()
 

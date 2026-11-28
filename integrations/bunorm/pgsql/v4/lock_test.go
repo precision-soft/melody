@@ -103,7 +103,6 @@ func TestPgsqlLock_RefreshReportsLostLock(t *testing.T) {
     }
 }
 
-/* a pinned session found dead by Refresh's probe is refused as a lost lock carrying the probe's failure as its cause, as the mysql twin carries its own. */
 func TestPgsqlLock_RefreshCarriesTheProbeFailureOfALostLock(t *testing.T) {
     locker := NewLocker(pgLockDatabase(t), LockerConfig{})
     runtimeInstance := newLockRuntime()
@@ -130,7 +129,6 @@ func TestPgsqlLock_RefreshCarriesTheProbeFailureOfALostLock(t *testing.T) {
     }
 }
 
-/* every lock failure names both spellings: the caller's name and the advisory key halves the server was actually asked for, without which the operator has nothing to match against pg_locks */
 func TestPgsqlLock_FailuresNameTheAdvisoryKeyBesideTheName(t *testing.T) {
     sqldb := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN("postgres://melody:melody@127.0.0.1:1/melody?sslmode=disable")))
     database := bun.NewDB(sqldb, pgdialect.New())
@@ -182,7 +180,6 @@ func TestPgsqlLock_ReacquiringAHeldLockKeepsItsSession(t *testing.T) {
     }
 }
 
-/* a session the server ended took the advisory lock with it, so the next acquire discards the dead pin and takes the lock afresh on a new session, which then holds it against every other session */
 func TestPgsqlLock_ReacquiringAfterTheSessionEndedTakesTheLockAfresh(t *testing.T) {
     database := pgLockDatabase(t)
     locker := NewLocker(database, LockerConfig{})
@@ -400,7 +397,6 @@ func TestPgsqlLock_ACallerDeadlineAlreadyPassedReleasesOnTheLockersBudget(t *tes
     }
 }
 
-/* typedNilRuntime is a runtime implementation held as a nil pointer, which passes a plain nil comparison and panics on its first call */
 type typedNilRuntime struct {
     containercontract.Runtime
 }

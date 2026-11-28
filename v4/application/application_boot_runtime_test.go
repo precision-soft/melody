@@ -256,7 +256,6 @@ func (instance *lateBootRuntimeFactoryModule) RegisterHttpMiddlewares(kernelInst
     })
 }
 
-/* the --build inspection runs the factories in a cli run, after Boot: a door a factory calls under the finished boot runtime names the finished boot */
 func TestBuildForInspection_AFactoryResolvingUnderTheBootRuntimeAfterBootReadsErrBootFinished(t *testing.T) {
     applicationInstance := newEnvironmentKeyBootApplication(t, nil)
     applicationInstance.runtimeFlags = NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeCli})

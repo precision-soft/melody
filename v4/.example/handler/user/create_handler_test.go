@@ -13,7 +13,6 @@ import (
     "github.com/precision-soft/melody/v4/.example/security"
 )
 
-/* the create door holds the same line the update door holds: a role carrying a comma would come back as several roles on the next read, among them an administrator nobody granted, and an account that reads as an administrator is then shielded from every other administrator by protectsAnotherAdmin */
 func TestApiCreateHandlerRefusesARoleCarryingAComma(t *testing.T) {
     userRepository := newRecordingUserRepository(administrator("admin-1"))
     runtimeInstance := adminRuntime(t, userRepository, "admin-1", []string{entity.RoleAdmin})
@@ -41,7 +40,7 @@ func TestApiCreateHandlerRefusesARoleCarryingAComma(t *testing.T) {
     }
 }
 
-/* a username longer than the 255-byte column, and than the cache key grammar admits once escaped, is turned away at the door as the caller's mistake instead of landing as a driver error, or as a row the lookup doors could never ask the cache about */
+/* longer than the 255-byte column, and than the cache key grammar admits once escaped */
 func TestApiCreateHandlerRefusesAUsernameTheTableCannotHold(t *testing.T) {
     userRepository := newRecordingUserRepository(administrator("admin-1"))
     runtimeInstance := adminRuntime(t, userRepository, "admin-1", []string{entity.RoleAdmin})
@@ -71,7 +70,6 @@ func TestApiCreateHandlerRefusesAUsernameTheTableCannotHold(t *testing.T) {
     }
 }
 
-/* the same door accepts a plain role list, so the refusal above is the comma and not the door */
 func TestApiCreateHandlerAcceptsAPlainRoleList(t *testing.T) {
     userRepository := newRecordingUserRepository(administrator("admin-1"))
     runtimeInstance := adminRuntime(t, userRepository, "admin-1", []string{entity.RoleAdmin})
@@ -100,9 +98,6 @@ func TestApiCreateHandlerAcceptsAPlainRoleList(t *testing.T) {
     }
 }
 
-/* the check that precedes the write is a read, so two callers can pass it before either has written; the
-   unique index refuses the second, and its refusal — wrapped by the audit tracker, recognised by the
-   repository's seam — is the caller's 400, the same answer the check gives, not a 500 of a failed write */
 func TestApiCreateHandlerAnswersTheIndexsRefusalOfATakenUsernameAs400(t *testing.T) {
     userRepository := newRecordingUserRepository(administrator("admin-1"))
     userRepository.refuseWrites(fmt.Errorf("audited insert failed: %w", repository.ErrUsernameAlreadyExists))
@@ -143,8 +138,6 @@ func TestApiCreateHandlerAnswersAnyOtherFailedWriteAs500(t *testing.T) {
     }
 }
 
-/* the voter compares a role's spelling exactly, so a spelling outside the closed vocabulary would be stored,
-   reported created and grant nothing: the door refuses it, naming the vocabulary, the way the console grant does */
 func TestApiCreateHandlerRefusesARoleTheApplicationDoesNotKnow(t *testing.T) {
     userRepository := newRecordingUserRepository(administrator("admin-1"))
     runtimeInstance := adminRuntime(t, userRepository, "admin-1", []string{entity.RoleAdmin})
@@ -206,7 +199,6 @@ func TestApiCreateDoor_AcceptsA255ByteUsername(t *testing.T) {
     }
 }
 
-/* the kernel bounds every body; a body past it is the client's too large a payload, not unreadable json */
 func TestApiCreateDoor_AnswersABodyPastTheLimit413(t *testing.T) {
     userRepository := newRecordingUserRepository(administrator("admin-1"), editor("editor-1"))
     runtimeInstance := adminRuntime(t, userRepository, "admin-1", []string{entity.RoleAdmin})

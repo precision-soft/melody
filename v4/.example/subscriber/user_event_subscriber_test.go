@@ -20,7 +20,6 @@ import (
     melodyevent "github.com/precision-soft/melody/v4/event"
 )
 
-/* deleteCountingCache counts the deletions under each key over a working cache */
 type deleteCountingCache struct {
     melodycachecontract.Cache
     mutex   sync.Mutex
@@ -35,7 +34,6 @@ func (instance *deleteCountingCache) Delete(runtimeInstance melodycontainercontr
     return instance.Cache.Delete(runtimeInstance, key)
 }
 
-/* userUpdateUnderTest answers a runtime holding only the cache: the listener drops its entries before it notifies, so the notification hub it cannot resolve ends the call after the drops under test */
 func userUpdateUnderTest(t *testing.T) (*deleteCountingCache, melodycontainercontract.Runtime) {
     t.Helper()
 
@@ -62,7 +60,6 @@ func dispatchUserUpdated(runtimeInstance melodycontainercontract.Runtime, user *
     _ = listener(runtimeInstance, melodyevent.NewEvent(event.EventUserUpdated, event.NewUserUpdatedEvent(user, previousUsername), melodyclock.NewSystemClock().Now()))
 }
 
-/* a rename leaves the by-username entry under the spelling before it; dropped, the name before the rename can neither sign in from the cache nor be refused as taken when it is registered again */
 func TestUserEventSubscriber_DropsBothSpellingsOnARename(t *testing.T) {
     cacheInstance, runtimeInstance := userUpdateUnderTest(t)
 
@@ -120,7 +117,6 @@ func TestUserEventSubscriber_DropsTheEntriesUnderACanceledEvent(t *testing.T) {
     }
 }
 
-/* every account write is announced on the user directory topic, read behind the administrator's role, and never on the catalogue topic an editor reads */
 func TestUserEventSubscriber_BroadcastsOnTheUserDirectoryTopicAlone(t *testing.T) {
     user := entity.NewUser("user-7", "grace", "hash", []string{entity.RoleUser})
     eventList := map[string]any{

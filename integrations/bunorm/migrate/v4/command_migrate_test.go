@@ -137,7 +137,6 @@ func TestMigrateCommand_LockFailureAbortsWithoutMigratingOrUnlocking(t *testing.
         t.Fatalf("a never-acquired lock was released: %v", recorder.recordedQueries())
     }
 
-    /* the command does not pre-print the failure it returns: the cli runner's [error] line and the full log record report it */
     if true == strings.Contains(rendered, "ERROR:") {
         t.Fatalf("the returned failure must not be pre-printed by the command, got: %q", rendered)
     }
@@ -243,7 +242,6 @@ func TestMigrateCommand_FailedMigrationKeepsItsErrorOverAFailedUnlock(t *testing
     }
 }
 
-/* a pipeline reading .data.migrations to record what it deployed receives the migrations at the default verbosity: --verbose shapes the plain text, not the machine document */
 func TestMigrateCommand_JsonCarriesTheDetailAtTheDefaultVerbosity(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = appliedMigrationRowsHook()
@@ -272,7 +270,6 @@ func TestMigrateCommand_JsonCarriesTheDetailAtTheDefaultVerbosity(t *testing.T) 
         t.Fatalf("expected the applied count in the document, got %#v in %q", document.Data.Details, rendered)
     }
 
-    /* the group is computed inside the same block, so a repair that moved only the printing would leave it at its placeholder */
     if "" == document.Data.Details["group"] || "<none>" == document.Data.Details["group"] {
         t.Fatalf("expected the migration group in the document, got %#v", document.Data.Details["group"])
     }
@@ -286,7 +283,6 @@ func TestMigrateCommand_JsonCarriesTheDetailAtTheDefaultVerbosity(t *testing.T) 
         t.Fatalf("expected the applied migration to be named, got %q", applied[0])
     }
 
-    /* the text rendering is unchanged: verbosity still decides what a person is shown */
     textDatabase, textRecorder := newFakeBunDatabase()
     textRecorder.queryHook = appliedMigrationRowsHook()
 
@@ -305,7 +301,6 @@ func TestMigrateCommand_JsonCarriesTheDetailAtTheDefaultVerbosity(t *testing.T) 
     }
 }
 
-/* a plain run is the shape a deploy script invokes, so the text a deploy log captures names a run that applied migrations and tells it apart from a run that did nothing. */
 func TestMigrateCommand_ARunThatChangedTheSchemaSaysSoOnTheText(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = appliedMigrationRowsHook()
@@ -336,7 +331,6 @@ func TestMigrateCommand_ARunThatChangedTheSchemaSaysSoOnTheText(t *testing.T) {
     }
 }
 
-/* the machine document does not carry the success line: under json the same run already carries the applied count, the group and the names as structured fields, so a prose duplicate would be a second and weaker spelling of what the consumer has */
 func TestMigrateCommand_TheSuccessLineDoesNotEnterTheMachineDocument(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = appliedMigrationRowsHook()
@@ -370,7 +364,6 @@ func TestMigrateCommand_TheSuccessLineDoesNotEnterTheMachineDocument(t *testing.
     }
 }
 
-/* a group that fails part way through names what it already applied, on both renderings, so the operator can choose between re-running (safe) and rolling back (which would take the landed ones with it) without reading the database by hand. */
 func TestMigrateCommand_AFailedGroupNamesTheMigrationsThatLanded(t *testing.T) {
     applied := make([]string, 0)
 
@@ -461,7 +454,6 @@ func TestMigrateCommand_AFailedGroupNamesTheMigrationsThatLanded(t *testing.T) {
     }
 }
 
-/* a run that fails on its first migration reports no applied block at all, rather than an empty one claiming a partial state */
 func TestMigrateCommand_AGroupThatLandedNothingReportsNoAppliedBlock(t *testing.T) {
     migrations := migrate.NewMigrations()
     migrations.Add(migrate.Migration{
@@ -492,13 +484,11 @@ func TestMigrateCommand_AGroupThatLandedNothingReportsNoAppliedBlock(t *testing.
         t.Fatalf("a run that landed nothing must claim no applied migrations, got: %q", rendered)
     }
 
-    /* the details block is the half of the report that the empty-set guard actually defends: printMigrationsBlock refuses an empty list on its own, but printDetailsBlock would happily render "applied | 0" beside a group id, which reads as a partial state where there is none */
     if true == strings.Contains(rendered, "DETAILS") {
         t.Fatalf("a run that landed nothing must print no applied-group detail block, got: %q", rendered)
     }
 }
 
-/* the per-query progress of a migration that runs its own statements must not reach the command writer under json: the document is the only byte the command may emit there, and a single "[migration:up] ... executing:" line ahead of it makes the output undecodable. The runner reads its writer from the posture the command puts on the context, since a generated migration's signature is fixed by bun. */
 func TestMigrateCommand_TheRunnersOwnProgressStaysOutOfTheMachineDocument(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = appliedMigrationRowsHook()
@@ -571,7 +561,6 @@ func TestMigrateCommand_HandsItsPostureToTheMigrationsThroughTheContext(t *testi
     }
 }
 
-/* failingOnWriter refuses every payload that carries the marker and writes the rest through: the truncation lands on ONE line, so which line decides which door is being proven — a writer that failed for good after the first refusal would have the command's own banner refuse on behalf of the runner's line */
 type failingOnWriter struct {
     marker string
     buffer bytes.Buffer
@@ -585,7 +574,6 @@ func (instance *failingOnWriter) Write(payload []byte) (int, error) {
     return instance.buffer.Write(payload)
 }
 
-/* every text write of the report went `_, _ =`, and finish returned the command's own error alone, so a report cut short by a full disk ended with exit zero — the class the framework's table printer documents fixing with its error-tracking writer. The first lost write is what finish now refuses on, in text mode and under the json document alike; the command's own failure still wins when there is one. */
 func TestMigrateCommand_AReportCutShortIsRefusedInsteadOfExitingZero(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = appliedMigrationRowsHook()
@@ -600,7 +588,6 @@ func TestMigrateCommand_AReportCutShortIsRefusedInsteadOfExitingZero(t *testing.
         },
     })
 
-    /* the text report cut on the command's own banner */
     banner := &failingOnWriter{marker: "applied 1 migration"}
     runErr := runMigrationCommandTo(t, banner, runtimeInstance, NewMigrateCommand(migrations, resolvedDefaultOptions), "--no-color")
     if nil == runErr || false == strings.Contains(runErr.Error(), "could not be written in full") {
@@ -612,21 +599,18 @@ func TestMigrateCommand_AReportCutShortIsRefusedInsteadOfExitingZero(t *testing.
         t.Fatalf("expected the refusal to carry the lost write, got %v", runErr)
     }
 
-    /* the text report cut on a per-query line of the migration itself, which prints through the command's writer */
     queryLine := &failingOnWriter{marker: "executing:"}
     runErr = runMigrationCommandTo(t, queryLine, runtimeInstance, NewMigrateCommand(migrations, resolvedDefaultOptions), "--no-color")
     if nil == runErr || false == strings.Contains(runErr.Error(), "could not be written in full") {
         t.Fatalf("expected the report cut on the runner's line refused, got %v (written: %q)", runErr, queryLine.buffer.String())
     }
 
-    /* the json document cut mid-way */
     document := &failingOnWriter{marker: "\"meta\""}
     runErr = runMigrationCommandTo(t, document, runtimeInstance, NewMigrateCommand(migrations, resolvedDefaultOptions), "--format=json")
     if nil == runErr || false == strings.Contains(runErr.Error(), "could not be written in full") {
         t.Fatalf("expected the truncated json document refused, got %v (written: %q)", runErr, document.buffer.String())
     }
 
-    /* a report written whole is not refused */
     var whole bytes.Buffer
     if runErr = runMigrationCommandTo(t, &whole, runtimeInstance, NewMigrateCommand(migrations, resolvedDefaultOptions), "--no-color"); nil != runErr {
         t.Fatalf("expected a report written whole to pass, got %v", runErr)
@@ -697,7 +681,6 @@ func TestMigrationCommands_APanicKeepsPrecedenceOverAFailedUnlock(t *testing.T) 
     }
 }
 
-/* a lock refused because the locks table is missing does not send the operator to the unlock command, which cannot clear a lock nobody holds; bun's error stays the cause */
 func TestMigrateCommand_ALockRefusedByAMissingLocksTableDoesNotNameTheUnlockCommand(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     missingTable := errors.New("Error 1146 (42S02): Table 'melody.bun_migration_locks' doesn't exist")
@@ -730,7 +713,6 @@ func TestMigrateCommand_ALockRefusedByAMissingLocksTableDoesNotNameTheUnlockComm
     }
 }
 
-/* a lock refused while the locks table holds no row is a transient failure, answered without a remedy */
 func TestMigrateCommand_ALockRefusedWithNoLockHeldNamesNoRemedy(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = lockCountHook(0)
@@ -753,7 +735,6 @@ func TestMigrateCommand_ALockRefusedWithNoLockHeldNamesNoRemedy(t *testing.T) {
     }
 }
 
-/* a lock refused under a cancelled context says it was cancelled, and asks the locks table nothing */
 func TestLockRefusal_ACancelledContextSaysCancelled(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = lockCountHook(1)
@@ -771,7 +752,6 @@ func TestLockRefusal_ACancelledContextSaysCancelled(t *testing.T) {
     }
 }
 
-/* lockRefusalContextOf answers the context the lock refusal carries */
 func lockRefusalContextOf(t *testing.T, refusal error) exceptioncontract.Context {
     t.Helper()
 
@@ -785,7 +765,6 @@ func lockRefusalContextOf(t *testing.T, refusal error) exceptioncontract.Context
     return contextual.Context()
 }
 
-/* an empty migration's warning reaches the json document: the per-query lines go to a discarded writer under --format=json, and the warning went with them while the migration was listed as applied; the text mode prints it as before */
 func TestMigrateCommand_AnEmptyMigrationIsWarnedInTheJsonDocument(t *testing.T) {
     for _, format := range []string{"--format=json", "--no-color"} {
         database, recorder := newFakeBunDatabase()
@@ -835,7 +814,6 @@ func TestMigrateCommand_AnEmptyMigrationIsWarnedInTheJsonDocument(t *testing.T) 
     }
 }
 
-/* details.group is the bare id on success and on failure alike: a machine reader parsed "group #1 (...)" from one path and "1" from the other */
 func TestMigrateCommand_TheGroupIsSpelledTheSameOnSuccessAndOnFailure(t *testing.T) {
     for _, failing := range []bool{false, true} {
         database, recorder := newFakeBunDatabase()
@@ -875,7 +853,6 @@ func TestMigrateCommand_TheGroupIsSpelledTheSameOnSuccessAndOnFailure(t *testing
     }
 }
 
-/* a migration whose Up ran and whose mark failed is reported apart, as ran but not recorded, so the operator is not steered to run it again; an Up failure keeps the report of the migrations before it alone */
 func TestMigrateCommand_AMarkFailureReportsTheLastMigrationAsRanNotRecorded(t *testing.T) {
     for _, markFails := range []bool{true, false} {
         database, recorder := newFakeBunDatabase()
@@ -951,7 +928,6 @@ func TestMigrateCommand_AMarkFailureReportsTheLastMigrationAsRanNotRecorded(t *t
     }
 }
 
-/* a stop that cancels the command context between the Up and the mark is the commonest cause of the failed mark; the marker insert must still reach the database, under its own deadline */
 func TestWriteRanNotRecordedMarker_WritesOnACancelledCommandContext(t *testing.T) {
     database, recorder := newFakeBunDatabase()
 
@@ -979,7 +955,6 @@ func TestWriteRanNotRecordedMarker_WritesOnACancelledCommandContext(t *testing.T
     }
 }
 
-/* a marker an earlier run left refuses the next run before any Up, naming the migration and the flag; under --force the marker is deleted and the run goes on */
 func TestMigrateCommand_AStandingRanNotRecordedMarkerRefusesTheRunUntilForce(t *testing.T) {
     for _, force := range []bool{false, true} {
         database, recorder := newFakeBunDatabase()

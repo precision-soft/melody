@@ -204,7 +204,6 @@ func TestModule_TheConnectionIsBuiltAtBootWithItsFailureMode(t *testing.T) {
     }
 }
 
-/* the application's Boot builds what the container answers here */
 func TestModule_AConnectionBuiltAtBootIsBuiltByTheContainersBootBuild(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     NewModule(ModuleConfig{
@@ -223,7 +222,6 @@ func TestModule_AConnectionBuiltAtBootIsBuiltByTheContainersBootBuild(t *testing
     }
 }
 
-/* the fake broker never answers the close, so the container's teardown of the registered connection ends at the close timeout the owner carries from its provider, the module having none of its own */
 func TestModule_HasNoCloseTimeoutOfItsOwn(t *testing.T) {
     address := listenFakeBroker(t)
     provider := NewProvider("melody", ProviderConfig{CloseTimeout: bound.Of(200 * time.Millisecond)})
@@ -245,7 +243,6 @@ func TestModule_HasNoCloseTimeoutOfItsOwn(t *testing.T) {
     }
 }
 
-/* a transport provider resolves the shared connection, which a transport built at wiring could not */
 func TestModule_ATransportProviderBuildsOverTheResolvedConnection(t *testing.T) {
     raw := &amqp091.Connection{}
 

@@ -13,14 +13,12 @@ import (
     "testing"
 )
 
-/* the exported constructors outside the argument rule, each with the reason it stays; an entry the walk does not meet fails */
 var constructorArgumentRuleException = map[string]string{
     "v4/kernel:NewKernel":                    "framework-only behind the kernelseam token: the application builds it from its own collaborators",
     "v4/validation:NewValidationError":       "the three values of every validation error and its params map, built at each constraint",
     "integrations/rueidis/v4:NewRateLimiter": "required collaborators and values, connection, name, limit and window, then the config struct",
 }
 
-/* the config fields refused as required, each with the reason they stay; an entry the walk does not meet fails */
 var configRequiredFieldException = map[string]string{
     "integrations/cron/v4:RunnerConfig.TickDedup":                    "optional, the application's registered locker when left out; only a typed nil is refused",
     "v4/translation:ManagerConfig.FallbackLocales":                   "required only beside catalogs, and an empty entry of the list is refused by its index",
@@ -33,7 +31,6 @@ var configRequiredFieldException = map[string]string{
     "v4/http/static:Config.FileSystem":                               "required only in the embedded mode; the filesystem mode builds it from the public directory",
 }
 
-/* the framework-only names, keyed by package and receiver, none declared exported */
 var frameworkOnlySymbol = []string{
     "v4/config:NewParameter",
     "v4/event:NewRequiredListenerSkippedError",
@@ -52,12 +49,10 @@ var frameworkOnlySymbol = []string{
     "v4/security:SecurityContext.SetMatchedRule",
 }
 
-/* the framework-only names that left the surface under another name, each with the name that took its place */
 var frameworkOnlySymbolSuccessor = map[string]string{
     "v4/http:RouteRegistry.SetBootCollisionRecorder": "RouteRegistry.InstallBootCollisionRecorder",
 }
 
-/* unexportedTwin answers the name an entry is declared under once unexported: the function's, or the method's, first letter lowered */
 func unexportedTwin(name string) string {
     separatorIndex := max(strings.LastIndex(name, "."), strings.LastIndex(name, ":"))
     prefix, function := name[:separatorIndex+1], name[separatorIndex+1:]
@@ -71,7 +66,6 @@ type productionSource struct {
     set  *token.FileSet
 }
 
-/* fourthMajorProductionSourceList parses the production files of the framework and its integrations, tests, internal packages and the example left out, each keyed by its package directory */
 func fourthMajorProductionSourceList(t *testing.T) []productionSource {
     t.Helper()
 
@@ -201,7 +195,6 @@ func constructorArgumentViolation(function *ast.FuncDecl) string {
     return ""
 }
 
-/* baseTypeName answers the name a parameter type is spelled by under its pointers, slices, maps and ellipsis, the selector's name for a qualified one, "" for a func or an interface literal */
 func baseTypeName(expression ast.Expr) string {
     switch typed := expression.(type) {
     case *ast.Ident:
@@ -281,7 +274,6 @@ func TestConfigStructs_HoldNoRequiredField(t *testing.T) {
         })
     }
 
-    /* a refusal that names no field is met through the guard that raises it: a config parameter's field compared with its zero value */
     for _, source := range fourthMajorProductionSourceList(t) {
         for _, declaration := range source.file.Decls {
             function, isFunction := declaration.(*ast.FuncDecl)
@@ -359,7 +351,6 @@ func TestConfigStructs_HoldNoRequiredField(t *testing.T) {
     }
 }
 
-/* guardedConfigField answers "<Type>.<Field>" when the condition compares a field of a config parameter with "" or nil, or asks IsNilInterface of it */
 func guardedConfigField(condition ast.Expr, configParameters map[string]string) string {
     fieldOf := func(expression ast.Expr) string {
         selector, isSelector := ast.Unparen(expression).(*ast.SelectorExpr)
@@ -413,7 +404,6 @@ func guardedConfigField(condition ast.Expr, configParameters map[string]string) 
     return ""
 }
 
-/* namesAContextKey answers whether a refusal names what it refuses under "field" or "argument", which the walk over the keys reads */
 func namesAContextKey(call *ast.CallExpr) bool {
     named := false
     ast.Inspect(call, func(node ast.Node) bool {
@@ -502,7 +492,6 @@ func TestFrameworkOnlySymbols_AreNotExported(t *testing.T) {
         }
     }
 
-    /* an entry pins something only while the unexported twin, or the successor named for it, is declared */
     for _, symbol := range frameworkOnlySymbol {
         packageName := strings.SplitN(symbol, ":", 2)[0]
         if false == packages[packageName] {

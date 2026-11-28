@@ -67,7 +67,6 @@ func TestEncryptedStringFor_CompartmentsAreIsolated(t *testing.T) {
         t.Fatalf("value: %v", valueErr)
     }
 
-    /* the billing compartment must not be able to decrypt a crm ciphertext */
     var leaked EncryptedStringFor[billingCipherReference]
     if scanErr := leaked.Scan(stored.([]byte)); nil == scanErr {
         t.Fatalf("expected the billing compartment to reject a crm ciphertext")
@@ -139,7 +138,6 @@ func TestEncryptedStringFor_RotationInsideTheCompartmentKeepsDecrypting(t *testi
         t.Fatalf("value: %v", valueErr)
     }
 
-    /* rotate: a new current key, the retired key still active for decryption */
     rotatedProvider := NewStaticKeyProvider(KeyRing{
         CurrentKeyId: "crm-v2",
         Keys: map[string][]byte{
@@ -165,7 +163,6 @@ func (instance emptyNameCipherReference) CipherName() string {
     return ""
 }
 
-/* A marker with an empty CipherName() would resolve the DEFAULT cipher, silently giving a compartment-bound column the default key — the cross-compartment read the marker exists to prevent. */
 func TestEncryptedStringFor_EmptyCipherNameIsRejected(t *testing.T) {
     installCipher(t, defaultCipherName, NewFakeCipher())
 
@@ -204,7 +201,6 @@ func (instance pointerFormRef) CipherName() string {
     return "pointer-form"
 }
 
-/* the pointer form compiles whenever the value form does, and its zero value is a nil pointer whose CipherName() dereferences nil from inside database/sql; it must answer as an error naming the marker */
 func TestEncryptedStringFor_RefusesAPointerFormMarker(t *testing.T) {
     column := EncryptedStringFor[*pointerFormRef]("plaintext")
 
@@ -252,7 +248,6 @@ func TestEncryptedStringFor_UnmarshalJSONDecodesAPlaintextString(t *testing.T) {
     }
 }
 
-/* the generic instantiation cannot be asserted in the source file, because the package ships no marker of its own on purpose: the marker is the integrator's, one per compartment */
 var _ json.Unmarshaler = (*EncryptedStringFor[crmCipherReference])(nil)
 
 func TestEncryptedStringFor_FormatRedactsNumericVerbs(t *testing.T) {
@@ -268,7 +263,6 @@ func TestEncryptedStringFor_FormatRedactsNumericVerbs(t *testing.T) {
     }
 }
 
-/* a column an attacker can write and later read back must not decrypt a seal handed to it as data: the seal of another row's secret, stored through this column, is read back as that seal and never as the secret */
 func TestEncryptedStringFor_ASealWrittenAsDataIsSealedAndReadBackAsTheSeal(t *testing.T) {
     useCompartmentCiphers(t)
 
@@ -318,7 +312,6 @@ func TestEncryptedStringFor_AnInterfaceMarkerIsRefusedWithoutAPanic(t *testing.T
     }
 }
 
-/* the refusal of a marker that is a pointer or an interface names the marker's TYPE: %T of a nil interface spelled "<nil>", which named nothing. */
 func TestReferenceCipher_RefusalNamesThePointerAndTheInterfaceMarker(t *testing.T) {
     _, _, interfaceErr := referenceColumn[CipherReference]()
     interfaceRefusal, isInterfaceRefusal := interfaceErr.(*exception.Error)
@@ -333,7 +326,6 @@ func TestReferenceCipher_RefusalNamesThePointerAndTheInterfaceMarker(t *testing.
     }
 }
 
-/* a bound marker's column writes gcm2 under its label, whatever the switch says, and reads it back */
 func TestEncryptedStringFor_ValueSealsUnderTheBindingOfItsMarker(t *testing.T) {
     cipherInstance := newCrmCipher(t)
 
@@ -362,7 +354,6 @@ func TestEncryptedStringFor_ValueSealsUnderTheBindingOfItsMarker(t *testing.T) {
     }
 }
 
-/* a marker without a binding is unchanged: its column still writes gcm1 */
 func TestEncryptedStringFor_AMarkerWithoutABindingStillSealsGcm1(t *testing.T) {
     newCrmCipher(t)
 
@@ -372,7 +363,6 @@ func TestEncryptedStringFor_AMarkerWithoutABindingStillSealsGcm1(t *testing.T) {
     }
 }
 
-/* while the binding admits them, a gcm1 seal and a value without the marker are read */
 func TestBoundColumn_AdmitsAnUnboundSealAndPlaintextByDefault(t *testing.T) {
     cipherInstance := newCrmCipher(t)
     installSealBinding(t, crmIbanBinding{}, false)
@@ -387,7 +377,6 @@ func TestBoundColumn_AdmitsAnUnboundSealAndPlaintextByDefault(t *testing.T) {
     }
 }
 
-/* a binding that refuses unbound values refuses a gcm1 seal on its format alone, before any key is asked for */
 func TestBoundColumn_RefusingUnboundRefusesAGcm1Seal(t *testing.T) {
     provider := &countingKeyProvider{KeyProvider: NewStaticKeyProvider(KeyRing{CurrentKeyId: "crm-v2", Keys: map[string][]byte{"crm-v2": newKey(12)}})}
     cipherInstance := NewCipher(provider)
@@ -408,7 +397,6 @@ func TestBoundColumn_RefusingUnboundRefusesAGcm1Seal(t *testing.T) {
     }
 }
 
-/* the same switch refuses a value without the marker, so a bare value written into the column is not served */
 func TestBoundColumn_RefusingUnboundRefusesAValueWithoutTheMarker(t *testing.T) {
     newCrmCipher(t)
     installSealBinding(t, crmIbanBinding{}, true)
@@ -419,7 +407,6 @@ func TestBoundColumn_RefusingUnboundRefusesAValueWithoutTheMarker(t *testing.T) 
     }
 }
 
-/* a bound column reads the marker family as the plain ones do: a format this build does not read is ErrSealFormatUnknown, while the binding admits unbound values too */
 func TestBoundColumn_RefusesAnUnknownSealFormat(t *testing.T) {
     newCrmCipher(t)
 
@@ -456,7 +443,6 @@ func TestReferenceColumn_RefusesAMarkerThatCannotCarryItsBinding(t *testing.T) {
     }
 }
 
-/* a seal written through one marker does not read through another marker of the same compartment */
 func TestBoundColumn_RefusesASealRelocatedFromAnotherBinding(t *testing.T) {
     newCrmCipher(t)
     installSealBinding(t, crmIbanBinding{}, false)
@@ -475,7 +461,6 @@ func TestBoundColumn_RefusesASealRelocatedFromAnotherBinding(t *testing.T) {
     }
 }
 
-/* a value that is itself a seal, of either format, is sealed as data under the binding and reads back as that string */
 func TestEncryptedStringFor_ASealWrittenAsDataRoundTripsUnderABinding(t *testing.T) {
     cipherInstance := newCrmCipher(t)
     installSealBinding(t, crmIbanBinding{}, true)
@@ -497,7 +482,6 @@ func TestEncryptedStringFor_ASealWrittenAsDataRoundTripsUnderABinding(t *testing
     }
 }
 
-/* a bound marker that was never declared is refused at its first use, naming the marker and the field that declares it */
 func TestEncryptedStringFor_AnUndeclaredBindingIsRefused(t *testing.T) {
     newCrmCipher(t)
 
@@ -518,7 +502,6 @@ func TestEncryptedStringFor_AnUndeclaredBindingIsRefused(t *testing.T) {
     }
 }
 
-/* a wrapped cipher installed behind the declaration's back is refused by the bound column, which never seals unbound in its place */
 func TestBoundColumn_AWrappedCipherIsRefused(t *testing.T) {
     installCipher(t, crmCipherReference{}.CipherName(), wrappedCipher{Cipher: NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "crm-v2", Keys: map[string][]byte{"crm-v2": newKey(12)}}))})
     installSealBinding(t, crmIbanBinding{}, false)

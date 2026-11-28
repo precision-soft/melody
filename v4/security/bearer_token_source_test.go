@@ -159,7 +159,6 @@ func TestBearerTokenSource_EnrichmentFailureFallsBackToAnonymous(t *testing.T) {
     }
 }
 
-/* failingTokenStore models the token store's backend being down. */
 type failingTokenStore struct {
     failure error
 }
@@ -197,7 +196,6 @@ func TestBearerTokenSource_AStoreThatCannotAnswerIsUnavailable(t *testing.T) {
     expectAnonymousToken(t, missing)
 }
 
-/* the token's key cannot be looked up: the source answers unavailable, which the firewall serves as 503, and a key the set does not know stays the caller's anonymous request */
 func TestBearerTokenSource_AKeySetThatCannotAnswerIsUnavailable(t *testing.T) {
     outage := errors.New("the key service is down")
     tokenString := signJwtHs256([]byte(thirtyTwoByteSecret), map[string]any{"sub": "user-1", "exp": time.Now().Add(time.Hour).Unix()})
@@ -235,7 +233,6 @@ func TestBearerTokenSource_BadCredentialStaysAtInfo(t *testing.T) {
     }
 }
 
-/* markingEnricher stands in for an enricher built on the framework's stores, whose lookup failure carries the infrastructure mark. */
 type markingEnricher struct{}
 
 func (instance *markingEnricher) Enrich(

@@ -232,7 +232,6 @@ func TestHmacEnvelopeSigner_RefusesToSignWithAShortSecret(t *testing.T) {
     })
 }
 
-/* hmacTestRuntime is a run's runtime over a scope of its own, the shape a provider door is asked under outside a request */
 func hmacTestRuntime() containercontract.Runtime {
     return runtime.NewRun(context.Background(), container.NewContainer(container.ContainerConfig{}).NewScope())
 }

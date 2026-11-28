@@ -15,7 +15,6 @@ import (
     containercontract "github.com/precision-soft/melody/v4/container/contract"
 )
 
-/* the holder captured its collaborator instead of resolving it, so no edge was ever written and the creation order alone closes the collaborator FIRST — under the holder that is still using it. Under the waves, the walk sees what the holder holds and the graph gains the edge the provider did not write. */
 func TestContainer_Close_WavesAHeldCollaboratorIsClosedAfterTheServiceHoldingIt(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -38,7 +37,6 @@ func TestContainer_Close_WavesAHeldCollaboratorIsClosedAfterTheServiceHoldingIt(
     }
 }
 
-/* the sequence above is the property, but on its own it cannot pin the edge: with no edge the two land in ONE wave and are closed at the same moment, so the order recorded is whatever the scheduler chose and the assertion passes about half the time. The wave is what nothing can decide by luck — a dependency is one past its last dependent, or it is beside it. */
 func TestContainer_Waves_AHeldCollaboratorIsOneWavePastTheServiceHoldingIt(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -72,7 +70,6 @@ func TestContainer_Waves_AHeldCollaboratorIsOneWavePastTheServiceHoldingIt(t *te
     }
 }
 
-/* the sibling that makes the test above an observation rather than a coincidence: the same pair, closed sequentially, closes in the order the creation stamp gives — the collaborator first, under the service still holding it, since the sequential teardown does not walk. */
 func TestContainer_Close_SequentialAHeldCollaboratorIsClosedBeforeTheServiceHoldingIt(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{TeardownSequential: true})
 
@@ -91,7 +88,6 @@ func TestContainer_Close_SequentialAHeldCollaboratorIsClosedBeforeTheServiceHold
     }
 }
 
-/* a map is neither counted nor entered, because iterating one another goroutine writes is a fatal error no recover catches. The cost is a real edge the walk cannot see, and it is written down here so the limit is a decision rather than an oversight. */
 func TestHeldPointerIdentities_DoesNotEnterAMap(t *testing.T) {
     held := &closeOrderServiceB{}
 
@@ -125,7 +121,6 @@ func holdsIdentity(identities []heldPointer, wanted pointerIdentity) bool {
     return false
 }
 
-/* mutualParentService and mutualChildService hold each other, which is what a parent and a child with a back-pointer are and what the reflection walk has to answer about: each pointer is evidence that the other must outlive it, and the two together are evidence of nothing. */
 type mutualParentService struct {
     recorder *closeOrderRecorder
     child    *mutualChildService
@@ -186,7 +181,6 @@ func TestContainer_Close_WavesAMutuallyHeldPairGainsNoEdgeAndReportsNoCycle(t *t
     }
 }
 
-/* foreignHub is the shape of a PUBLISHED collaborator: an interface field its owner rewrites under its own mutex, while the walk of a service holding the hub reads without one. */
 type foreignHub struct {
     mutex     sync.Mutex
     backplane fmt.Stringer
@@ -427,7 +421,6 @@ func TestHeldPointerIdentities_AnAtomicPointerSwappedWhileWalkedIsNoRace(t *test
     }
 }
 
-/* the hub is named by a pointer the walk reads whole; what the hub holds through an INTERFACE is two words somebody else is replacing, and the walk does not read them. Run under -race, a walk that reads them reports the race on every run; the assertion below pins the same thing without the detector. */
 func TestHeldPointerIdentities_DoesNotReadAnInterfaceFieldOfForeignMemory(t *testing.T) {
     hub := &foreignHub{backplane: &foreignBackplane{label: "first"}}
     stop := make(chan struct{})
@@ -467,7 +460,6 @@ func TestHeldPointerIdentities_DoesNotReadAnInterfaceFieldOfForeignMemory(t *tes
     writes.Wait()
 }
 
-/* a context is held through an INTERFACE field, which the walk does not enter from any door: the holder alone is named, and what the interface names — the runtime's cancel context, with the done channel stored atomically on first use — is never read. The walk that entered a fresh value's own interface fields reached that atomic.Value, whose type word is a runtime sentinel in the middle of its first store. */
 func TestHeldPointerIdentities_DoesNotReadInsideAContextItHolds(t *testing.T) {
     for iteration := 0; iteration < 500; iteration = iteration + 1 {
         ctx, cancel := context.WithCancel(context.Background())
@@ -498,7 +490,6 @@ func TestHeldPointerIdentities_DoesNotReadInsideAContextItHolds(t *testing.T) {
     }
 }
 
-/* the collaborator behind an intermediate struct the container does not know is still found: the walk enters foreign memory, it only refuses to read what a torn read could fabricate a type from. */
 type intermediateStruct struct{ service *closeOrderServiceB }
 
 type outerHolder struct{ middle *intermediateStruct }
@@ -514,7 +505,6 @@ func TestHeldPointerIdentities_StillFindsAServiceBehindAnIntermediateStruct(t *t
     }
 }
 
-/* chainLink and the two roots reach the SAME tail by a long path and by a short one, in both field orders. A pointer first met at the depth limit is entered again from the shorter path, so the tail's service is found whichever field the struct lists first. Five links put the tail exactly at the limit: the walk spends two levels per link. */
 type chainLink struct {
     next *chainLink
     held *closeOrderServiceB
@@ -570,7 +560,6 @@ func TestHeldPointerIdentities_StopsAtTheDepthLimit(t *testing.T) {
     }
 }
 
-/* oddDepthLink and oddDepthTail put the held pointer at an ODD depth — a struct level between the last link and the pointer — so the pointer can sit exactly one past the limit, at thirteen: the chain of links alone lands pointers on even depths only, and the site that separates the depth guard from its absence is the pointer at thirteen, not one at fourteen */
 type oddDepthTail struct {
     nested struct{ held *closeOrderServiceB }
 }
@@ -599,7 +588,7 @@ func oddDepthChain(length int, held *closeOrderServiceB) *oddDepthLink {
     return head
 }
 
-/* three links put the held pointer at depth eleven, four at exactly thirteen — one past the limit — where the walk that asked the depth of the TAKEN item, and queued every child regardless, would still have read it */
+/* three links put the held pointer at depth eleven, four at thirteen, one past the limit */
 func TestHeldPointerIdentities_DoesNotReadAPointerOnePastTheDepthLimit(t *testing.T) {
     held := &closeOrderServiceB{}
     heldIdentity, _ := pointerKeyOf(held)
@@ -613,7 +602,6 @@ func TestHeldPointerIdentities_DoesNotReadAPointerOnePastTheDepthLimit(t *testin
     }
 }
 
-/* wideHolder nests two arrays at the per-level limit, which is more cells than the walk's whole budget: the budget is spent level by level, so a service in a cell of such a table is not reached whatever cell it sits in — the first included, where the depth-first walk reached the first cells and not the last — while a service declared BESIDE the table, at a shallower depth, is reached before the table costs anything, which is the shape the walk exists for; a table within the budget is walked to its last cell. */
 type wideHolder struct {
     cells [256][256]struct{ service *closeOrderServiceB }
 }
@@ -658,7 +646,6 @@ func TestHeldPointerIdentities_StopsAtTheNodeBudget(t *testing.T) {
     }
 }
 
-/* one value filed under its name and under its type is walked once; the two nodes read the same record. */
 func TestContainer_Waves_WalksAValueFiledUnderNameAndTypeOnce(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -690,7 +677,6 @@ func TestContainer_Waves_WalksAValueFiledUnderNameAndTypeOnce(t *testing.T) {
     }
 }
 
-/* the record keeps the collaborator ALIVE: a holder that drops its collaborator after construction would otherwise leave a bare address behind, and the next allocation of that size class would be matched as the service the holder never held. */
 func TestHeldPointerIdentities_KeepsAHeldCollaboratorAlive(t *testing.T) {
     finalized := make(chan struct{}, 1)
 
@@ -789,7 +775,6 @@ func TestContainer_Close_WavesARingOfHeldCollaboratorsLongerThanTheWalkGainsNoCy
     }
 }
 
-/* resolvingHolder resolves its collaborator, so the container itself writes the edge, and keeps no pointer to it; the collaborator holds the holder back. The inferred edge contradicts the resolved one and is not written: the pair closes in the resolved order and reports nothing. */
 type resolvingHolder struct {
     recorder *closeOrderRecorder
 }
@@ -907,7 +892,6 @@ type handedSliceHolder struct {
 
 func (instance *handedSliceHolder) CloseWithContext(closeContext context.Context) error { return nil }
 
-/* the slice a provider stores is the header a registry handed it, whose first element the registry rewrites under its own mutex while the walk reads it: walked as the holder's own memory, that read reports the race under the detector on every run. The proof is the race detector, so this test says nothing without -race; the deterministic pin is the one above. */
 func TestHeldPointerIdentities_DoesNotReadASliceHandedToTheValueByAnotherOwner(t *testing.T) {
     registry := &rewritingRegistry{items: []*closeOrderServiceB{{}}}
 
@@ -1004,7 +988,6 @@ func TestContainer_Close_WavesAHeldEdgeBesideAMutualPairIsStillWritten(t *testin
     serviceContainer.MustRegister(
         "pair.b",
         func(resolver containercontract.Resolver) (*mutualPairB, error) {
-            /* resolved, so the graph carries b before the holder: that resolution is what made the way back from a to the holder look like one */
             if _, resolveErr := resolver.Get(resolver.Runtime().Context(), "pair.holder"); nil != resolveErr {
                 return nil, resolveErr
             }
@@ -1042,13 +1025,11 @@ func TestContainer_Close_WavesAHeldEdgeBesideAMutualPairIsStillWritten(t *testin
         return -1
     }
 
-    /* b closes first either way, since it resolved the holder; what this pins is the holder against the member it holds */
     if 3 != len(closeSequence) || indexOf("c") > indexOf("a") {
         t.Fatalf("expected the holder closed before the member it holds, got %v", closeSequence)
     }
 }
 
-/* what the walk reads may already be published — a provider can hand back a value in use, its owner writing it — so it is walked as foreign memory, its own interface fields included: a hub whose backplane its owner swaps under its own mutex is named by its pointer and what its interface field holds stays unread. Walked as the value's own memory, it reports the race under the detector on every run. */
 func TestContainer_Waves_WalksAPublishedServiceAsForeignMemory(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -1083,7 +1064,6 @@ func TestContainer_Waves_WalksAPublishedServiceAsForeignMemory(t *testing.T) {
         }
     }()
 
-    /* the filing walked the hub once; the loop is that walk, called directly two hundred times under the writer, since through the container it would answer from the memo after the first */
     for iteration := 0; iteration < 200; iteration = iteration + 1 {
         walkHeldPointers(hub, nil, nil)
     }
@@ -1098,7 +1078,6 @@ func TestContainer_Waves_WalksAPublishedServiceAsForeignMemory(t *testing.T) {
     }
 }
 
-/* aliasedResolvingService is resolved through its TYPE, so it lives under two nodes — its name and its type — and keeps no pointer to what it resolves, so the only way from it to its collaborator is the resolved edge, filed under one of its two keys; aliasedCapturingService holds it back through a captured pointer. */
 type aliasedResolvingService struct {
     recorder *closeOrderRecorder
 }
@@ -1120,7 +1099,6 @@ func (instance *aliasedCapturingService) CloseWithContext(closeContext context.C
     return nil
 }
 
-/* the ring an inferred edge would close has to be looked for in the CANONICAL key space, where a service filed under its name and under its type is one node: asked on the raw keys, the resolved edge from the type node and the held edge onto the name node never meet, the held edge is written, and the drain — which folds the aliases first — reports a cycle over a teardown in which both services close, by map order, about one run in seven. Fifty rounds here, because a defect that appears one time in seven does not show in one. */
 func TestContainer_Close_WavesAHeldEdgeAgainstAResolvedEdgeThroughATypeAliasIsNotWritten(t *testing.T) {
     for round := 0; round < 50; round = round + 1 {
         serviceContainer := NewContainer(ContainerConfig{})
@@ -1171,13 +1149,11 @@ func TestContainer_Close_WavesAHeldEdgeAgainstAResolvedEdgeThroughATypeAliasIsNo
     }
 }
 
-/* the records the walk keeps hold every named collaborator alive for the plan; once the teardown has run they are released with it, so a value a service dropped after construction is collectable again. Before the release it is pinned, which is the control: the same holder, the same collection, the finalizer does not run until Close has. */
 func TestContainer_Close_ReleasesTheHeldIdentityRecords(t *testing.T) {
     finalized := make(chan struct{}, 1)
 
     serviceContainer := NewContainer(ContainerConfig{})
 
-    /* the container has to outlive the collection below, or the record dies with the container and the test passes for that reason instead */
     defer runtime.KeepAlive(serviceContainer)
 
     verifyDeclaredTeardownDependencies(t, serviceContainer)
@@ -1258,12 +1234,10 @@ func TestContainer_TeardownPlan_DoesNotWriteAnInferredEdgeIntoTheGraph(t *testin
 
     buildEveryRegisteredService(t, serviceContainer, "app.held", "app.holder")
 
-    /* the operator's view, computed BEFORE the late resolution: it infers holder → held */
     serviceContainer.(interface {
         TeardownPlan() []containercontract.TeardownPlanEntry
     }).TeardownPlan()
 
-    /* the held service, through the resolver it kept, resolves the holder: held → holder, which contradicts the inference and must win */
     if _, getErr := lateResolver.Get(t.Context(), "app.holder"); nil != getErr {
         t.Fatalf("unexpected late resolution error: %v", getErr)
     }
@@ -1277,7 +1251,6 @@ func TestContainer_TeardownPlan_DoesNotWriteAnInferredEdgeIntoTheGraph(t *testin
     }
 }
 
-/* the way back that decides whether an inference would close a ring runs through the nodes the drain will read — the CREATED ones — so a declared edge towards a service nobody built is not a way back: read as one, it would drop a true inference and leave the pair in one wave. */
 func TestContainer_Waves_AnUnbuiltDeclaredDependencyIsNotAWayBack(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -1338,7 +1311,6 @@ func TestContainer_Waves_AnUnbuiltDeclaredDependencyIsNotAWayBack(t *testing.T) 
     }
 }
 
-/* fatHub is large in the one way the walk cannot collapse: cells holding POINTERS, each a visit whether nil or not — a table of scalars is one node since the scalar-array repair, and a hub made of those would have let the re-walk it exists to provoke cost nothing */
 type fatHub struct {
     cells [64][256]struct{ left, right *closeOrderServiceB }
 }
@@ -1358,7 +1330,6 @@ func newHubChain(hub *fatHub, length int) *hubLink {
     return head
 }
 
-/* collaboratorLink puts the held service a chosen number of links BELOW its holder: a service beside a table or a hub, at the holder's own depth, is taken from the queue before any cell of the table is paid for, so it is found whether or not the table is one node — the breadth-first order emptied three pins written that way; the service one link below the table, or four links below a hub walked twice, is queued after the cells and found only if they were not charged */
 type collaboratorLink struct {
     next *collaboratorLink
     held *closeOrderServiceB
@@ -1392,13 +1363,11 @@ func (instance *collaboratorFirstHolder) CloseWithContext(closeContext context.C
     return nil
 }
 
-/* a large object reached whole through a chain of links was walked AGAIN from every shallower path that reached it afterwards, although the first walk had seen all of it; the re-walks spent the budget before the root's last field, so which field came first decided whether a held service was found. A subtree is entered again from a shallower path only when the first walk was cut. The chain is two links long so that the FIRST meeting of the hub, at the end of the chain, is whole — a longer chain meets it first at a depth where its cells are cut, and the cut walks alone cost the budget whatever the re-entry rule says. */
 func TestHeldPointerIdentities_DoesNotWalkAWholeSubtreeAgainFromAShallowerPath(t *testing.T) {
     held := &closeOrderServiceB{}
     heldIdentity, _ := pointerKeyOf(held)
     hub := &fatHub{}
 
-    /* the held service sits four links below the holder, at depth ten: a hub of forty-nine thousand items walked once leaves it room in the budget, walked twice from the chain's second path it does not */
     if false == holdsIdentity(walkHeldPointers(&collaboratorFirstHolder{collaborator: newCollaboratorChain(held, 4), hub: hub, chain: newHubChain(hub, 2)}, nil, nil), heldIdentity) {
         t.Fatalf("expected the collaborator declared first to be found")
     }
@@ -1422,7 +1391,7 @@ type peerFirstCodec struct {
 
 func (instance *peerFirstCodec) CloseWithContext(closeContext context.Context) error { return nil }
 
-/* an inline table of sixty-four kibibytes, charged one budget unit per byte, is the whole budget, so a pointer field declared after it would go unreached; an array whose element type cannot name anything is one node */
+/* sixty-four kibibytes at one budget unit per byte is the whole budget */
 func TestHeldPointerIdentities_CountsAnArrayOfScalarsAsOneNode(t *testing.T) {
     held := &closeOrderServiceB{}
     heldIdentity, _ := pointerKeyOf(held)
@@ -1436,7 +1405,6 @@ func TestHeldPointerIdentities_CountsAnArrayOfScalarsAsOneNode(t *testing.T) {
     }
 }
 
-/* structOfScalarsAsWideAsTheBudget builds, through reflect, a struct of two hundred and fifty-six structs of two hundred and fifty-six integers: sixty-five thousand five hundred and thirty-six scalar fields, the walk's whole budget, which no array of the same content costs */
 func structOfScalarsAsWideAsTheBudget() reflect.Type {
     integerFields := make([]reflect.StructField, 0, TeardownWalkElementsRule().Default)
     for index := 0; index < TeardownWalkElementsRule().Default; index = index + 1 {
@@ -1457,7 +1425,6 @@ func reflectStructFieldName(prefix string, index int) string {
     return prefix + string(rune('A'+index/26)) + string(rune('A'+index%26))
 }
 
-/* a struct of scalars is one node, as an array of scalars is: charged field by field, a struct as wide as the budget would spend all of it, and the held service one level below it would not be queued */
 func TestHeldPointerIdentities_CountsAStructOfScalarsAsOneNode(t *testing.T) {
     held := &closeOrderServiceB{}
     heldIdentity, _ := pointerKeyOf(held)
@@ -1497,7 +1464,7 @@ func TestHeldPointerIdentities_ChargesTheBudgetWhenAnItemIsQueued(t *testing.T) 
 
     runtime.KeepAlive(table)
 
-    /* a million cells queued cost about two hundred megabytes in the form charged at the taking; the form charged at the queue holds at most the budget of items, under four megabytes — sixteen megabytes is the line between the two, four times the honest figure */
+    /* a million cells: about two hundred megabytes charged at the taking, under four charged at the queue */
     allocated := after.TotalAlloc - before.TotalAlloc
     if 16<<20 < allocated {
         t.Fatalf("expected the walk over a million pointer-holding cells to queue no more than the budget, it allocated %d bytes", allocated)
@@ -1508,7 +1475,6 @@ func TestHeldPointerIdentities_ChargesTheBudgetWhenAnItemIsQueued(t *testing.T) 
     }
 }
 
-/* cycleMemberLink, cycleMemberHead, cycleMemberTail and cycleMemberLeaf build the shape a cycle member's verdict must survive: through the chain the head is reached at a depth from which its leaf is cut, its tail's only way forward is the cycle back to the head, and the root reaches the tail directly as well, from a depth that has room */
 type cycleMemberLink struct {
     next *cycleMemberLink
     head *cycleMemberHead
@@ -1547,11 +1513,9 @@ func newCycleMemberShape(held *closeOrderServiceB) (*cycleMemberLink, *cycleMemb
     tail := &cycleMemberTail{head: head}
     head.tail = tail
 
-    /* through the chain the head sits at depth six and the held pointer at fourteen, two past the limit; through the tail the head sits at four and the held pointer at twelve */
     return &cycleMemberLink{next: &cycleMemberLink{head: head}}, tail
 }
 
-/* a ring whose only way forward is the way back to a head cut at the depth limit: the held service behind the head is past the limit through the chain and inside it through the tail, and it is found whichever of the two the holder lists first — the depth-first walk memoised the ring with the verdict of the first path and refused the shorter one, and which field came first decided */
 func TestHeldPointerIdentities_FindsAHeldServiceBehindARingFromTheShortPathWhicheverFieldComesFirst(t *testing.T) {
     held := &closeOrderServiceB{}
     heldIdentity, _ := pointerKeyOf(held)
@@ -1569,7 +1533,6 @@ func TestHeldPointerIdentities_FindsAHeldServiceBehindARingFromTheShortPathWhich
     }
 }
 
-/* cyclicHub is the fat hub with one pointer back into the chain that leads to it: reached through the chain and again from the holder directly, it is paid for once, and the collaborator declared after it is found — walked once per path that reached it, the second walk spent the budget before that collaborator */
 type cyclicHub struct {
     cells [64][256]struct{ left, right *closeOrderServiceB }
     back  *cyclicHubLink
@@ -1604,7 +1567,6 @@ func TestHeldPointerIdentities_AHubOnARingIsPaidForOnceAndTheCollaboratorAfterIt
     }
 }
 
-/* crossEdgeShape: the deep path reaches the ring's root R at depth 8 and, under it, a chain whose collaborator sits past the depth limit; A reaches back to R, and B holds A through a plain forward edge after A's walk has returned. The short path enters B directly, with room to spare. */
 type crossEdgeNode struct {
     next  *crossEdgeNode
     cross *crossEdgeNode
@@ -1636,7 +1598,6 @@ func newCrossEdgeShape(held *closeOrderServiceB) (chain *crossEdgeNode, holderOf
     return chain, holderOfMember
 }
 
-/* a holder of a ring member through a plain forward edge, with the held service past the limit through the chain and inside it through the holder: found — a depth-first walk that records the holder as whole while the ring is being cut refuses it from the short path that has room, and loses the service */
 func TestHeldPointerIdentities_FindsAHeldServiceBehindARingHeldThroughAForwardEdgeFromTheShortPath(t *testing.T) {
     held := &closeOrderServiceB{}
     heldIdentity, _ := pointerKeyOf(held)
@@ -1664,7 +1625,6 @@ func (instance *sliceTableFirstCodec) CloseWithContext(closeContext context.Cont
     return nil
 }
 
-/* an inline table of interfaces or slices is one node too: the walk enters neither, so counting each cell of it would spend the whole budget before the pointer field declared after the table */
 func TestHeldPointerIdentities_CountsAnArrayOfWhatItDoesNotReadAsOneNode(t *testing.T) {
     held := &closeOrderServiceB{}
     heldIdentity, _ := pointerKeyOf(held)
@@ -1685,7 +1645,6 @@ type selfReferringHolder struct {
 
 func (instance *selfReferringHolder) CloseWithContext(closeContext context.Context) error { return nil }
 
-/* a pointer met again while its own walk is on the stack is a cycle, not a cut: the walk of a value that points at itself must not mark itself cut, or the next shallower path would walk it a second time for nothing */
 func TestHeldPointerIdentities_ReadsAValuePointingAtItselfOnce(t *testing.T) {
     held := &closeOrderServiceB{}
     heldIdentity, _ := pointerKeyOf(held)
@@ -1716,7 +1675,6 @@ type busListener struct {
     peak     *atomic.Int32
 }
 
-/* Close holds until the other listener has entered its own Close as well — read from the peak, which only rises — or until a bound that only a serialised close reaches: two closes that overlap meet inside the window whatever the machine's load, where a fixed sleep met only when the scheduler was quick enough */
 func (instance *busListener) CloseWithContext(closeContext context.Context) error {
     now := instance.inFlight.Add(1)
 
@@ -1737,14 +1695,13 @@ func (instance *busListener) CloseWithContext(closeContext context.Context) erro
     return nil
 }
 
-/* a bus that resolved two listeners, each holding a pointer back to it, gave the walk two edges the resolutions contradict — both dropped, both unordered against the bus — and the union of those pairs put the two listeners, unrelated to each other, into one group: the wave past the bus closed them one after the other, which is the starvation the waves exist to remove. A group is formed from the pairs whose members share a wave; the listeners are in one wave and the bus is not */
 func TestContainer_Close_WavesTwoListenersHoldingTheirBusBackStillCloseTogether(t *testing.T) {
     var inFlight atomic.Int32
     var peak atomic.Int32
 
     serviceContainer := NewContainer(ContainerConfig{})
 
-    /* the bus is allocated before the listeners, so each listener holds it when it is filed and walked: the walk sees the back-pointer, the resolution writes the edge the other way, and the pair gains no edge */
+    /* the bus is allocated before the listeners, so each listener holds it when it is filed and walked */
     bus := &listenerBus{}
 
     for _, name := range []string{"app.p", "app.q"} {
@@ -1791,7 +1748,6 @@ func TestContainer_Close_WavesTwoListenersHoldingTheirBusBackStillCloseTogether(
     }
 }
 
-/* a provider handing back an object built long before the container and already in use — the capturing provider the package document names as the ordinary case — resolved under the waves, had its interface fields read while their owner rewrote them, which the race detector reported on every run; the walk reads a fresh value by the same rule as a published one now. The proof is the race detector, so this test says nothing without -race; the deterministic pin is the context test above, where the interface field yields no identity at all. */
 func TestHeldPointerIdentities_ReadsAPreBuiltValueAProviderHandsBackAsPublishedMemory(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -1874,7 +1830,6 @@ func (instance *zeroSizeHeldService) CloseWithContext(closeContext context.Conte
     return nil
 }
 
-/* zeroSizeHolder holds a pointer to a zero-size value of the service's type that is NOT the service — its own allocation, which lands on the shared zero-size address all the same. */
 type zeroSizeHolder struct {
     held *zeroSizeHeldService
 }
@@ -1929,7 +1884,6 @@ func TestContainer_Waves_AHeldZeroSizePointerNamesNoServiceAndGainsNoEdge(t *tes
     t.Fatalf("expected the holder in the teardown plan")
 }
 
-/* selfPointingNode is the one recursive shape Go admits — a struct holding a POINTER to itself — and the reason the descent needs no visiting set: the pointer answers before the recursion could begin. */
 type selfPointingNode struct {
     next *selfPointingNode
 }
@@ -2000,7 +1954,6 @@ func TestHeldPointerIdentities_MatchesTheBoundedReachabilityOfARandomGraph(t *te
 
 type reflectionStorageInner struct{}
 
-/* reflectionStorage keeps a pointer its holder does not carry, so the inner identity is reachable only by entering the storage */
 type reflectionStorage struct {
     inner *reflectionStorageInner
     pad   int
@@ -2010,7 +1963,6 @@ type reflectionStorageHolder struct {
     storage *reflectionStorage
 }
 
-/* registers app.storage with TeardownReflectionDisabled when skipReflection, and app.holder capturing it; the storage is filed before the holder, so the holder's walk meets a value already known to be opaque */
 func registerStorageFiledBeforeItsCapturingHolder(t *testing.T, serviceContainer containercontract.Container, skipReflection bool) *reflectionStorage {
     t.Helper()
 
@@ -2085,7 +2037,6 @@ func TestContainer_Waves_AServiceRegisteredWithTeardownReflectionDisabledIsHeldB
     }
 }
 
-/* an override files its value under every type the name is registered under too; the option covers that type node as it covers the name */
 func TestContainer_Waves_AnOverrideIsNotWalkedUnderTheTypeOfANameRegisteredWithTeardownReflectionDisabled(t *testing.T) {
     for _, skipReflection := range []bool{false, true} {
         serviceContainer := NewContainer(ContainerConfig{})
@@ -2102,7 +2053,6 @@ func TestContainer_Waves_AnOverrideIsNotWalkedUnderTheTypeOfANameRegisteredWithT
     }
 }
 
-/* the option is the registration's, so a value installed over the name is not walked either */
 func TestContainer_Waves_AnOverrideOfANameRegisteredWithTeardownReflectionDisabledIsNotWalked(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
     verifyDeclaredTeardownDependencies(t, serviceContainer)
@@ -2116,7 +2066,6 @@ func TestContainer_Waves_AnOverrideOfANameRegisteredWithTeardownReflectionDisabl
     }
 }
 
-/* the held edge is kept: the storage is still closed a wave past the holder that captured it */
 func TestContainer_Waves_AServiceRegisteredWithTeardownReflectionDisabledIsStillOneWavePastItsHolder(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
     verifyDeclaredTeardownDependencies(t, serviceContainer)
@@ -2141,7 +2090,6 @@ type reflectionBusyLink struct {
     next *reflectionBusyLink
 }
 
-/* reflectionBusyService rewrites a pointer field from its own goroutine under its own mutex, which is what the walk cannot read without a data race */
 type reflectionBusyService struct {
     mutex sync.Mutex
     head  *reflectionBusyLink
@@ -2189,7 +2137,7 @@ type reflectionBusyHolder struct {
     busy *reflectionBusyService
 }
 
-/* a data race is visible only under -race, which the gate's race lane runs: registered without the option, the walk of the holder and of the service itself reads head while the goroutine writes it */
+/* a data race is visible only under -race, which the gate's race lane runs */
 func TestContainer_Waves_ABusyServiceRegisteredWithTeardownReflectionDisabledIsNeverRead(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
     verifyDeclaredTeardownDependencies(t, serviceContainer)

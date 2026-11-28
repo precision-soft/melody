@@ -2980,7 +2980,6 @@ func TestWriteResponse_ASaveOutageAnswersTheKernelsRetryAfter(t *testing.T) {
     }
 }
 
-/* hangingSessionManager waits on the context of its save or delete and answers its bare, unmarked error, as a replaced manager that forgets the mark would */
 type hangingSessionManager struct {
     stubSessionManager
 }
@@ -3125,7 +3124,6 @@ func TestWriteResponse_ADeleteOutageOnACommittedResponseKeepsItsStatus(t *testin
     }
 }
 
-/* a hijacked connection records no status, so the response writeResponse answers is the one it keeps */
 type hijackedHeadersWriter struct {
     *httptest.ResponseRecorder
 }

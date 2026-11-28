@@ -14,9 +14,6 @@ import (
     melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
 )
 
-/* the command empties the cache the application reads, once, says what the clear reached, and touches neither
-   database: the runtime carries a catalogue and an archive that are not persistent, so any step of the reset
-   would have nothing to act on and the clear is the whole of the run */
 func TestCacheClearCommandEmptiesTheCacheAndSaysWhatItReached(t *testing.T) {
     runtimeInstance, cacheInstance := newResetRuntimeWithArchive(t, persistence.NewCatalogStorage(nil), persistence.NewArchiveStorage(nil))
 
@@ -43,8 +40,6 @@ func TestCacheClearCommandEmptiesTheCacheAndSaysWhatItReached(t *testing.T) {
     }
 }
 
-/* a clear that fails takes the exit code, under the name of the command that ran it — the reset's own refusal
-   names the reset, so the operator reads which of the two doors stopped */
 func TestCacheClearCommandNamesItselfWhenTheClearFails(t *testing.T) {
     runtimeInstance, cacheInstance := newResetRuntimeWithArchive(t, persistence.NewCatalogStorage(nil), persistence.NewArchiveStorage(nil))
     cacheInstance.refusal = errors.New("redis: connection refused")

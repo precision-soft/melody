@@ -14,7 +14,6 @@ import (
     "github.com/precision-soft/melody/v4/exception"
 )
 
-/* the two lookup doors are read as the dialect renders them rather than run against a database: what has to be pinned is which rows they may match, and that lives entirely in the where clause. The column's own collation (utf8mb4_0900_ai_ci) folds accents, 'café' = 'cafe', while NormalizedUsername, the one spelling the cache keys and the invalidation listeners agree on, folds case alone, so under the column's collation an account reachable through an accent-folded spelling is cached under a key the invalidation cannot address, and a revoked password keeps authenticating from the entry, which has no expiry. */
 func renderedUserByUsernameQuery(t *testing.T, wanted string) string {
     t.Helper()
 
@@ -53,7 +52,7 @@ func TestUsernameTakenByAnotherQuery_ComparesTheColumnTheApplicationFolded(t *te
     }
 }
 
-/* Go folds the Georgian Mtavruli capitals onto Mkhedruli and MySQL's LOWER() leaves them, so a key on LOWER(username) let 'ᲐᲜᲐ' stand beside 'ანა' while the cache and the lookup held them one name: the folded column is written by the application, in Go's spelling */
+/* Go folds the Georgian Mtavruli capitals onto Mkhedruli and MySQL's LOWER() leaves them */
 func TestNewUserRow_WritesTheNameAsNormalizedUsernameFoldsIt(t *testing.T) {
     row := newUserRow(entity.NewUser("user-1", "ᲐᲜᲐ", "hash", []string{entity.RoleUser}))
 
@@ -66,15 +65,7 @@ func TestNewUserRow_WritesTheNameAsNormalizedUsernameFoldsIt(t *testing.T) {
     }
 }
 
-/* the check that precedes the insert is a read, so it cannot hold a name against a caller that passed it
-   at the same moment; the unique index the migration set adds is what holds it, and this is the seam that
-   turns its refusal into the message the door already answers when the read catches the name in time.
-
-   The match has to be on the index's own name and nothing wider: a duplicate on the PRIMARY key is a
-   different diagnosis — an identifier collision — and reporting it as a taken username would send the
-   caller to rename an account whose name was never the problem. */
 func TestAsUsernameAlreadyExists_TranslatesOnlyTheUsernameIndexRefusal(t *testing.T) {
-    /* the shape production produces: the audit tracker's own exception, whose message says nothing about the index, with the driver's refusal as its cause, so the seam has to find the index's name below the top of the chain */
     driverRefusal := fmt.Errorf(
         "Error 1062 (23000): Duplicate entry 'zzprobe' for key 'melody_example_v4_user.%s'",
         migration.UserUsernameIndexName,
@@ -95,7 +86,6 @@ func TestAsUsernameAlreadyExists_TranslatesOnlyTheUsernameIndexRefusal(t *testin
     }
 }
 
-/* mysql renders the duplicated value before the key clause and does not escape it, and the admin doors admit quotes in a name, so a username that carries the clause's own spelling would put a first-clause reader onto the value: the refusal would stay the driver's and the door would answer 500 over a collision it answers 400. The clause is the tail of the message, and the second row spells a whole clause of another index inside the value. */
 func TestAsUsernameAlreadyExists_ReadsTheKeyClauseAtTheTailOfTheMessage(t *testing.T) {
     for _, value := range []string{
         "for key 'z'",
@@ -124,7 +114,6 @@ func TestAsUsernameAlreadyExists_LeavesEveryOtherFailureAlone(t *testing.T) {
         t.Fatalf("expected a duplicate identifier to stay the diagnosis it is, got %q", asUsernameAlreadyExists(primaryKey))
     }
 
-    /* the index is read out of the key clause, not searched for in the whole text: an identifier that happens to spell the index's name is still a duplicate IDENTIFIER */
     spelledLikeTheIndex := exception.NewError(
         "audited insert failed",
         nil,
@@ -140,7 +129,6 @@ func TestAsUsernameAlreadyExists_LeavesEveryOtherFailureAlone(t *testing.T) {
     }
 }
 
-/* selfWrappingError is a chain that closes on itself through Unwrap, and selfJoiningError one that closes on itself through both branches of a join: neither is a shape the driver produces, but the walk reads whatever error a write returns, and an unbounded walk over a cycle exhausts the goroutine stack, a fatal error no recover turns into a response. */
 type selfWrappingError struct {
     message string
 }
@@ -175,7 +163,6 @@ func TestAsUsernameAlreadyExists_EndsOnAChainThatClosesOnItself(t *testing.T) {
         }
     }
 
-    /* the bound is on the walk, not on the diagnosis: a refusal three links down is still read */
     driverRefusal := fmt.Errorf(
         "Error 1062 (23000): Duplicate entry 'zzprobe' for key 'melody_example_v4_user.%s'",
         migration.UserUsernameIndexName,
@@ -187,7 +174,6 @@ func TestAsUsernameAlreadyExists_EndsOnAChainThatClosesOnItself(t *testing.T) {
     }
 }
 
-/* lockedUserRows answers the locked read of the update and delete doors with the account as the directory holds it, and every count with zero */
 func lockedUserRows(id string, username string, password string, roles string) func(query string) ([]string, [][]driver.Value, error) {
     return func(query string) ([]string, [][]driver.Value, error) {
         if true == strings.Contains(query, "count(*)") {

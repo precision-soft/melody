@@ -9,7 +9,6 @@ import (
     "github.com/precision-soft/melody/v4/internal/testhelper"
 )
 
-/* the guard exists to replace the raw dereference with a refusal that names the pattern, so an unqualified recover is satisfied by the very crash it was written to remove. */
 func TestRouteGroup_PanicsWhenRouterIsNil(t *testing.T) {
     group := NewRouteGroup(nil, GroupConfig{PathPrefix: "/api"})
 

@@ -91,7 +91,6 @@ func (instance *capturingLogger) count() int {
 
 var _ loggingcontract.Logger = (*capturingLogger)(nil)
 
-/* installDefaultAsyncStorageLogger swaps the process-wide default for the test's own capture: the real default is the emergency logger on standard error, which a test can neither read nor keep quiet. */
 func installDefaultAsyncStorageLogger(t *testing.T) *capturingLogger {
     t.Helper()
 
@@ -105,8 +104,6 @@ func installDefaultAsyncStorageLogger(t *testing.T) *capturingLogger {
     return logger
 }
 
-/* awaitClose runs Close on its own goroutine under a two-second bound, so a disarmed grace fails the test in seconds instead of hanging the suite until the go test timeout; two seconds sits well under the real grace and well over the shortened one the tests install. */
-/* contextGivingEachStretch is a close deadline whose two stretches each come to grace: a stretch is seven sixteenths of the remainder, half of it once the margin of an eighth is kept back */
 func contextGivingEachStretch(t *testing.T, grace time.Duration) context.Context {
     t.Helper()
 
@@ -133,7 +130,6 @@ func awaitClose(t *testing.T, storage *AsyncStorage, closeContext context.Contex
     }
 }
 
-/* contextIgnoringStorage parks every save until released and never reads its context — the shape of a write already inside a syscall, and of a custom Storage that takes the context and does nothing with it. */
 type contextIgnoringStorage struct {
     entered chan struct{}
     release chan struct{}
@@ -255,7 +251,6 @@ func TestAsyncStorage_OverflowDeadLetters(t *testing.T) {
         t.Fatalf("save buffered: %v", saveErr)
     }
 
-    /* the refused entry is reported to the caller as well as dead-lettered: the caller is the one party still present when the entry is lost, and the queue protects the request path from the delegate's latency, not from knowing that its audit record was dropped */
     saveErr := storage.Save(context.Background(), DefaultTable, []Entry{Entry{Entity: "user", EntityId: "dropped", Operation: "insert"}})
     if false == errors.Is(saveErr, ErrAsyncStorageQueueFull) {
         t.Fatalf("expected the overflow to be reported as ErrAsyncStorageQueueFull, got: %v", saveErr)
@@ -447,7 +442,6 @@ func TestAsyncStorage_CloseCancelsAWedgedSaveAfterTheGrace(t *testing.T) {
         closeDone <- storage.CloseWithContext(contextGivingEachStretch(t, 50*time.Millisecond))
     }()
 
-    /* Close is called on its own goroutine and bounded here, so a disarmed cancel-after-grace fails this test in seconds instead of hanging the suite until the go test timeout */
     var closeErr error
     select {
     case closeErr = <-closeDone:
@@ -473,7 +467,6 @@ func TestAsyncStorage_CloseCancelsAWedgedSaveAfterTheGrace(t *testing.T) {
     }
 }
 
-/* releasedStorage holds its save until the test releases it, then stores it */
 type releasedStorage struct {
     entered  chan struct{}
     released chan struct{}
@@ -513,7 +506,6 @@ func TestAsyncStorage_CloseWithoutADeadlineDrainsUnbounded(t *testing.T) {
     }
 }
 
-/* settlingAtTheDrainContext settles the save in hand at the drain's first read of Done, which the drain's select evaluates after the entry count and before it arms its timer: the timer then fires with nothing outstanding, deterministically */
 type settlingAtTheDrainContext struct {
     context.Context
     once   sync.Once
@@ -526,7 +518,6 @@ func (instance *settlingAtTheDrainContext) Done() <-chan struct{} {
     return instance.Context.Done()
 }
 
-/* the drain timer firing after the worker's last settle and before its drained signal finds nothing in hand: the close answers nil, as it does for nothing outstanding at entry, where the counted verdict reported a cancelled save that never was. The test holds the drained signal back itself, standing for the worker between its settle and its exit. */
 func TestAsyncStorage_CloseAnswersNilWhenTheLastSaveSettledBeforeTheDrainTimer(t *testing.T) {
     delegate := &releasedStorage{entered: make(chan struct{}), released: make(chan struct{})}
     storage := NewAsyncStorage(delegate, AsyncStorageConfig{BufferSize: bound.Of(2)})
@@ -566,7 +557,6 @@ func TestAsyncStorage_CloseAnswersNilWhenTheLastSaveSettledBeforeTheDrainTimer(t
     }
 }
 
-/* ridingRecordingStorage records like recordingStorage and answers whether it rides a bound transaction, as BunStorage does */
 type ridingRecordingStorage struct {
     *recordingStorage
     rides bool
@@ -576,7 +566,7 @@ func (instance *ridingRecordingStorage) RidesTransactionOf(origin *bun.DB) bool 
     return instance.rides
 }
 
-/* the worker is deliberately wedged on an unbound entry first: a queued bound entry would sit behind it, so the second delegate call arriving before Save returns can only be the synchronous path — the probe is constructed rather than raced */
+/* the worker is wedged on an unbound entry first, so a second delegate call before Save returns can only be the synchronous path */
 func TestAsyncStorage_SaveWithABoundDatabaseGoesThroughTheDelegateSynchronously(t *testing.T) {
     installDefaultAsyncStorageLogger(t)
 
@@ -721,7 +711,6 @@ func TestAsyncStorage_CloseAbandonsADelegateThatIgnoresTheCancellationAfterASeco
         t.Fatalf("expected the report to count the one entry still queued behind the abandoned save, got: %v", closeErr)
     }
 
-    /* the entries behind the abandoned save are still the worker's: neither dropped nor failed, and written if the delegate ever answers */
     if 0 != storage.Dropped() || 0 != storage.Failed() {
         t.Fatalf("expected the abandoned entries left uncounted, got dropped=%d failed=%d", storage.Dropped(), storage.Failed())
     }
@@ -798,7 +787,6 @@ func TestAsyncStorage_CloseGracesWithin_ADeclaredBudgetIsSplitWithoutACap(t *tes
     }
 }
 
-/* a cancellation without a deadline is read like a spent deadline, because the delegate below is handed the worker's cancellation either way and the registry this storage writes through abandons on the same signal. */
 func TestAsyncStorage_CloseGracesWithin_ACancelledContextWithoutADeadlineDoesNotWait(t *testing.T) {
     storage := NewAsyncStorage(newRecordingStorage(), AsyncStorageConfig{BufferSize: bound.Of(4)})
     defer func() { _ = storage.CloseWithContext(context.Background()) }()
@@ -816,7 +804,6 @@ func TestAsyncStorage_CloseGracesWithin_ACancelledContextWithoutADeadlineDoesNot
     }
 }
 
-/* a close reached with its deadline already spent is the NORMAL state of a teardown whose budget an earlier component ate, and over an empty queue it has nothing to abandon. Both graces are zero there, so every wait below is armed and ready at once; answered from the sentinel goroutine — which has not been scheduled yet — the close cancelled a worker holding nothing and named entries that were not there. The pair below is what separates the two: the same spent deadline over an empty queue and over a save that will not give up. */
 func TestAsyncStorage_CloseWithASpentDeadlineOverAnEmptyQueueReportsNothing(t *testing.T) {
     storage := NewAsyncStorage(newRecordingStorage(), AsyncStorageConfig{BufferSize: bound.Of(4)})
 
@@ -828,7 +815,6 @@ func TestAsyncStorage_CloseWithASpentDeadlineOverAnEmptyQueueReportsNothing(t *t
     }
 }
 
-/* the sibling of the test above, and the arm that has to FAIL: the same spent deadline over a save that ignores its cancellation is still reported, because the entries behind it really were not stored. Without this arm the guard above would be indistinguishable from one that stopped reporting altogether. */
 func TestAsyncStorage_CloseWithASpentDeadlineOverAWedgedSaveStillReports(t *testing.T) {
     ignoring := newContextIgnoringStorage()
     storage := NewAsyncStorage(ignoring, AsyncStorageConfig{BufferSize: bound.Of(4)})
@@ -853,12 +839,10 @@ func TestAsyncStorage_CloseWithASpentDeadlineOverAWedgedSaveStillReports(t *test
         t.Fatalf("a save that ignored its cancellation was reported as a clean close")
     }
 
-    /* what a spent budget can say: the save was cancelled and nothing confirmed it stored. Whether it IGNORED the cancellation is not measurable when no grace waited for its reaction, and the answer does not claim it */
     if false == strings.Contains(closeErr.Error(), "budget already spent") || true == strings.Contains(closeErr.Error(), "ignored its cancellation") {
         t.Fatalf("the failure does not name what happened: %v", closeErr)
     }
 
-    /* the deadline that had passed at entry is what ended the close, so errors.Is reads it off the answer as it does for a deadline reached during a stretch */
     if false == errors.Is(closeErr, context.DeadlineExceeded) {
         t.Fatalf("expected the passed deadline as the cause, got: %v", closeErr)
     }
@@ -869,7 +853,6 @@ func TestAsyncStorage_CloseWithASpentDeadlineOverAWedgedSaveStillReports(t *test
     }
 }
 
-/* a context its caller cancelled before the close began leaves no grace either, and the answer is the caller's withdrawal, as a cancellation during a stretch is, with context.Canceled as its cause, never a spent budget */
 func TestAsyncStorage_CloseWithACancelledContextOverAWedgedSaveIsTheCallersWithdrawal(t *testing.T) {
     ignoring := newContextIgnoringStorage()
     storage := NewAsyncStorage(ignoring, AsyncStorageConfig{BufferSize: bound.Of(4)})
@@ -899,7 +882,6 @@ func TestAsyncStorage_CloseWithACancelledContextOverAWedgedSaveIsTheCallersWithd
     }
 }
 
-/* a context CANCELLED but carrying no deadline reaches the same zero graces by the other door, and answers the same way over an empty queue. It is the form a caller reaches by asserting its way to CloseWithContext with a cancellation in hand, which is the producer the GoDoc of the grace helper names. */
 func TestAsyncStorage_CloseWithACancelledContextWithoutADeadlineOverAnEmptyQueueReportsNothing(t *testing.T) {
     storage := NewAsyncStorage(newRecordingStorage(), AsyncStorageConfig{BufferSize: bound.Of(4)})
 
@@ -915,7 +897,6 @@ func TestAsyncStorage_CloseWithACancelledContextWithoutADeadlineOverAnEmptyQueue
     }
 }
 
-/* the count of what is outstanding FALLS as the worker stores: a storage that accepted entries and stored them all is, under a spent deadline, a storage with nothing to abandon, and it answers nil. Without the decrement the count would stay where the producers left it and the close would report an abandonment over work that was done. */
 func TestAsyncStorage_CloseWithASpentDeadlineAfterTheEntriesWereStoredReportsNothing(t *testing.T) {
     delegate := newRecordingStorage()
     close(delegate.release)
@@ -955,7 +936,6 @@ func TestAsyncStorage_CloseWithASpentDeadlineAfterTheEntriesWereStoredReportsNot
     }
 }
 
-/* contextHonouringStorage parks the save until it is released or CANCELLED, the way a real delegate under a context does. */
 type contextHonouringStorage struct {
     entered chan struct{}
     release chan struct{}
@@ -975,7 +955,6 @@ func (instance *contextHonouringStorage) Save(ctx context.Context, table string,
     }
 }
 
-/* a spent budget gives the save in hand no grace to react to its cancellation, so whether it IGNORED it is not measurable; the delegate here honours the cancellation, and the answer says only what a spent budget can say: cancelled, and not confirmed stored, the save in hand counted. */
 func TestAsyncStorage_CloseWithASpentDeadlineOverAnHonouringSaveDoesNotClaimItWasIgnored(t *testing.T) {
     honouring := &contextHonouringStorage{entered: make(chan struct{}), release: make(chan struct{})}
     storage := NewAsyncStorage(honouring, AsyncStorageConfig{BufferSize: bound.Of(4)})
@@ -1010,7 +989,6 @@ func TestAsyncStorage_CloseWithASpentDeadlineOverAnHonouringSaveDoesNotClaimItWa
     }
 }
 
-/* slowRecordingStorage stores every entry after a fixed delay, so a drain in progress has a measurable middle a second closer can arrive in */
 type slowRecordingStorage struct {
     mutex sync.Mutex
     delay time.Duration
@@ -1028,7 +1006,6 @@ func (instance *slowRecordingStorage) Save(ctx context.Context, table string, en
     return nil
 }
 
-/* a second closer arriving with its budget spent, the ordinary state under a shared teardown deadline, answers nil at once and leaves the drain to the closer that owns it, rather than cancelling the worker under that drain and dead-lettering the entries the first closer is still given time to store */
 func TestAsyncStorage_CloseWithContext_ASecondCloserLeavesTheFirstClosersDrainAlone(t *testing.T) {
     delegate := &slowRecordingStorage{delay: 20 * time.Millisecond}
     storage := NewAsyncStorage(delegate, AsyncStorageConfig{BufferSize: bound.Of(8)})
@@ -1048,7 +1025,6 @@ func TestAsyncStorage_CloseWithContext_ASecondCloserLeavesTheFirstClosersDrainAl
         firstOutcome <- storage.CloseWithContext(firstContext)
     }()
 
-    /* the second closer arrives once the first has taken the storage — read from the flag the first closer sets under the mutex, where a fixed sleep read the scheduler */
     awaitFirstCloser := time.Now().Add(2 * time.Second)
     for {
         storage.mutex.Lock()
@@ -1091,7 +1067,6 @@ func TestAsyncStorage_CloseWithContext_ASecondCloserLeavesTheFirstClosersDrainAl
     }
 }
 
-/* a grace of a few microseconds — the leftover of a budget an earlier component spent — is no measurement of a delegate's reaction, and it said "ignored its cancellation" over a delegate that honoured it 289 times out of 300; below the floor both stretches read as none */
 func TestAsyncStorage_CloseGraces_ABudgetBelowTheFloorIsNoGrace(t *testing.T) {
     storage := NewAsyncStorage(&recordingStorage{entered: make(chan struct{}), release: make(chan struct{})}, AsyncStorageConfig{BufferSize: bound.Of(8)})
     defer func() { _ = storage.CloseWithContext(context.Background()) }()
@@ -1112,7 +1087,6 @@ func TestAsyncStorage_CloseGraces_ABudgetBelowTheFloorIsNoGrace(t *testing.T) {
         t.Fatalf("expected a remainder above the floor to keep its graces, got %v and %v", drainGrace, cancellationGrace)
     }
 
-    /* a remainder between the floor and twice the floor keeps its DRAIN half, so a save of half a millisecond finishing inside it is not answered "budget already spent", and gives up its CANCELLATION half, in which no reaction can be observed: given as a grace, a delegate honouring its cancellation seven hundred microseconds later would read as having ignored it. The remainder is read again inside closeGracesWithin, and a scheduling stall between this deadline and that read moves it, so the assertion is judged on the remainder as it stood AFTER the call, and only while it still sits inside the window the case is about: a stall that pushed it below the floor is not this case, and the call is asked again. */
     for attempt := 0; ; attempt = attempt + 1 {
         narrowContext, cancelNarrow := context.WithTimeout(context.Background(), 1900*time.Microsecond)
 
@@ -1164,7 +1138,6 @@ func TestAsyncStorage_TheRefusalNamesTheJournalTheEntryWasDeadLetteredThrough(t 
     }
 }
 
-/* refusedIdentities reads the entries a refusal names, in the order they were refused */
 func refusedIdentities(t *testing.T, refusal error) []map[string]any {
     t.Helper()
 
@@ -1181,7 +1154,6 @@ func refusedIdentities(t *testing.T, refusal error) []map[string]any {
     return refused
 }
 
-/* a call of several entries is admitted one by one, so a full queue splits it: the refusal has to say WHICH entries were dropped, or a caller that retries the batch on the count stores the admitted ones twice */
 func TestAsyncStorage_TheRefusalNamesEachEntryItDropped(t *testing.T) {
     installDefaultAsyncStorageLogger(t)
 
@@ -1238,7 +1210,6 @@ func TestAsyncStorage_TheRefusalAfterCloseNamesEachEntryItDropped(t *testing.T) 
     }
 }
 
-/* closeWithin runs CloseWithContext on its own goroutine and refuses to wait past the bound, so a wait that stopped reading the caller's context fails in a second instead of parking the suite for the close graces */
 func closeWithin(t *testing.T, storage *AsyncStorage, closeContext context.Context, bound time.Duration) error {
     t.Helper()
 
@@ -1256,7 +1227,6 @@ func closeWithin(t *testing.T, storage *AsyncStorage, closeContext context.Conte
     }
 }
 
-/* the caller's context was read once, at entry: a cancellation landing during the drain was noticed by nobody, and a close under WithCancel spent both close graces over a wedged delegate where the registry beside it, on the same context, returned at once */
 func TestAsyncStorage_CloseWithContext_ACancellationDuringTheDrainEndsIt(t *testing.T) {
     installDefaultAsyncStorageLogger(t)
 
@@ -1302,7 +1272,6 @@ func TestAsyncStorage_CloseWithContext_ACancellationDuringTheDrainEndsIt(t *test
     }
 }
 
-/* the second stretch reads the caller's context too: a cancellation landing while the close waits for the delegate to react is answered as unobserved, not as ignored */
 func TestAsyncStorage_CloseWithContext_ACancellationDuringTheCancellationGraceEndsIt(t *testing.T) {
     installDefaultAsyncStorageLogger(t)
 
@@ -1336,7 +1305,6 @@ func TestAsyncStorage_CloseWithContext_ACancellationDuringTheCancellationGraceEn
     }
 }
 
-/* the third verdict is read off the worker's counters, not the clock: a delegate that never reads its cancellation and stores every entry after it is reported as having stored them, not as having dead-lettered them */
 func TestAsyncStorage_CloseCountsWhatTheDelegateStoredAfterTheCancellation(t *testing.T) {
     installDefaultAsyncStorageLogger(t)
 
@@ -1357,7 +1325,7 @@ func TestAsyncStorage_CloseCountsWhatTheDelegateStoredAfterTheCancellation(t *te
         t.Fatalf("the second entry was not queued: %v", saveErr)
     }
 
-    /* released inside the second stretch — after the 200 ms drain grace has cancelled the worker, before its 200 ms cancellation grace ends — so the delegate, which never reads the context, stores both entries after the cancellation */
+    /* released inside the second stretch: after the 200 ms drain grace, before its 200 ms cancellation grace ends */
     go func() {
         time.Sleep(300 * time.Millisecond)
         close(ignoring.release)
@@ -1378,7 +1346,6 @@ func TestAsyncStorage_CloseCountsWhatTheDelegateStoredAfterTheCancellation(t *te
     }
 }
 
-/* firstSaveHonouringStorage reads the cancellation on the save it has in hand and ignores it on every save after — the delegate whose driver aborts the statement in flight and then accepts the next one on a fresh connection */
 type firstSaveHonouringStorage struct {
     entered chan struct{}
     once    sync.Once
@@ -1429,7 +1396,6 @@ func TestAsyncStorage_CloseCountsTheDeadLetteredAndTheStoredApart(t *testing.T) 
     }
 }
 
-/* two entries of one call can carry the same entity, id and operation, two updates of one row in one batch, so the refusal carries each entry's position in the call for a caller retrying "the refused ones" to tell the twins apart */
 func TestAsyncStorage_TheRefusalCarriesTheIndexOfEachTwinItRefused(t *testing.T) {
     installDefaultAsyncStorageLogger(t)
 
@@ -1448,7 +1414,6 @@ func TestAsyncStorage_TheRefusalCarriesTheIndexOfEachTwinItRefused(t *testing.T)
         t.Fatalf("the delegate was never reached; the queue cannot be filled behind a parked save")
     }
 
-    /* the first twin fills the one slot the queue has; the second and the third are refused, and only their positions tell them apart */
     saveErr := storage.Save(context.Background(), "audit", []Entry{Entry{Entity: "order", EntityId: "twin", Operation: OperationUpdate}, Entry{Entity: "order", EntityId: "twin", Operation: OperationUpdate}, Entry{Entity: "order", EntityId: "twin", Operation: OperationUpdate}})
     if false == errors.Is(saveErr, ErrAsyncStorageQueueFull) {
         t.Fatalf("expected the full queue to refuse, got %v", saveErr)
@@ -1470,7 +1435,6 @@ func TestAsyncStorage_TheRefusalCarriesTheIndexOfEachTwinItRefused(t *testing.T)
     }
 }
 
-/* outstanding and failed are one state: a save failing between two separate reads of them was counted in neither, and the close's verdict credited the delegate with storing an entry it had dead-lettered. The pair is settled by the worker and read by the close under one lock; the race detector is the proof — with the lock taken off the snapshot it reports the worker's settle against the close's read. */
 func TestAsyncStorage_TheCloseReadsTheCountersInOneSnapshotWhileTheWorkerSettlesThem(t *testing.T) {
     installDefaultAsyncStorageLogger(t)
 
@@ -1509,7 +1473,6 @@ func (unwrapPanickingSaveError) Unwrap() error {
     panic("Unwrap() panics")
 }
 
-/* panicOnceStorage fails its first save with the value it is given — raised as a panic, or returned — and stores every save after it */
 type panicOnceStorage struct {
     mutex      sync.Mutex
     calls      int
@@ -1552,7 +1515,6 @@ func (instance *panicOnceStorage) savedEntities() []string {
     return entities
 }
 
-/* the worker recovers a panicking delegate and dead-letters it, and the dead-letter reads the panic's chain: a panic value whose Unwrap panicked raised a second panic inside the defer whose recover was already spent, on the worker's bare goroutine, and the process ended — the audit trail, the one component whose failure the design demotes to a dead-letter, took the application down. The worker now files the entry and stores the next one */
 func TestAsyncStorage_WorkerSurvivesAPanicWhoseUnwrapPanics(t *testing.T) {
     delegate := &panicOnceStorage{panicValue: unwrapPanickingSaveError{}}
     logger := &capturingLogger{}
@@ -1586,14 +1548,12 @@ func TestAsyncStorage_WorkerSurvivesAPanicWhoseUnwrapPanics(t *testing.T) {
     }
 }
 
-/* messagePanickingSaveError is a delegate failure whose own Error() raises, the shape a panic carries when the nil field that made it panic-worthy is the one its message reads */
 type messagePanickingSaveError struct{}
 
 func (messagePanickingSaveError) Error() string {
     panic("Error() panics")
 }
 
-/* the recovery puts the panic value into the dead-letter's context as it came, and a json journal renders it: its Error() raised inside the defer that had spent its recover, on the worker's own goroutine, and ended the process. Behind a real json logger the record is written and the worker goes on to the next entry. */
 func TestAsyncStorage_WorkerSurvivesAPanicWhoseMessagePanicsBehindAJsonJournal(t *testing.T) {
     journal := &strings.Builder{}
     delegate := &panicOnceStorage{panicValue: messagePanickingSaveError{}}
@@ -1618,7 +1578,6 @@ func TestAsyncStorage_WorkerSurvivesAPanicWhoseMessagePanicsBehindAJsonJournal(t
     }
 }
 
-/* lockedJournal serializes the writes of the logger under test into a builder the test reads after Close */
 type lockedJournal struct {
     mutex   sync.Mutex
     builder *strings.Builder
@@ -1631,7 +1590,6 @@ func (instance *lockedJournal) Write(payload []byte) (int, error) {
     return instance.builder.Write(payload)
 }
 
-/* the same error RETURNED by the delegate is dead-lettered under its own message: the reader that files it does not panic, so the failure is not filed again by the recovery as a panic of the storage */
 func TestAsyncStorage_DeadLettersAReturnedErrorWhoseUnwrapPanicsUnderItsOwnMessage(t *testing.T) {
     delegate := &panicOnceStorage{returnErr: unwrapPanickingSaveError{}}
     logger := &capturingLogger{}
@@ -1660,7 +1618,6 @@ func TestAsyncStorage_DeadLettersAReturnedErrorWhoseUnwrapPanicsUnderItsOwnMessa
     }
 }
 
-/* reenteringLogger calls back into the storage from its Error, the shape of a dead-letter journal whose own failure handling closes the storage it journals for. */
 type reenteringLogger struct {
     *capturingLogger
     onError func()
@@ -1739,7 +1696,6 @@ func TestAsyncStorage_ADeadLetterLoggerOnAFullQueueCanCloseAndDrain(t *testing.T
     }
 }
 
-/* a wedged save under a caller's deadline is reported abandoned, every time: the cancellation stretch ends a margin before the deadline, so its timer does not race the deadline for the verdict */
 func TestAsyncStorage_AWedgedSaveUnderADeadlineIsReportedAbandonedNotCancelled(t *testing.T) {
     installDefaultAsyncStorageLogger(t)
 
@@ -1758,14 +1714,12 @@ func TestAsyncStorage_AWedgedSaveUnderADeadlineIsReportedAbandonedNotCancelled(t
         cancel()
         close(delegate.release)
 
-        /* a drain stretch that overran the margin on a loaded machine meets the deadline during the drain, the spent budget; either way the deadline is never the caller's cancellation */
         if nil == closeErr || (false == strings.Contains(closeErr.Error(), "abandoned") && false == strings.Contains(closeErr.Error(), "budget already spent")) || true == strings.Contains(closeErr.Error(), "cancelled by its caller") {
             t.Fatalf("round %d: expected the wedged save reported abandoned, got: %v", round, closeErr)
         }
     }
 }
 
-/* a caller that cancels during the stretches is still answered as the caller who withdrew the budget */
 func TestAsyncStorage_ACallerCancellingDuringTheCloseIsReportedAsCancelling(t *testing.T) {
     installDefaultAsyncStorageLogger(t)
 
@@ -1789,7 +1743,6 @@ func TestAsyncStorage_ACallerCancellingDuringTheCloseIsReportedAsCancelling(t *t
     }
 }
 
-/* a bound save over a delegate that cannot ride the transaction gains no atomicity from the inline write, so it is queued behind the wedged worker instead of reaching the delegate before Save returns */
 func TestAsyncStorage_ABoundSaveOverADelegateThatCannotRideItIsQueued(t *testing.T) {
     installDefaultAsyncStorageLogger(t)
 
@@ -1819,7 +1772,6 @@ func TestAsyncStorage_ABoundSaveOverADelegateThatCannotRideItIsQueued(t *testing
     }
 }
 
-/* forwardingStorage is an application's decorator around another storage: it saves through it and forwards the rider question to it */
 type forwardingStorage struct {
     inner Storage
 }
@@ -1861,7 +1813,6 @@ func TestAsyncStorage_ABoundSaveOverADecoratorThatForwardsTheRiderQuestionRidesT
     }
 }
 
-/* recordingStorageOf answers the recording storage under a delegate of either shape */
 func recordingStorageOf(delegate Storage) *recordingStorage {
     if riding, isRiding := delegate.(*ridingRecordingStorage); true == isRiding {
         return riding.recordingStorage
@@ -1870,7 +1821,6 @@ func recordingStorageOf(delegate Storage) *recordingStorage {
     return delegate.(*recordingStorage)
 }
 
-/* earlyDeadlineContext declares a deadline and expires before it, with context.DeadlineExceeded, standing in for a close whose stretch overran its timer on a loaded machine: the deadline lands inside a stretch the split had kept clear of it */
 type earlyDeadlineContext struct {
     declared  time.Time
     expiresIn time.Duration
@@ -1879,14 +1829,12 @@ type earlyDeadlineContext struct {
     expired   chan struct{}
 }
 
-/* the expiry is counted from the first read of the deadline, which the close makes once at entry to split its stretches, so the expiry and the stretch timers start together and neither setup nor a scheduler stall before the close begins can move the deadline out of the stretch it is aimed at */
 func newEarlyDeadlineContext(declaredIn time.Duration, expiresIn time.Duration) *earlyDeadlineContext {
     done := make(chan struct{})
 
     return &earlyDeadlineContext{declared: time.Now().Add(declaredIn), expiresIn: expiresIn, done: done, expired: done}
 }
 
-/* newSilentDeadlineContext expires like newEarlyDeadlineContext but never readies Done, standing in for the instant a stretch's timer and the deadline are ready together and select picks the timer: the close learns of the deadline only from Err */
 func newSilentDeadlineContext(declaredIn time.Duration, expiresIn time.Duration) *earlyDeadlineContext {
     return &earlyDeadlineContext{declared: time.Now().Add(declaredIn), expiresIn: expiresIn, done: make(chan struct{}), expired: make(chan struct{})}
 }
@@ -1939,7 +1887,6 @@ func closeWedgedStorageUnder(t *testing.T, buildCloseContext func() context.Cont
     return closeWithin(t, storage, buildCloseContext(), 5*time.Second)
 }
 
-/* a deadline reached during the wait for the cancelled save is the budget running out on a save that has not reacted, the abandonment the stretch's own timer reports: the caller withdrew nothing, so the close must not say it was cancelled by its caller */
 func TestAsyncStorage_ADeadlineReachedDuringTheCancellationStretchIsReportedAbandoned(t *testing.T) {
     installDefaultAsyncStorageLogger(t)
 
@@ -1959,7 +1906,6 @@ func TestAsyncStorage_ADeadlineReachedDuringTheCancellationStretchIsReportedAban
     }
 }
 
-/* a deadline reached by the time the cancellation stretch's timer answered is the deadline cutting the grace short, though select picked the timer: the answer carries the deadline as its cause and says it cut the grace short, as when Done answered first */
 func TestAsyncStorage_ADeadlineReadyWithTheCancellationTimerIsTheCause(t *testing.T) {
     installDefaultAsyncStorageLogger(t)
 
@@ -1976,7 +1922,6 @@ func TestAsyncStorage_ADeadlineReadyWithTheCancellationTimerIsTheCause(t *testin
     }
 }
 
-/* a deadline reached during the drain leaves the cancellation no grace to observe a reaction in: that is the spent budget, and the caller withdrew nothing */
 func TestAsyncStorage_ADeadlineReachedDuringTheDrainIsReportedAsTheBudgetSpent(t *testing.T) {
     installDefaultAsyncStorageLogger(t)
 
@@ -1993,7 +1938,6 @@ func TestAsyncStorage_ADeadlineReachedDuringTheDrainIsReportedAsTheBudgetSpent(t
     }
 }
 
-/* lateCancelContext is live when the close reads it at entry and cancelled at every read after, standing in for a caller that cancels the moment the close has begun */
 type lateCancelContext struct {
     mutex sync.Mutex
     reads int
@@ -2031,7 +1975,6 @@ func (instance *lateCancelContext) Value(key any) any {
     return nil
 }
 
-/* a caller that cancels once the close has begun is answered as withdrawing the budget with no grace left, not as having cancelled before the close began: the entry is read once, before anything waits */
 func TestAsyncStorage_ACancellationAfterTheCloseBeganIsNotReportedAsBeforeIt(t *testing.T) {
     installDefaultAsyncStorageLogger(t)
 

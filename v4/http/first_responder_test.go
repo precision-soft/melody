@@ -91,7 +91,6 @@ func TestKernelResponseEvent_AReplacementDoesNotStopTheDispatch(t *testing.T) {
     }
 }
 
-/* a decision ahead of a required kernel.request listener ends the request without it: the kernel fails closed, the answer closed, unless the deciding listener may skip */
 func TestKernel_ADecisionAheadOfARequiredRequestListener(t *testing.T) {
     for _, testCase := range []struct {
         name           string

@@ -104,7 +104,6 @@ func (instance *Manager) isTombstoned(sessionId string) bool {
     return instance.isTombstonedLocked(sessionId)
 }
 
-/* contextlessSessionRuntime carries no context, which no constructor of the runtime package builds */
 type contextlessSessionRuntime struct {
     containercontract.Runtime
 }

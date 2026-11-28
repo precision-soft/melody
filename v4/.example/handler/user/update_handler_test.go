@@ -32,7 +32,6 @@ func TestProtectsAnotherAdminAllowsAnAccountBelow(t *testing.T) {
     }
 }
 
-/* An update names the fields it changes: an omitted username and an omitted password are kept, and omitted roles are kept too rather than falling back to the base role, an administrator editing their own account included. */
 func TestApiUpdateHandlerKeepsTheRolesABodyDoesNotName(t *testing.T) {
     userRepository := newRecordingUserRepository(administrator("admin-1"), editor("editor-1"))
     runtimeInstance := adminRuntime(t, userRepository, "admin-1", []string{entity.RoleAdmin})
@@ -57,7 +56,6 @@ func TestApiUpdateHandlerKeepsTheRolesABodyDoesNotName(t *testing.T) {
     }
 }
 
-/* the other half of the same rule: roles the body DOES name replace what the target held */
 func TestApiUpdateHandlerReplacesTheRolesABodyNames(t *testing.T) {
     userRepository := newRecordingUserRepository(administrator("admin-1"), editor("editor-1"))
     runtimeInstance := adminRuntime(t, userRepository, "admin-1", []string{entity.RoleAdmin})
@@ -82,7 +80,6 @@ func TestApiUpdateHandlerReplacesTheRolesABodyNames(t *testing.T) {
     }
 }
 
-/* a list sent EXPLICITLY empty is an opinion, and normalizeRoles answers the base role for it: an account is never left with none, because the example's catch-all rule guards every path behind ROLE_USER */
 func TestApiUpdateHandlerFallsBackToTheBaseRoleForAnEmptyListTheBodyNames(t *testing.T) {
     userRepository := newRecordingUserRepository(administrator("admin-1"), editor("editor-1"))
     runtimeInstance := adminRuntime(t, userRepository, "admin-1", []string{entity.RoleAdmin})
@@ -107,7 +104,6 @@ func TestApiUpdateHandlerFallsBackToTheBaseRoleForAnEmptyListTheBodyNames(t *tes
     }
 }
 
-/* the repository joins the role list into one comma-separated column, so a role carrying a comma comes back as SEVERAL roles on the next read — the update door is where that is refused, before the row lands */
 func TestApiUpdateHandlerRefusesARoleCarryingAComma(t *testing.T) {
     userRepository := newRecordingUserRepository(administrator("admin-1"), editor("editor-1"))
     runtimeInstance := adminRuntime(t, userRepository, "admin-1", []string{entity.RoleAdmin})
@@ -136,7 +132,6 @@ func TestApiUpdateHandlerRefusesARoleCarryingAComma(t *testing.T) {
     }
 }
 
-/* the same rule, at the door on this major */
 func TestRolesForUpdateLeavesTheRolesUnwrittenWhenTheBodyDoesNotNameThem(t *testing.T) {
     if kept := rolesForUpdate(nil); nil != kept {
         t.Fatalf("roles the body never named must not be written, got %v", kept)
@@ -159,8 +154,6 @@ func TestRolesForUpdateFallsBackToTheBaseRoleForAnEmptyListTheBodyNames(t *testi
     }
 }
 
-/* a rename the unique index refused after the door's check had passed is the caller's 400, the same answer
-   the check gives, not a 500 of a failed write */
 func TestApiUpdateHandlerAnswersTheIndexsRefusalOfATakenUsernameAs400(t *testing.T) {
     userRepository := newRecordingUserRepository(administrator("admin-1"), editor("editor-1"))
     userRepository.refuseWrites(fmt.Errorf("audited update failed: %w", repository.ErrUsernameAlreadyExists))
@@ -181,7 +174,6 @@ func TestApiUpdateHandlerAnswersTheIndexsRefusalOfATakenUsernameAs400(t *testing
     }
 }
 
-/* the same refusal at the update door: a misspelt role is refused, and the row keeps its roles */
 func TestApiUpdateHandlerRefusesARoleTheApplicationDoesNotKnow(t *testing.T) {
     userRepository := newRecordingUserRepository(administrator("admin-1"), editor("editor-1"))
     runtimeInstance := adminRuntime(t, userRepository, "admin-1", []string{entity.RoleAdmin})
@@ -206,7 +198,6 @@ func TestApiUpdateHandlerRefusesARoleTheApplicationDoesNotKnow(t *testing.T) {
     }
 }
 
-/* the twin of the create door's: a write that failed for any reason but the taken username is the server's fault and answers 500 */
 func TestApiUpdateHandlerAnswersAnyOtherFailedWriteAs500(t *testing.T) {
     userRepository := newRecordingUserRepository(administrator("admin-1"), editor("editor-1"))
     userRepository.refuseWrites(errors.New("audited update failed"))
@@ -227,7 +218,6 @@ func TestApiUpdateHandlerAnswersAnyOtherFailedWriteAs500(t *testing.T) {
     }
 }
 
-/* the four cells of the write-back: a stale entry of the account primed in the cache or not, a grant landed in the directory behind the cache or not. In every cell an admin who only renames the account leaves the password and the roles the directory holds. */
 func TestApiUpdateHandlerWritesOnlyWhatTheBodyNamesOverTheDirectorysAccount(t *testing.T) {
     for _, primed := range []bool{true, false} {
         for _, granted := range []bool{true, false} {
@@ -282,7 +272,6 @@ func TestApiUpdateHandlerRefusesAPeerAdministratorAndWritesNothing(t *testing.T)
     }
 }
 
-/* the peer decision is taken on the directory: an account the cache still holds as an editor, promoted behind it, is refused */
 func TestApiUpdateHandlerDecidesThePeerRefusalOnTheDirectoryNotTheCache(t *testing.T) {
     userRepository := newRecordingUserRepository(administrator("admin-1"), administrator("admin-2"))
     cacheInstance := &valueCache{values: map[string]any{service.CacheKeyUserById("admin-2"): editor("admin-2")}}
@@ -342,7 +331,6 @@ func TestApiUpdateDoor_AcceptsA255ByteUsernameAndRefuses256(t *testing.T) {
     }
 }
 
-/* the kernel bounds every body; a body past it is the client's too large a payload, not unreadable json */
 func TestApiUpdateDoor_AnswersABodyPastTheLimit413(t *testing.T) {
     userRepository := newRecordingUserRepository(administrator("admin-1"), editor("editor-1"))
     runtimeInstance := adminRuntime(t, userRepository, "admin-1", []string{entity.RoleAdmin})

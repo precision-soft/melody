@@ -235,8 +235,6 @@ func TestConsume_ExhaustedWithoutFailureTransportDropsMessage(t *testing.T) {
     }
 }
 
-/* configurable dead-letter bound: requeue forever by default, give up after N when set */
-
 type recordingNackTransport struct {
     nackCount    int
     nackRequeue  bool
@@ -312,7 +310,6 @@ func TestConsume_BoundedDeadLetterStopsRequeueAfterMax(t *testing.T) {
 
     source := &recordingNackTransport{}
 
-    /* still under the bound: the failed dead-letter routing must requeue and bump the attempt counter */
     mustConsumeSession(command, runtimeInstance).consume(runtimeInstance, source, NewEnvelope(consumeTestMessage{Value: 1}, nil).WithStamps([]messagebuscontract.Stamp{DeadLetterAttemptStamp{Count: 0}}))
     if 1 != source.nackCount || false == source.nackRequeue {
         t.Fatalf("expected the first failed dead-letter routing to requeue, got nackCount=%d requeue=%v", source.nackCount, source.nackRequeue)
@@ -321,7 +318,6 @@ func TestConsume_BoundedDeadLetterStopsRequeueAfterMax(t *testing.T) {
         t.Fatalf("expected the requeued envelope to carry dead-letter attempt 1, got %d", DeadLetterAttemptCount(source.nackEnvelope))
     }
 
-    /* at the bound: stop requeueing and nack without requeue so a transport-native dead-letter can claim it instead of looping forever */
     source.nackCount = 0
     mustConsumeSession(command, runtimeInstance).consume(runtimeInstance, source, NewEnvelope(consumeTestMessage{Value: 1}, nil).WithStamps([]messagebuscontract.Stamp{DeadLetterAttemptStamp{Count: 1}}))
     if 1 != source.nackCount || true == source.nackRequeue {
@@ -861,7 +857,6 @@ func (instance *consumeNilPanicError) Error() string {
     return instance.reason
 }
 
-/* a handler panicking with a typed-nil error answers no cause, as every recovery boundary reads it, and takes the path of a non-error panic: the dispatch error carries the recovered value and renders, where the typed nil travelled as the cause and its Error dereferenced nil. */
 func TestDispatchSafely_ATypedNilPanicIsAnsweredWithoutACause(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
@@ -919,7 +914,6 @@ func (instance *panicRecordCapturingLogger) Error(message string, context loggin
     }
 }
 
-/* a typed-nil error panicking outside the handler — here from Ack — is logged as a panic without a cause and the worker returns to take the next delivery; the record's context renders no cause for it, the typed nil being read as none. */
 func TestConsumeRecovered_ATypedNilPanicOutsideTheHandlerIsLoggedWithoutACause(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := serviceContainer.NewScope()
@@ -965,7 +959,6 @@ func TestConsume_MessagesGetIsolatedScopes(t *testing.T) {
     var leaked int64
     locator := NewHandlerLocator()
     RegisterHandler(locator, func(handlerRuntime containercontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
-        /* each delivery must see its own scope: an override written for one message must not be visible while handling another */
         if true == handlerRuntime.Scope().Has("service.ambient") {
             atomic.AddInt64(&leaked, 1)
         }
@@ -1064,7 +1057,6 @@ func TestConsume_MessageScopeCarriesMessageIdLogger(t *testing.T) {
     }
 }
 
-/* the in-process cron runner overlaps a run with itself whenever an entry outruns its interval, so two concurrent Runs of the single auto-registered command are a supported deployment shape — before the run-local session, the second Run's container hydration wrote the singleton's bus, transports and retryPolicy fields while the first Run's workers were reading them, a data race the -race band fails on. */
 func TestRun_OverlappingRunsShareNoMutableState(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
@@ -1196,7 +1188,6 @@ func TestWithReplacedStamp_KeepsTheOtherStampsAndAppendsOnAForeignEnvelope(t *te
     }
 }
 
-/* the `--limit` and `--concurrency` flags parse in base ten, as the standard integer flags do: with the engine's inferred base --limit=010 would read as eight and --limit=08 would be refused */
 func TestConsumeCommand_IntegerFlagsParseInBaseTen(t *testing.T) {
     for _, flagName := range []string{"limit", "concurrency"} {
         for spelling, expected := range map[string]int{"010": 10, "08": 8} {
@@ -1225,7 +1216,6 @@ func TestConsumeCommand_IntegerFlagsParseInBaseTen(t *testing.T) {
     }
 }
 
-/* a stopped worker takes no further delivery: the stop is read before the select, where it and a waiting delivery are both ready and Go picked between them at random */
 func TestConsumeFrom_AStoppedWorkerTakesNoFurtherDelivery(t *testing.T) {
     for run := 0; run < 20; run++ {
         serviceContainer := container.NewContainer(container.ContainerConfig{})
@@ -1255,7 +1245,6 @@ func TestConsumeFrom_AStoppedWorkerTakesNoFurtherDelivery(t *testing.T) {
     }
 }
 
-/* a delivery gets a scope of its own; a run whose scope closed has none to open, so the delivery keeps the run's runtime and refuses at its first resolution */
 func TestConsume_MessageRuntimeOpensAChildScopeAndKeepsTheRunsWhenItsScopeClosed(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     baseScope := serviceContainer.NewScope()
@@ -1281,7 +1270,6 @@ func TestConsume_MessageRuntimeOpensAChildScopeAndKeepsTheRunsWhenItsScopeClosed
     }
 }
 
-/* the failure transport is resolved by name from the transports the run reads, so a failure transport the container builds reaches the framework's command; a name no transport carries refuses the run before any message is pulled */
 func TestConsume_AFailureTransportNameNoTransportCarriesRefusesTheRun(t *testing.T) {
     command := newConsumeCommandOverTransports(
         NewManager("default", nil),
@@ -1319,7 +1307,6 @@ func TestConsume_TheFailureTransportIsTheRegisteredTransportItsNameNames(t *test
     }
 }
 
-/* the failure transport is told apart by name: a run reading the transport the policy names discards the exhausted message rather than send it back, whatever the transport's kind */
 func TestConsume_ARunReadingTheFailureTransportByNameDoesNotSendItBack(t *testing.T) {
     command, runtimeInstance := newAlwaysFailingConsumeCommand(t, RetryPolicy{
         MaxRetries:            bound.Of(0),
@@ -1338,7 +1325,6 @@ func TestConsume_ARunReadingTheFailureTransportByNameDoesNotSendItBack(t *testin
     }
 }
 
-/* valueTransport is a transport of value kind, which no identity comparison can tell apart, recording what is sent to it */
 type valueTransport struct {
     inner *InMemoryTransport
     sent  *atomic.Int64
@@ -1366,7 +1352,6 @@ func (instance valueTransport) CloseWithContext(closeContext context.Context) er
     return instance.inner.CloseWithContext(closeContext)
 }
 
-/* a run of the command reading the transport its policy names as the failure transport discards an exhausted message rather than send it back, even for a transport of value kind */
 func TestConsumeCommand_ARunOfTheFailureTransportOfValueKindDoesNotSendItBack(t *testing.T) {
     failure := valueTransport{inner: NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(8)}), sent: &atomic.Int64{}}
 

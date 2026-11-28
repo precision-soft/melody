@@ -52,7 +52,6 @@ func closedScopeRefusals(t *testing.T, boot bool) map[string]error {
 
 func TestScopeClosedCause_EveryRefusalOfAClosedBootScopeNamesTheFinishedBoot(t *testing.T) {
     for door, refusal := range closedScopeRefusals(t, true) {
-        /* the boot scope refuses a scoped registration before it asks whether it is closed */
         if "RegisterScoped" == door {
             if false == errors.Is(refusal, ErrScopedServiceAtBoot) {
                 t.Fatalf("%s: expected ErrScopedServiceAtBoot, got %v", door, refusal)

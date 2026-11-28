@@ -49,7 +49,6 @@ func TestNewJwtSecretKeySet_MinimumBelowTheFloor_Refused(t *testing.T) {
     })
 }
 
-/* the set keeps its own copy of the secret, and hands each caller a copy of its own: by reference, zeroing or rotating either slice in place would change what every later token verifies against */
 func TestNewJwtSecretKeySet_CopiesTheSecret(t *testing.T) {
     secret := []byte("copy-me-before-i-change-padded-to-the-hs256-minimum")
     tokenString := signJwtHs256(append([]byte{}, secret...), map[string]any{

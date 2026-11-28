@@ -196,7 +196,6 @@ func TestInstallHttpMiddlewares_RefusesARouteAFactoryPutOnADoorsPath(t *testing.
         }
     }()
 
-    /* a fresh kernel, so the refusal is the route's and not a second installation's */
     application.httpKernel = nil
     application.installHttpMiddlewares()
 }
@@ -245,7 +244,6 @@ func (instance *csrfApplicationTestModule) RegisterHttpRoutes(kernelInstance ker
     kernelInstance.HttpRouter().Handle("/account", bootCollisionTestHandler(), http.RouteOptions{Name: "account", Methods: []string{nethttp.MethodPost}})
 }
 
-/* serveCsrfApplicationWrite boots an application over one session firewall and posts to its route with a session holding an identity */
 func serveCsrfApplicationWrite(t *testing.T, csrf security.CsrfConfig, headers map[string]string) int {
     t.Helper()
 

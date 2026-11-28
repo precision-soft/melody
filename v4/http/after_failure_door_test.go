@@ -20,7 +20,6 @@ import (
     "github.com/precision-soft/melody/v4/logging"
 )
 
-/* doorPayload is one of the four guarded payloads, with how a listener writes a response to it */
 type doorPayload struct {
     name     string
     door     *afterFailureDoor
@@ -149,15 +148,11 @@ type doorKernelCase struct {
     tagged    func(eventValue eventcontract.Event)
     replaces  bool
     required  bool
-    /* failing writes this response through the payload before it fails */
     standing httpcontract.Response
-    /* failingWrite runs in the failing listener before it fails, beside standing */
     failingWrite func(eventValue eventcontract.Event)
-    /* logger is the journal the kernel writes to, a fresh one when nil */
     logger *afterFailureRecordingLogger
 }
 
-/* runDoorKernel serves one request whose eventName dispatch fails, a tagged listener writing behind the failure; a required listener behind it when asked */
 func runDoorKernel(t *testing.T, testCase doorKernelCase) (*httptest.ResponseRecorder, *afterFailureRecordingLogger, *bool) {
     t.Helper()
 
@@ -411,7 +406,6 @@ func TestKernel_AnExitAfterAWriteStillWarnsAndClosesIt(t *testing.T) {
     }
 }
 
-/* an answer a door admitted after a failure replaces the half-made response the failed listener left, which the kernel closes once */
 func TestKernel_AnAdmittedAnswerClosesTheResponseItReplaced(t *testing.T) {
     for _, eventName := range []string{kernelcontract.EventKernelRequest, kernelcontract.EventKernelController} {
         standing, standingBody := responseWithClosingBody(nethttp.StatusAccepted, "half made")
@@ -432,7 +426,6 @@ func TestKernel_AnAdmittedAnswerClosesTheResponseItReplaced(t *testing.T) {
     }
 }
 
-/* a door-closed write that would erase the refusal standing at the failure is refused like any other: the refusal is raised */
 func TestKernel_ADoorClosedNilAnswerDoesNotEraseAStandingRefusal(t *testing.T) {
     recorder, recordingLogger, _ := runDoorKernel(t, doorKernelCase{
         eventName: kernelcontract.EventKernelRequest,
@@ -552,7 +545,6 @@ func TestKernel_ADoorClosedWriteOnKernelRequestNamesTheStandingResponseUnserved(
     }
 }
 
-/* the response the failed listener left is the payload's own when a later listener's exit unwinds the dispatch, though no write touched it: the exit closes it once */
 func TestKernel_AnExitClosesTheResponseTheFailureLeft(t *testing.T) {
     for _, eventName := range []string{kernelcontract.EventKernelRequest, kernelcontract.EventKernelController, kernelcontract.EventKernelException} {
         standing, standingBody := responseWithClosingBody(nethttp.StatusAccepted, "half made")

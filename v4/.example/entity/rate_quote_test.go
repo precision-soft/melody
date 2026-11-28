@@ -5,7 +5,6 @@ import (
     "time"
 )
 
-/* the reading is named by the provider's stamp and the rate; the instant on this clock is taken again on every arrival and is not part of what the reading is */
 func TestRateQuote_NamesTheSameReadingByTheProvidersStampAndTheRate(t *testing.T) {
     stamped := time.Date(2026, time.September, 8, 9, 0, 0, 0, time.UTC)
     held := NewRateQuote(1.2, stamped.Add(-4*time.Minute), stamped)
@@ -23,7 +22,6 @@ func TestRateQuote_NamesTheSameReadingByTheProvidersStampAndTheRate(t *testing.T
     }
 }
 
-/* a currency built on this clock holds one instant in both frames */
 func TestNewCurrency_HoldsTheReadingInBothFramesAtOneInstant(t *testing.T) {
     instant := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
     currency := NewCurrency("cur-usd", "USD", "US Dollar", 1.1, instant)

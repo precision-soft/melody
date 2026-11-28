@@ -282,7 +282,7 @@ func TestRefuseUnknownBootWarningCodes_JudgesEachCodeAgainstTheFrameworkAndTheMo
 
 const bootCliCodeProbeMarker = "MELODY_TEST_BOOT_CLI_CODE_PROBE"
 
-/* Boot exits the process on a refusal, so each probe boots in a child of the test binary; the configuration is built first, so a code refused there would exit 92 */
+/* Boot exits the process on a refusal, so each probe boots in a child of the test binary */
 func TestBoot_JudgesTheCliCodesAfterTheModulesDeclaredTheirs(t *testing.T) {
     if probe := os.Getenv(bootCliCodeProbeMarker); "" != probe {
         values := map[string]string{
@@ -342,7 +342,6 @@ func TestBoot_JudgesTheCliCodesAfterTheModulesDeclaredTheirs(t *testing.T) {
 
 const ignoredProcessVariableFragment = "process environment variable is ignored"
 
-/* collected rather than written at boot, so a command filters it like every other boot warning */
 func TestRunCli_WritesTheIgnoredProcessVariableUnderTheIgnoreKey(t *testing.T) {
     originalArguments := os.Args
     os.Args = []string{"melody"}
@@ -396,7 +395,6 @@ func TestBoot_CollectsTheIgnoredProcessVariable(t *testing.T) {
 
 const bootWarningsBeforeExitProbeMarker = "MELODY_TEST_BOOT_WARNINGS_BEFORE_EXIT_PROBE"
 
-/* a boot refused after the collection exits before any run, so the exit handler writes the boot warnings beside the exit record; the hazard they name may be what killed it */
 func TestBoot_ARefusedBootWritesTheCollectedBootWarningsBeforeItsExitRecord(t *testing.T) {
     if probe := os.Getenv(bootWarningsBeforeExitProbeMarker); "" != probe {
         projectDirectory, ignored, _ := strings.Cut(probe, "|")
@@ -492,7 +490,6 @@ func TestWriteBootWarnings_WritesOnceAndAnHttpProcessHonoursTheIgnoreKey(t *test
 
 const runRefusalBootWarningsProbeMarker = "MELODY_TEST_RUN_REFUSAL_BOOT_WARNINGS_PROBE"
 
-/* runHttp refuses a scope teardown outlasting the http shutdown before it writes the boot warnings, so Run's exit handler writes them */
 func TestRun_AnHttpRunRefusedBeforeItsWriterWritesTheBootWarningsBeforeItsExitRecord(t *testing.T) {
     if projectDirectory := os.Getenv(runRefusalBootWarningsProbeMarker); "" != projectDirectory {
         environment, environmentErr := config.NewEnvironment(context.Background(), &mapEnvironmentSource{values: map[string]string{

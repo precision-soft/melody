@@ -24,8 +24,6 @@ import (
     "github.com/uptrace/bun/dialect/mysqldialect"
 )
 
-/* countingRefusingConnector refuses every connection and counts the attempts, so a test reads how many times
-   the store's migration went to the database */
 type countingRefusingConnector struct {
     attempts atomic.Int64
 }
@@ -40,7 +38,6 @@ func (instance *countingRefusingConnector) Driver() driver.Driver {
     return nil
 }
 
-/* the store is a service whose provider applies the migration set, and a dial refusal is not remembered by it (only a lock wait that ran out its window is, see EnsureMigrated): the first resolution goes to the database and is refused, and the second goes to the database again, a heal a boot-time build cannot reach. The handle is resolved by name, once, and kept by the container. */
 func TestRegisterTwoFactorStoreService_ARefusedMigrationIsAskedAgainAtTheNextResolution(t *testing.T) {
     connector := &countingRefusingConnector{}
     database := bun.NewDB(sql.OpenDB(connector), mysqldialect.New())
@@ -88,8 +85,6 @@ func TestRegisterTwoFactorStoreService_ARefusedMigrationIsAskedAgainAtTheNextRes
     }
 }
 
-/* without a catalogue database the environment has no enrollment table, and the store is not registered: the
-   doors and the release stand on the same switch and are not registered either */
 func TestRegisterTwoFactorStoreService_RegistersNothingWithoutADatabase(t *testing.T) {
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
 

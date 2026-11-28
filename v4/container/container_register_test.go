@@ -51,7 +51,6 @@ func TestContainer_RegisterType_Interface_AndResolveByType(t *testing.T) {
     }
 }
 
-/* both same-string types can be type-registered under their auto-derived names: the name is import-path-qualified, so "contract.Bus" from two packages does not collide at registration */
 func TestRegisterType_SameStringTypesFromDifferentPackagesGetDistinctNames(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -78,7 +77,6 @@ func TestRegisterType_SameStringTypesFromDifferentPackagesGetDistinctNames(t *te
     }
 }
 
-/* TestContainer_Register_RefusesAnEmptyTeardownDependencyName pins the refusal an empty name gets: it cannot be an edge, and dropping it silently would report a teardown order that was never installed. */
 func TestContainer_Register_RefusesAnEmptyTeardownDependencyName(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -94,13 +92,11 @@ func TestContainer_Register_RefusesAnEmptyTeardownDependencyName(t *testing.T) {
         t.Fatalf("expected ErrTeardownDependencyNameIsRequired, got %v", registerErr)
     }
 
-    /* the refusal leaves nothing behind: the registration is not half-installed */
     if true == serviceContainer.Has("service.dependent") {
         t.Fatalf("expected the refused registration to leave no provider behind")
     }
 }
 
-/* TestContainer_Register_RefusesATeardownDependencyOnItself pins the refusal a self-declaration gets. The teardown walk ignores a self-edge, so the declaration would be inert; it is refused where it is written rather than dropped where it is read. */
 func TestContainer_Register_RefusesATeardownDependencyOnItself(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -121,7 +117,6 @@ func TestContainer_Register_RefusesATeardownDependencyOnItself(t *testing.T) {
     }
 }
 
-/* a service of the same Go type as another, registered WITHOUT filing the type, declares on that type and names whoever filed it — the sibling — not itself; the guard that reads the declaration as a self-edge holds only for a registration that files its type */
 func TestContainer_Register_AdmitsATypeDeclarationOnItsOwnGoTypeWhenTheRegistrationDoesNotFileIt(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
