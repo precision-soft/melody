@@ -40,14 +40,16 @@ var markerFamily = encryptionMarker + markerGlue
 
 var reportableSealFormatPattern = regexp.MustCompile(`^[a-z0-9]{1,16}$`)
 
+/* EncryptOptions is what one seal declares beside its plaintext. */
+type EncryptOptions struct {
+    /* KeyId names the key the value is sealed under; left out, the provider's current key. */
+    KeyId string
+}
+
 type Cipher interface {
-    Encrypt(plaintext string) (string, error)
+    Encrypt(plaintext string, options EncryptOptions) (string, error)
 
-    EncryptWithKeyId(plaintext string, keyId string) (string, error)
-
-    EncryptDeterministic(plaintext string) (string, error)
-
-    EncryptDeterministicWithKeyId(plaintext string, keyId string) (string, error)
+    EncryptDeterministic(plaintext string, options EncryptOptions) (string, error)
 
     /* CiphertextCandidates answers the unbound gcm1 candidates, one per active key; a bound column writes gcm2, which none of them matches, so its lookup goes through CiphertextCandidatesFor */
     CiphertextCandidates(plaintext string) ([][]byte, error)
@@ -114,29 +116,25 @@ func (instance *aes256Cipher) material(keyId string) (*keyMaterial, error) {
     return built, nil
 }
 
-func (instance *aes256Cipher) Encrypt(plaintext string) (string, error) {
+func (instance *aes256Cipher) sealKeyId(options EncryptOptions) string {
+    if "" == options.KeyId {
+        return instance.keys.CurrentKeyId()
+    }
+
+    return options.KeyId
+}
+
+func (instance *aes256Cipher) Encrypt(plaintext string, options EncryptOptions) (string, error) {
     if true == instance.isPassThroughCiphertext(plaintext) {
         return plaintext, nil
     }
 
-    return instance.seal(plaintext, instance.keys.CurrentKeyId(), false)
+    return instance.seal(plaintext, instance.sealKeyId(options), false)
 }
 
-func (instance *aes256Cipher) EncryptWithKeyId(plaintext string, keyId string) (string, error) {
-    if true == instance.isPassThroughCiphertext(plaintext) {
-        return plaintext, nil
-    }
-
-    return instance.seal(plaintext, keyId, false)
-}
-
-func (instance *aes256Cipher) EncryptDeterministic(plaintext string) (string, error) {
-    return instance.sealDeterministic(plaintext, instance.keys.CurrentKeyId())
-}
-
-/* EncryptDeterministicWithKeyId seals the plaintext deterministically under the named key. A value that is already one of this cipher's seals is converted in place under the key id it carries, never under the named key, so the call is not a rotation. */
-func (instance *aes256Cipher) EncryptDeterministicWithKeyId(plaintext string, keyId string) (string, error) {
-    return instance.sealDeterministic(plaintext, keyId)
+/* EncryptDeterministic seals the plaintext deterministically under the options' key. A value that is already one of this cipher's seals is converted in place under the key id it carries, never under the options' key, so the call is not a rotation. */
+func (instance *aes256Cipher) EncryptDeterministic(plaintext string, options EncryptOptions) (string, error) {
+    return instance.sealDeterministic(plaintext, instance.sealKeyId(options))
 }
 
 /* sealDeterministic asks one question more than isPassThroughCiphertext: a random-nonce seal authenticates but is a value CiphertextCandidates never produces, so it is converted in place under its own key id, while a deterministic seal passes through whatever key it carries. */
@@ -384,10 +382,10 @@ func sealColumnValue(cipherInstance Cipher, plaintext string, deterministic bool
     }
 
     if true == deterministic {
-        return cipherInstance.EncryptDeterministic(plaintext)
+        return cipherInstance.EncryptDeterministic(plaintext, EncryptOptions{})
     }
 
-    return cipherInstance.Encrypt(plaintext)
+    return cipherInstance.Encrypt(plaintext, EncryptOptions{})
 }
 
 /* errSealWrittenAsDataThroughForeignCipher refuses a marker-shaped value a column type would write through a cipher implemented outside this package; the context carries no key id, since the value is application data and the id it spells is untrusted */

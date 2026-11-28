@@ -119,7 +119,7 @@ func TestEncryptedDeterministicStringFor_ASealWrittenAsDataIsSealedAndReadBackAs
         t.Fatalf("cipher: %v", cipherErr)
     }
 
-    otherRowsSeal, sealErr := crmCipher.EncryptDeterministic("another customer's email")
+    otherRowsSeal, sealErr := crmCipher.EncryptDeterministic("another customer's email", EncryptOptions{})
     if nil != sealErr {
         t.Fatalf("seal: %v", sealErr)
     }

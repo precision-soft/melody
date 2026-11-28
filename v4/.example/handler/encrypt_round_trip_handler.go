@@ -14,7 +14,7 @@ func EncryptRoundTripHandler(cipher melodyencrypt.Cipher) melodyhttpcontract.Han
     return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         plaintext := "sensitive-value"
 
-        ciphertext, encryptErr := cipher.Encrypt(plaintext)
+        ciphertext, encryptErr := cipher.Encrypt(plaintext, melodyencrypt.EncryptOptions{})
         if nil != encryptErr {
             return nil, encryptErr
         }

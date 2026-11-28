@@ -154,7 +154,7 @@ func TestEnrollment_SecretAndRecoveryCodesAreBoundToTheirColumns(t *testing.T) {
         t.Fatalf("expected the secret's seal refused by the recovery codes column, read %q", codes)
     }
 
-    unbound, _ := cipher.Encrypt("zz-secret")
+    unbound, _ := cipher.Encrypt("zz-secret", melodyencrypt.EncryptOptions{})
     if scanErr := secret.Scan(unbound); nil == scanErr || false == errors.Is(scanErr, melodyencrypt.ErrUnboundValueRefused) {
         t.Fatalf("expected an unbound seal refused by the secret column, got %v", scanErr)
     }

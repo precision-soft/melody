@@ -51,7 +51,7 @@ func TestEncryptTransform_DeterministicConvertsAnAlreadyRandomizedValue(t *testi
     cipher := NewCipher(provider)
     migrator := &Migrator{cipher: cipher}
 
-    randomized, randomizedErr := cipher.EncryptWithKeyId("alice@example.com", "v2")
+    randomized, randomizedErr := cipher.Encrypt("alice@example.com", EncryptOptions{KeyId: "v2"})
     if nil != randomizedErr {
         t.Fatalf("randomized encrypt: %v", randomizedErr)
     }
@@ -79,7 +79,7 @@ func TestEncryptTransform_DeterministicKeepsTheKeyTheValueCarries(t *testing.T) 
     cipher := NewCipher(provider)
     migrator := &Migrator{cipher: cipher}
 
-    randomizedUnderRetiredKey, randomizedErr := cipher.EncryptWithKeyId("alice@example.com", "v1")
+    randomizedUnderRetiredKey, randomizedErr := cipher.Encrypt("alice@example.com", EncryptOptions{KeyId: "v1"})
     if nil != randomizedErr {
         t.Fatalf("randomized encrypt: %v", randomizedErr)
     }
@@ -132,7 +132,7 @@ func TestEncryptTransform_StopsOnAStoredValueThatNoLongerDecrypts(t *testing.T) 
     cipher := NewCipher(provider)
     migrator := &Migrator{cipher: cipher}
 
-    foreign, foreignErr := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v9", Keys: map[string][]byte{"v9": newKey(9)}})).Encrypt("alice@example.com")
+    foreign, foreignErr := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v9", Keys: map[string][]byte{"v9": newKey(9)}})).Encrypt("alice@example.com", EncryptOptions{})
     if nil != foreignErr {
         t.Fatalf("foreign encrypt: %v", foreignErr)
     }
@@ -154,7 +154,7 @@ func TestReencryptTransform_ConvertsRandomizedSameKeyValueToDeterministic(t *tes
     cipher := NewCipher(provider)
     migrator := &Migrator{cipher: cipher}
 
-    randomizedUnderTarget, _ := cipher.EncryptWithKeyId("alice@example.com", "v2")
+    randomizedUnderTarget, _ := cipher.Encrypt("alice@example.com", EncryptOptions{KeyId: "v2"})
     if true == deterministicCandidateMatches(t, cipher, "alice@example.com", randomizedUnderTarget) {
         t.Fatalf("precondition: randomized value should not be searchable")
     }
@@ -184,7 +184,7 @@ func TestReencryptTransform_RandomizedSameKeyRewritesDeterministicValue(t *testi
     cipher := NewCipher(provider)
     migrator := &Migrator{cipher: cipher}
 
-    deterministicUnderTarget, _ := cipher.EncryptDeterministicWithKeyId("alice@example.com", "v2")
+    deterministicUnderTarget, _ := cipher.EncryptDeterministic("alice@example.com", EncryptOptions{KeyId: "v2"})
     if false == deterministicCandidateMatches(t, cipher, "alice@example.com", deterministicUnderTarget) {
         t.Fatalf("precondition: deterministic value should be searchable")
     }
@@ -209,7 +209,7 @@ func TestReencryptTransform_AKeyChangeKeepsADeterministicSealDeterministic(t *te
     cipher := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v2", Keys: map[string][]byte{"v1": newKey(1), "v2": newKey(2)}}))
     migrator := &Migrator{cipher: cipher}
 
-    deterministicUnderV1, _ := cipher.EncryptDeterministicWithKeyId("alice@example.com", "v1")
+    deterministicUnderV1, _ := cipher.EncryptDeterministic("alice@example.com", EncryptOptions{KeyId: "v1"})
 
     rotated, rotateErr := migrator.reencryptTransform(TableSpecification{Deterministic: false}, "v2")(deterministicUnderV1)
     if nil != rotateErr {
@@ -230,7 +230,7 @@ func TestReencryptTransform_AKeyChangeKeepsARandomSealRandom(t *testing.T) {
     cipher := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v2", Keys: map[string][]byte{"v1": newKey(1), "v2": newKey(2)}}))
     migrator := &Migrator{cipher: cipher}
 
-    randomUnderV1, _ := cipher.EncryptWithKeyId("alice@example.com", "v1")
+    randomUnderV1, _ := cipher.Encrypt("alice@example.com", EncryptOptions{KeyId: "v1"})
 
     rotated, rotateErr := migrator.reencryptTransform(TableSpecification{Deterministic: false}, "v2")(randomUnderV1)
     if nil != rotateErr {
@@ -255,8 +255,8 @@ func TestReencryptTransform_AKeyChangeThroughAForeignCipherKeepsTheMode(t *testi
     packageCipher := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v2", Keys: map[string][]byte{"v1": newKey(1), "v2": newKey(2)}}))
     migrator := &Migrator{cipher: wrappedCipher{Cipher: packageCipher}}
 
-    deterministicUnderV1, _ := packageCipher.EncryptDeterministicWithKeyId("alice@example.com", "v1")
-    randomUnderV1, _ := packageCipher.EncryptWithKeyId("alice@example.com", "v1")
+    deterministicUnderV1, _ := packageCipher.EncryptDeterministic("alice@example.com", EncryptOptions{KeyId: "v1"})
+    randomUnderV1, _ := packageCipher.Encrypt("alice@example.com", EncryptOptions{KeyId: "v1"})
 
     for _, testCase := range []struct {
         stored        string
@@ -278,6 +278,58 @@ func TestReencryptTransform_AKeyChangeThroughAForeignCipherKeepsTheMode(t *testi
             t.Fatalf("expected the rotated value's mode kept (deterministic=%v)", testCase.deterministic)
         }
     }
+}
+
+/* through a foreign cipher every seal names its key: the target key of a rotation, the stored key of a deterministic conversion, never the provider's current key, which the runs below keep apart from both */
+func TestMigrator_AForeignCipherSealsUnderTheKeyTheRunNamesNotTheCurrentOne(t *testing.T) {
+    packageCipher := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1), "v2": newKey(2), "v3": newKey(3)}}))
+    migrator := &Migrator{cipher: wrappedCipher{Cipher: packageCipher}}
+
+    randomUnderV2, _ := packageCipher.Encrypt("alice@example.com", EncryptOptions{KeyId: "v2"})
+    deterministicUnderV2, _ := packageCipher.EncryptDeterministic("alice@example.com", EncryptOptions{KeyId: "v2"})
+    deterministicUnderV3, _ := packageCipher.EncryptDeterministic("alice@example.com", EncryptOptions{KeyId: "v3"})
+
+    for _, testCase := range []struct {
+        name          string
+        transform     func(string) (string, error)
+        stored        string
+        keyId         string
+        deterministic bool
+    }{
+        {name: "reencrypt keeps a random seal random", transform: migrator.reencryptTransform(TableSpecification{}, "v3"), stored: randomUnderV2, keyId: "v3", deterministic: false},
+        {name: "reencrypt converts to deterministic", transform: migrator.reencryptTransform(TableSpecification{Deterministic: true}, "v3"), stored: randomUnderV2, keyId: "v3", deterministic: true},
+        {name: "reencrypt onto the seal's own key converts to random", transform: migrator.reencryptTransform(TableSpecification{}, "v3"), stored: deterministicUnderV3, keyId: "v3", deterministic: false},
+        {name: "encrypt converts a random seal under its own key", transform: migrator.encryptTransform(TableSpecification{Deterministic: true}), stored: randomUnderV2, keyId: "v2", deterministic: true},
+        {name: "reencrypt keeps a deterministic seal deterministic", transform: migrator.reencryptTransform(TableSpecification{}, "v3"), stored: deterministicUnderV2, keyId: "v3", deterministic: true},
+    } {
+        sealed, sealErr := testCase.transform(testCase.stored)
+        if nil != sealErr {
+            t.Fatalf("%s: %v", testCase.name, sealErr)
+        }
+
+        if keyId, _, _ := keyIdOf(sealed); testCase.keyId != keyId {
+            t.Fatalf("%s: expected the seal under %q, got %q", testCase.name, testCase.keyId, keyId)
+        }
+
+        if plaintext, decryptErr := packageCipher.Decrypt(sealed); nil != decryptErr || "alice@example.com" != plaintext {
+            t.Fatalf("%s: expected the seal to open to the plaintext, got %q (%v)", testCase.name, plaintext, decryptErr)
+        }
+
+        if testCase.deterministic != (sealed == mustDeterministicUnder(t, packageCipher, testCase.keyId)) {
+            t.Fatalf("%s: expected deterministic=%v", testCase.name, testCase.deterministic)
+        }
+    }
+}
+
+func mustDeterministicUnder(t *testing.T, cipherInstance Cipher, keyId string) string {
+    t.Helper()
+
+    sealed, sealErr := cipherInstance.EncryptDeterministic("alice@example.com", EncryptOptions{KeyId: keyId})
+    if nil != sealErr {
+        t.Fatalf("deterministic seal under %q: %v", keyId, sealErr)
+    }
+
+    return sealed
 }
 
 type stubMigrateDriver struct {
@@ -624,9 +676,9 @@ func TestSealedProbeLength_AgreesWithASealOfTheFullPlaintext(t *testing.T) {
             var sealed string
             var sealErr error
             if "" == keyId {
-                sealed, sealErr = cipher.Encrypt(fullProbe)
+                sealed, sealErr = cipher.Encrypt(fullProbe, EncryptOptions{})
             } else {
-                sealed, sealErr = cipher.EncryptWithKeyId(fullProbe, keyId)
+                sealed, sealErr = cipher.Encrypt(fullProbe, EncryptOptions{KeyId: keyId})
             }
             if nil != sealErr {
                 t.Fatalf("key %q length %d: sealing the full probe: %v", keyId, plaintextByteLength, sealErr)
@@ -657,6 +709,28 @@ func TestSealedProbeLength_AnswersAHugeWidthWithoutAllocatingIt(t *testing.T) {
 
     if computed <= 512*1024*1024 {
         t.Fatalf("a sealed value is wider than its plaintext; got %d for 512 MiB", computed)
+    }
+}
+
+/* the probe is sealed under the key the run writes: a target key whose id is longer than the current one's widens every seal, and the width read under the current key would admit a column the rotation overflows */
+func TestMigrator_SizesTheColumnUnderTheTargetKey(t *testing.T) {
+    provider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1), "rotation-target-v2": newKey(2)}})
+    migrator := &Migrator{cipher: NewCipher(provider)}
+
+    for keyId, expectedKeyId := range map[string]string{"rotation-target-v2": "rotation-target-v2", "": "v1"} {
+        computed, computedErr := migrator.sealedProbeLength(10, keyId)
+        if nil != computedErr {
+            t.Fatalf("key %q: unexpected error: %v", keyId, computedErr)
+        }
+
+        sealed, sealErr := migrator.cipher.Encrypt(strings.Repeat(sealedProbeFiller, 10), EncryptOptions{KeyId: expectedKeyId})
+        if nil != sealErr {
+            t.Fatalf("key %q: seal: %v", keyId, sealErr)
+        }
+
+        if len(sealed) != computed {
+            t.Fatalf("key %q: expected the width of a seal under %q, %d, got %d", keyId, expectedKeyId, len(sealed), computed)
+        }
     }
 }
 
@@ -855,7 +929,7 @@ type normalisingCipher struct {
 }
 
 /* the seam fires only for the ROW's value: MigrateEncrypt runs its own capacity check first, whose width probe seals filler strings through this same Encrypt, so an unconditional trigger would normalise the row BEFORE the run's SELECT, the run would read the already-normalised value, and the guard would have no race left to catch. The race this test builds is the one between the run's SELECT and its guarded UPDATE, and only the row's own encrypt call sits in that window. */
-func (instance *normalisingCipher) Encrypt(plaintext string) (string, error) {
+func (instance *normalisingCipher) Encrypt(plaintext string, options EncryptOptions) (string, error) {
     if plaintext == instance.stored {
         _, execErr := instance.database.ExecContext(
             instance.ctx,
@@ -866,7 +940,7 @@ func (instance *normalisingCipher) Encrypt(plaintext string) (string, error) {
         }
     }
 
-    return instance.Cipher.Encrypt(plaintext)
+    return instance.Cipher.Encrypt(plaintext, options)
 }
 
 func TestEncryptMigrate_ConcurrentNormalisationIsSkippedUnderTheDefaultCollation(t *testing.T) {
@@ -1220,7 +1294,7 @@ func TestEncryptMigrate_RefusesARotationToALongerKeyId(t *testing.T) {
 
     plaintext := strings.Repeat("s", 100)
 
-    sealed, sealErr := cipher.EncryptWithKeyId(plaintext, "v1")
+    sealed, sealErr := cipher.Encrypt(plaintext, EncryptOptions{KeyId: "v1"})
     if nil != sealErr {
         t.Fatalf("seal: %v", sealErr)
     }
@@ -1365,12 +1439,12 @@ type sealStoredAsDataCase struct {
 func sealStoredAsDataCases(t *testing.T, cipherInstance Cipher) []sealStoredAsDataCase {
     t.Helper()
 
-    randomSeal, randomErr := cipherInstance.Encrypt("another account's iban")
+    randomSeal, randomErr := cipherInstance.Encrypt("another account's iban", EncryptOptions{})
     if nil != randomErr {
         t.Fatalf("random seal: %v", randomErr)
     }
 
-    deterministicSeal, deterministicErr := cipherInstance.EncryptDeterministic("another account's iban")
+    deterministicSeal, deterministicErr := cipherInstance.EncryptDeterministic("another account's iban", EncryptOptions{})
     if nil != deterministicErr {
         t.Fatalf("deterministic seal: %v", deterministicErr)
     }
@@ -1509,7 +1583,7 @@ func TestEncryptTransform_DeterministicReRunKeepsASealStoredAsDataAsData(t *test
 func TestMigrate_RefusesASealStoredAsDataThroughAForeignCipher(t *testing.T) {
     sealingCipher := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}}))
 
-    sealStoredAsData, sealErr := sealingCipher.Encrypt("another account's iban")
+    sealStoredAsData, sealErr := sealingCipher.Encrypt("another account's iban", EncryptOptions{})
     if nil != sealErr {
         t.Fatalf("seal: %v", sealErr)
     }
@@ -1547,7 +1621,7 @@ func TestMigrate_RefusesASealStoredAsDataThroughAForeignCipher(t *testing.T) {
 func TestMigrate_RefusesAMarkerFamilyPlaintextThroughAWrappedCipher(t *testing.T) {
     packageCipher := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1), "v2": newKey(2)}}))
 
-    stored, sealErr := packageCipher.Encrypt("<ENC>\x00gcm9\x00v1:zzz")
+    stored, sealErr := packageCipher.Encrypt("<ENC>\x00gcm9\x00v1:zzz", EncryptOptions{})
     if nil != sealErr {
         t.Fatalf("seal: %v", sealErr)
     }
@@ -2075,9 +2149,9 @@ func TestMigrator_EncryptSealsABoundColumnUnderItsBinding(t *testing.T) {
 /* the gcm1 to gcm2 path: each seal keeps the key it carries, v2 not being the current key, and its mode */
 func TestMigrator_EncryptRebindsAGcm1SealKeepingItsKeyAndMode(t *testing.T) {
     cipherInstance := newRotationCipher(t)
-    randomUnderV2, _ := cipherInstance.EncryptWithKeyId("random v2", "v2")
-    deterministicUnderV1, _ := cipherInstance.EncryptDeterministicWithKeyId("deterministic v1", "v1")
-    deterministicUnderV2, _ := cipherInstance.EncryptDeterministicWithKeyId("deterministic v2", "v2")
+    randomUnderV2, _ := cipherInstance.Encrypt("random v2", EncryptOptions{KeyId: "v2"})
+    deterministicUnderV1, _ := cipherInstance.EncryptDeterministic("deterministic v1", EncryptOptions{KeyId: "v1"})
+    deterministicUnderV2, _ := cipherInstance.EncryptDeterministic("deterministic v2", EncryptOptions{KeyId: "v2"})
 
     migrator, stub := newScriptedMigrator(t, scriptedNotesTable([][]driver.Value{
         {"1", randomUnderV2},
@@ -2138,7 +2212,7 @@ func TestMigrator_EncryptDeterministicConvertsARandomBoundSeal(t *testing.T) {
 
 func TestMigrator_EncryptOverAnUnboundColumnLeavesAGcm1SealUntouched(t *testing.T) {
     cipherInstance := newRotationCipher(t)
-    sealed, _ := cipherInstance.EncryptWithKeyId("my notes", "v2")
+    sealed, _ := cipherInstance.Encrypt("my notes", EncryptOptions{KeyId: "v2"})
 
     migrator, stub := newScriptedMigrator(t, scriptedNotesTable([][]driver.Value{{"1", sealed}}))
     migrator.cipher = cipherInstance
@@ -2152,7 +2226,7 @@ func TestMigrator_EncryptOverAnUnboundColumnLeavesAGcm1SealUntouched(t *testing.
 
 func TestMigrator_ReencryptWritesABoundColumnUnderItsBinding(t *testing.T) {
     cipherInstance := newRotationCipher(t)
-    unboundRandom, _ := cipherInstance.EncryptWithKeyId("unbound random", "v1")
+    unboundRandom, _ := cipherInstance.Encrypt("unbound random", EncryptOptions{KeyId: "v1"})
     boundDeterministic, _ := cipherInstance.(*aes256Cipher).sealBoundValueWithKeyId("bound deterministic", "v1", accountsNotesSealBinding, true)
 
     migrator, stub := newScriptedMigrator(t, scriptedNotesTable([][]driver.Value{
@@ -2175,7 +2249,7 @@ func TestMigrator_ReencryptWritesABoundColumnUnderItsBinding(t *testing.T) {
 /* a gcm1 seal under the target key is not yet the target, so it is re-sealed with its mode kept, never taken for the same-key conversion to random; a bound random seal under the target key is the target */
 func TestMigrator_ReencryptOntoTheCarriedKeyKeepsTheModeOfAGcm1Seal(t *testing.T) {
     cipherInstance := newRotationCipher(t)
-    unboundDeterministic, _ := cipherInstance.EncryptDeterministicWithKeyId("deterministic", "v2")
+    unboundDeterministic, _ := cipherInstance.EncryptDeterministic("deterministic", EncryptOptions{KeyId: "v2"})
     boundRandom, _ := cipherInstance.(*aes256Cipher).sealBoundValueWithKeyId("random", "v2", accountsNotesSealBinding, false)
     boundDeterministic, _ := cipherInstance.(*aes256Cipher).sealBoundValueWithKeyId("bound deterministic", "v2", accountsNotesSealBinding, true)
 
@@ -2203,7 +2277,7 @@ func TestMigrator_ReencryptOntoTheCarriedKeyKeepsTheModeOfAGcm1Seal(t *testing.T
 func TestMigrator_DecryptOpensABoundColumn(t *testing.T) {
     cipherInstance := newRotationCipher(t)
     bound, _ := cipherInstance.(*aes256Cipher).sealBoundValue("bound", accountsNotesSealBinding, false)
-    unbound, _ := cipherInstance.Encrypt("unbound")
+    unbound, _ := cipherInstance.Encrypt("unbound", EncryptOptions{})
 
     migrator, stub := newScriptedMigrator(t, scriptedNotesTable([][]driver.Value{{"1", bound}, {"2", unbound}}))
     migrator.cipher = cipherInstance
@@ -2244,7 +2318,7 @@ func TestMigrator_StopsOnASealOfAnotherBinding(t *testing.T) {
 /* the Migrator refuses an unbound value it reads on what it reads, else a relocated gcm1 seal would be re-sealed bound by the next run */
 func TestMigrator_RefusingUnboundStopsOnAGcm1SealAndOnPlaintext(t *testing.T) {
     cipherInstance := newRotationCipher(t)
-    unbound, _ := cipherInstance.Encrypt("unbound")
+    unbound, _ := cipherInstance.Encrypt("unbound", EncryptOptions{})
 
     for _, door := range []string{"encrypt", "reencrypt"} {
         run := migrateModeRuns[door]
@@ -2268,7 +2342,7 @@ func TestMigrator_RefusingUnboundStopsOnAGcm1SealAndOnPlaintext(t *testing.T) {
 func TestMigrator_ASealStoredAsDataInABoundColumnStaysData(t *testing.T) {
     cipherInstance := newRotationCipher(t)
     sealer := cipherInstance.(*aes256Cipher)
-    seal, _ := cipherInstance.Encrypt("someone else's row")
+    seal, _ := cipherInstance.Encrypt("someone else's row", EncryptOptions{})
     boundData, _ := sealer.sealBoundValue(seal, accountsNotesSealBinding, false)
     unboundData, _ := sealer.sealValue(seal, false)
 
@@ -2370,7 +2444,7 @@ func TestMigrator_CapacityCountsABoundSealAsSealed(t *testing.T) {
 
 func TestMigrator_CountsWhatItBoundAndWhatItSealed(t *testing.T) {
     cipherInstance := newRotationCipher(t)
-    unbound, _ := cipherInstance.Encrypt("unbound")
+    unbound, _ := cipherInstance.Encrypt("unbound", EncryptOptions{})
     bound, _ := cipherInstance.(*aes256Cipher).sealBoundValue("bound", accountsNotesSealBinding, false)
 
     migrator, _ := newScriptedMigrator(t, scriptedNotesTable([][]driver.Value{{"1", "plain"}, {"2", unbound}, {"3", bound}, {"4", "other plain"}}))
@@ -2389,7 +2463,7 @@ func TestMigrator_CountsWhatItBoundAndWhatItSealed(t *testing.T) {
 /* a rewrite that keeps a seal unbound, a random seal converted on an unbound column, is not counted as bound */
 func TestMigrator_CountsNoBindingOnAnUnboundColumn(t *testing.T) {
     cipherInstance := newRotationCipher(t)
-    random, _ := cipherInstance.Encrypt("random")
+    random, _ := cipherInstance.Encrypt("random", EncryptOptions{})
 
     migrator, stub := newScriptedMigrator(t, scriptedNotesTable([][]driver.Value{{"1", random}}))
     migrator.cipher = cipherInstance
@@ -2411,7 +2485,7 @@ func TestMigrator_CountsNoBindingOnAnUnboundColumn(t *testing.T) {
 /* a bound row whose value is itself a seal stays sealed: written bare it would be read as one */
 func TestMigrator_DecryptStopsOnABoundSealOfASeal(t *testing.T) {
     cipherInstance := newRotationCipher(t)
-    seal, _ := cipherInstance.Encrypt("someone else's row")
+    seal, _ := cipherInstance.Encrypt("someone else's row", EncryptOptions{})
     boundData, _ := cipherInstance.(*aes256Cipher).sealBoundValue(seal, accountsNotesSealBinding, false)
 
     migrator, stub := newScriptedMigrator(t, scriptedNotesTable([][]driver.Value{{"7", boundData}}))
@@ -2428,7 +2502,7 @@ func TestMigrator_DecryptStopsOnABoundSealOfASeal(t *testing.T) {
 /* Deterministic converts a bound column to searchable while rotating, a gcm1 random seal and a bound random one under the target key alike */
 func TestMigrator_ReencryptDeterministicConvertsABoundColumn(t *testing.T) {
     cipherInstance := newRotationCipher(t)
-    unboundRandom, _ := cipherInstance.EncryptWithKeyId("unbound random", "v1")
+    unboundRandom, _ := cipherInstance.Encrypt("unbound random", EncryptOptions{KeyId: "v1"})
     boundRandom, _ := cipherInstance.(*aes256Cipher).sealBoundValueWithKeyId("bound random", "v2", accountsNotesSealBinding, false)
 
     migrator, stub := newScriptedMigrator(t, scriptedNotesTable([][]driver.Value{{"1", unboundRandom}, {"2", boundRandom}}))

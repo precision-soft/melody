@@ -7,7 +7,7 @@ import (
 func TestFakeCipher_IsIdentity(t *testing.T) {
     cipher := NewFakeCipher()
 
-    encoded, _ := cipher.Encrypt("value")
+    encoded, _ := cipher.Encrypt("value", EncryptOptions{})
     if "value" != encoded {
         t.Fatalf("fake cipher must not transform the value")
     }

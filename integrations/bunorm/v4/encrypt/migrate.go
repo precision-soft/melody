@@ -454,10 +454,10 @@ func (instance *Migrator) encryptTransform(specification TableSpecification) fun
 
         if false == markerShaped {
             if false == specification.Deterministic {
-                return instance.cipher.Encrypt(value)
+                return instance.cipher.Encrypt(value, EncryptOptions{})
             }
 
-            return instance.cipher.EncryptDeterministic(value)
+            return instance.cipher.EncryptDeterministic(value, EncryptOptions{})
         }
 
         plaintext, decryptErr := instance.cipher.Decrypt(value)
@@ -482,7 +482,7 @@ func (instance *Migrator) encryptTransform(specification TableSpecification) fun
                 return "", errSealStoredAsDataThroughForeignCipher(keyId)
             }
 
-            return instance.cipher.EncryptDeterministicWithKeyId(plaintext, keyId)
+            return instance.cipher.EncryptDeterministic(plaintext, EncryptOptions{KeyId: keyId})
         }
 
         stored, _ := sealer.authenticatedSeal(value)
@@ -534,11 +534,11 @@ func (instance *Migrator) reencryptTransform(specification TableSpecification, t
         }
 
         if true == specification.Deterministic {
-            return instance.cipher.EncryptDeterministicWithKeyId(plaintext, targetKeyId)
+            return instance.cipher.EncryptDeterministic(plaintext, EncryptOptions{KeyId: targetKeyId})
         }
 
         if true == sameKey {
-            deterministic, deterministicErr := instance.cipher.EncryptDeterministicWithKeyId(plaintext, targetKeyId)
+            deterministic, deterministicErr := instance.cipher.EncryptDeterministic(plaintext, EncryptOptions{KeyId: targetKeyId})
             if nil != deterministicErr {
                 return "", deterministicErr
             }
@@ -547,22 +547,22 @@ func (instance *Migrator) reencryptTransform(specification TableSpecification, t
                 return value, nil
             }
 
-            return instance.cipher.EncryptWithKeyId(plaintext, targetKeyId)
+            return instance.cipher.Encrypt(plaintext, EncryptOptions{KeyId: targetKeyId})
         }
 
         /* a foreign cipher exposes no mode, so the stored seal's is read by sealing the plaintext deterministically under the key it carries: an equal seal is deterministic */
         if true == encrypted {
-            storedDeterministic, deterministicErr := instance.cipher.EncryptDeterministicWithKeyId(plaintext, currentKeyId)
+            storedDeterministic, deterministicErr := instance.cipher.EncryptDeterministic(plaintext, EncryptOptions{KeyId: currentKeyId})
             if nil != deterministicErr {
                 return "", deterministicErr
             }
 
             if value == storedDeterministic {
-                return instance.cipher.EncryptDeterministicWithKeyId(plaintext, targetKeyId)
+                return instance.cipher.EncryptDeterministic(plaintext, EncryptOptions{KeyId: targetKeyId})
             }
         }
 
-        return instance.cipher.EncryptWithKeyId(plaintext, targetKeyId)
+        return instance.cipher.Encrypt(plaintext, EncryptOptions{KeyId: targetKeyId})
     }
 }
 
@@ -799,15 +799,7 @@ func (instance *Migrator) sealedProbeLength(plaintextByteLength int, keyId strin
 
     probe := strings.Repeat(sealedProbeFiller, remainderLength)
 
-    var sealed string
-    var sealErr error
-
-    if "" == keyId {
-        sealed, sealErr = instance.cipher.Encrypt(probe)
-    } else {
-        sealed, sealErr = instance.cipher.EncryptWithKeyId(probe, keyId)
-    }
-
+    sealed, sealErr := instance.cipher.Encrypt(probe, EncryptOptions{KeyId: keyId})
     if nil != sealErr {
         return 0, exception.NewError("migrate could not measure the encrypted width", map[string]any{"keyId": keyId}, sealErr)
     }

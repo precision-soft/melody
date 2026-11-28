@@ -244,7 +244,7 @@ func liveDecryptCharsetTable(t *testing.T, sqlMode string) (*Migrator, *sql.DB, 
     t.Cleanup(func() { _, _ = sqlDb.ExecContext(context.Background(), "DROP TABLE IF EXISTS "+table) })
 
     cipher := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(3)}}))
-    sealed, sealErr := cipher.Encrypt("secret žluťoučký kůň")
+    sealed, sealErr := cipher.Encrypt("secret žluťoučký kůň", EncryptOptions{})
     if nil != sealErr {
         t.Fatalf("seal: %v", sealErr)
     }

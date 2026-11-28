@@ -16,6 +16,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/migration"
     "github.com/precision-soft/melody/v4/.example/persistence"
     examplesecurity "github.com/precision-soft/melody/v4/.example/security"
+    "github.com/precision-soft/melody/v4/.example/service"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
@@ -581,11 +582,16 @@ func TestDatabaseResetCommandGroupsTheReseedUnderOneAuditTransaction(t *testing.
         t.Fatalf("expected the reset over the recording handle to complete, got %v", runErr)
     }
 
+    actor := service.ActorFromRuntime(runtimeInstance)
+    if "" == actor {
+        t.Fatal("expected the reset's runtime to name an actor")
+    }
+
     transactionOpened := -1
     firstSeededRow := -1
     groupedEntries := 0
     for index, statement := range recorder.recorded() {
-        if -1 == transactionOpened && true == strings.HasPrefix(statement, "INSERT INTO `"+melodyaudit.DefaultTransactionTable+"`") && true == strings.Contains(statement, `'{"command":"example:db:reset"}'`) {
+        if -1 == transactionOpened && true == strings.HasPrefix(statement, "INSERT INTO `"+melodyaudit.DefaultTransactionTable+"`") && true == strings.Contains(statement, "DEFAULT, '"+actor+`', '{"command":"example:db:reset"}'`) {
             transactionOpened = index
         }
 
@@ -600,7 +606,7 @@ func TestDatabaseResetCommandGroupsTheReseedUnderOneAuditTransaction(t *testing.
     }
 
     if -1 == transactionOpened || -1 == firstSeededRow || transactionOpened > firstSeededRow {
-        t.Fatalf("expected the audit transaction naming the command opened before the first seeded row, got transaction %d, first row %d", transactionOpened, firstSeededRow)
+        t.Fatalf("expected the audit transaction naming the actor and the command opened before the first seeded row, got transaction %d, first row %d", transactionOpened, firstSeededRow)
     }
 
     if 8 != groupedEntries {

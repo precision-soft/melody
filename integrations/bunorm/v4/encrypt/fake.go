@@ -23,19 +23,11 @@ type fakeCipher struct {
     instanceNumber uint64
 }
 
-func (instance *fakeCipher) Encrypt(plaintext string) (string, error) {
+func (instance *fakeCipher) Encrypt(plaintext string, options EncryptOptions) (string, error) {
     return plaintext, nil
 }
 
-func (instance *fakeCipher) EncryptWithKeyId(plaintext string, keyId string) (string, error) {
-    return plaintext, nil
-}
-
-func (instance *fakeCipher) EncryptDeterministic(plaintext string) (string, error) {
-    return plaintext, nil
-}
-
-func (instance *fakeCipher) EncryptDeterministicWithKeyId(plaintext string, keyId string) (string, error) {
+func (instance *fakeCipher) EncryptDeterministic(plaintext string, options EncryptOptions) (string, error) {
     return plaintext, nil
 }
 

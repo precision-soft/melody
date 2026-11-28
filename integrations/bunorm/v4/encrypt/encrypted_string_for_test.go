@@ -277,7 +277,7 @@ func TestEncryptedStringFor_ASealWrittenAsDataIsSealedAndReadBackAsTheSeal(t *te
         t.Fatalf("cipher: %v", cipherErr)
     }
 
-    otherRowsSeal, sealErr := crmCipher.Encrypt("another customer's iban")
+    otherRowsSeal, sealErr := crmCipher.Encrypt("another customer's iban", EncryptOptions{})
     if nil != sealErr {
         t.Fatalf("seal: %v", sealErr)
     }
@@ -377,7 +377,7 @@ func TestBoundColumn_AdmitsAnUnboundSealAndPlaintextByDefault(t *testing.T) {
     cipherInstance := newCrmCipher(t)
     installSealBinding(t, crmIbanBinding{}, false)
 
-    unbound, _ := cipherInstance.Encrypt("RO49AAAA1B31007593840000")
+    unbound, _ := cipherInstance.Encrypt("RO49AAAA1B31007593840000", EncryptOptions{})
 
     for _, stored := range []string{unbound, "RO49AAAA1B31007593840000"} {
         var scanned EncryptedStringFor[crmIbanBinding]
@@ -394,7 +394,7 @@ func TestBoundColumn_RefusingUnboundRefusesAGcm1Seal(t *testing.T) {
     installCipher(t, crmCipherReference{}.CipherName(), cipherInstance)
     installSealBinding(t, crmIbanBinding{}, true)
 
-    unbound, _ := cipherInstance.Encrypt("RO49AAAA1B31007593840000")
+    unbound, _ := cipherInstance.Encrypt("RO49AAAA1B31007593840000", EncryptOptions{})
     provider.calls = 0
 
     var scanned EncryptedStringFor[crmIbanBinding]
@@ -481,7 +481,7 @@ func TestEncryptedStringFor_ASealWrittenAsDataRoundTripsUnderABinding(t *testing
     installSealBinding(t, crmIbanBinding{}, true)
     installSealBinding(t, crmEmailBinding{}, false)
 
-    unbound, _ := cipherInstance.Encrypt("another customer's iban")
+    unbound, _ := cipherInstance.Encrypt("another customer's iban", EncryptOptions{})
     bound, _ := EncryptedStringFor[crmEmailBinding]("another customer's email").Value()
 
     for _, applicationValue := range []string{unbound, string(bound.([]byte))} {

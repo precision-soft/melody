@@ -28,11 +28,19 @@ func transactionIdFromContext(ctx context.Context) int64 {
     return id
 }
 
+/* TransactionOptions is what one audit transaction records beside its id. */
+type TransactionOptions struct {
+    /* Actor is who the transaction is recorded for; left out, the row's actor is empty. */
+    Actor string
+    /* Extras are encoded as JSON into the row; nil or empty records none. */
+    Extras map[string]any
+}
+
 /* BeginTransaction answers the context an audited operation records under, so it takes and answers a context, never a runtime. */
-func BeginTransaction(ctx context.Context, database *bun.DB, actor string, extras map[string]any) (context.Context, int64, error) {
+func BeginTransaction(ctx context.Context, database *bun.DB, options TransactionOptions) (context.Context, int64, error) {
     encodedExtras := ""
-    if 0 != len(extras) {
-        payload, marshalErr := json.Marshal(extras)
+    if 0 != len(options.Extras) {
+        payload, marshalErr := json.Marshal(options.Extras)
         if nil != marshalErr {
             return ctx, 0, exception.NewError("could not encode audit transaction extras", nil, marshalErr)
         }
@@ -40,7 +48,7 @@ func BeginTransaction(ctx context.Context, database *bun.DB, actor string, extra
     }
 
     transaction := Transaction{
-        Actor:     actor,
+        Actor:     options.Actor,
         Extras:    encodedExtras,
         CreatedAt: time.Now(),
     }

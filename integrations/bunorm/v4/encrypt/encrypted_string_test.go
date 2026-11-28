@@ -123,7 +123,7 @@ func TestEncryptedString_ScanReportsATruncatedCiphertext(t *testing.T) {
     cipherInstance := NewCipher(provider)
     installCipher(t, defaultCipherName, cipherInstance)
 
-    sealed, encryptErr := cipherInstance.Encrypt("personal data")
+    sealed, encryptErr := cipherInstance.Encrypt("personal data", EncryptOptions{})
     if nil != encryptErr {
         t.Fatalf("encrypt: %v", encryptErr)
     }
@@ -350,7 +350,7 @@ func TestEncryptedString_ASealWrittenAsDataIsSealedAndReadBackAsTheSeal(t *testi
     cipherInstance := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(7)}}))
     installCipher(t, defaultCipherName, cipherInstance)
 
-    otherRowsSeal, sealErr := cipherInstance.Encrypt("another account's iban")
+    otherRowsSeal, sealErr := cipherInstance.Encrypt("another account's iban", EncryptOptions{})
     if nil != sealErr {
         t.Fatalf("seal: %v", sealErr)
     }

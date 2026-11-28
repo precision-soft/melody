@@ -452,7 +452,7 @@ func TestEncryptDatabaseCommand_RefusesASealBindingFlagItCannotResolve(t *testin
 
 func TestEncryptDatabaseCommand_LogsWhatItBound(t *testing.T) {
     cipherInstance := newRotationCipher(t)
-    unbound, _ := cipherInstance.Encrypt("unbound")
+    unbound, _ := cipherInstance.Encrypt("unbound", EncryptOptions{})
     command, _ := newScriptedNotesCommand(t, cipherInstance, [][]driver.Value{{"1", "plain"}, {"2", unbound}, {"3", unbound}}, SealBindingConfig{Reference: accountsNotesBinding{}, UnboundAdmitted: true})
 
     logger := &recordingLogger{}
@@ -569,7 +569,7 @@ func TestEncryptDatabaseCommand_RefusesAFlagItsModeDoesNotRead(t *testing.T) {
 /* a write the server refuses during a decrypt quotes the plaintext in its message; the error stream carries the refusal's number and never the value */
 func TestEncryptDatabaseCommand_TheErrorStreamOfARefusedDecryptWriteHoldsTheNumberNotTheValue(t *testing.T) {
     cipherInstance := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}}))
-    sealed, sealErr := cipherInstance.Encrypt("secret plaintext")
+    sealed, sealErr := cipherInstance.Encrypt("secret plaintext", EncryptOptions{})
     if nil != sealErr {
         t.Fatalf("seal: %v", sealErr)
     }
@@ -599,7 +599,7 @@ func TestEncryptDatabaseCommand_TheErrorStreamOfARefusedDecryptWriteHoldsTheNumb
 /* the closing record keys a bound column as the run resolved it against the schema, not the operator's spelling, in each of the three modes */
 func TestEncryptDatabaseCommand_LogsTheStoredSpelling(t *testing.T) {
     cipherInstance := newRotationCipher(t)
-    sealed, _ := cipherInstance.Encrypt("sealed")
+    sealed, _ := cipherInstance.Encrypt("sealed", EncryptOptions{})
 
     for mode, testCase := range map[string]struct {
         rows      [][]driver.Value

@@ -101,10 +101,10 @@ registry := audit.NewRegistry(audit.RegistryConfig{
 registry.EnsureSchema(runtimeInstance, auditDb) // create audit + transaction tables if absent, from a service built at boot that what writes the trail resolves
 ```
 
-Group one unit of work's entries under a shared `melody_audit_transaction` row:
+Group one unit of work's entries under a shared `melody_audit_transaction` row; `TransactionOptions.Actor` is who the row is recorded for and `Extras` are encoded as json into it, an empty actor and no extras when left out:
 
 ```go
-ctx, txId, _ := audit.BeginTransaction(ctx, auditDb, "user-42", map[string]any{"request": reqId})
+ctx, txId, _ := audit.BeginTransaction(ctx, auditDb, audit.TransactionOptions{Actor: "user-42", Extras: map[string]any{"request": reqId}})
 // every entry recorded with ctx now carries transaction_id = txId
 ```
 

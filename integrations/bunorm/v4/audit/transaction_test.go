@@ -2,9 +2,13 @@ package audit
 
 import (
     "context"
+    "database/sql"
     "reflect"
     "strings"
     "testing"
+
+    "github.com/uptrace/bun"
+    "github.com/uptrace/bun/dialect/mysqldialect"
 )
 
 /* the transaction table name is fixed in the model tag and cannot carry the major, so the constant and the tag must say the same thing: a drift between them means every read goes to a table the writes never fill */
@@ -52,7 +56,7 @@ func TestTransactionIdFromContext_AnswersZeroWhenNoTransactionWasOpened(t *testi
 func TestBeginTransaction_RefusesExtrasItCanNotEncodeWithoutOpeningAnything(t *testing.T) {
     ctx := context.Background()
 
-    answeredCtx, id, beginErr := BeginTransaction(ctx, newTestDatabase(), "user-42", map[string]any{"channel": make(chan int)})
+    answeredCtx, id, beginErr := BeginTransaction(ctx, newTestDatabase(), TransactionOptions{Actor: "user-42", Extras: map[string]any{"channel": make(chan int)}})
     if nil == beginErr {
         t.Fatal("expected unencodable extras to be refused")
     }
@@ -78,7 +82,7 @@ func TestBeginTransaction_RefusesExtrasItCanNotEncodeWithoutOpeningAnything(t *t
 func TestBeginTransaction_WrapsAnInsertItCouldNotRun(t *testing.T) {
     ctx := context.Background()
 
-    answeredCtx, id, beginErr := BeginTransaction(ctx, newTestDatabase(), "user-42", nil)
+    answeredCtx, id, beginErr := BeginTransaction(ctx, newTestDatabase(), TransactionOptions{Actor: "user-42"})
     if nil == beginErr {
         t.Fatal("expected an unreachable database to refuse")
     }
@@ -89,5 +93,38 @@ func TestBeginTransaction_WrapsAnInsertItCouldNotRun(t *testing.T) {
 
     if 0 != id || ctx != answeredCtx {
         t.Fatalf("expected nothing to be bound on a refusal, got id=%d", id)
+    }
+}
+
+func beginScriptedTransaction(t *testing.T, options TransactionOptions) string {
+    t.Helper()
+
+    scripted := &scriptedDatabase{}
+    database := bun.NewDB(sql.OpenDB(&scriptedConnector{database: scripted}), mysqldialect.New())
+
+    if _, _, beginErr := BeginTransaction(context.Background(), database, options); nil != beginErr {
+        t.Fatalf("begin: %v", beginErr)
+    }
+
+    if 1 != len(scripted.statements) {
+        t.Fatalf("expected one insert, got %q", scripted.statements)
+    }
+
+    return scripted.statements[0]
+}
+
+func TestBeginTransaction_RecordsTheOptionsActorAndExtras(t *testing.T) {
+    statement := beginScriptedTransaction(t, TransactionOptions{Actor: "alice", Extras: map[string]any{"command": "reset"}})
+
+    if false == strings.Contains(statement, "DEFAULT, 'alice', '{\"command\":\"reset\"}', '") {
+        t.Fatalf("expected the row to carry the options' actor and extras, got %s", statement)
+    }
+}
+
+func TestBeginTransaction_WithoutOptionsRecordsAnEmptyActorAndNoExtras(t *testing.T) {
+    statement := beginScriptedTransaction(t, TransactionOptions{})
+
+    if false == strings.Contains(statement, "DEFAULT, '', '', '") {
+        t.Fatalf("expected an empty actor and no extras, got %s", statement)
     }
 }

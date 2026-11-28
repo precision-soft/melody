@@ -186,7 +186,7 @@ func TestEncryptedDeterministicString_ASealWrittenAsDataIsSealedAndReadBackAsThe
     cipherInstance := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(7)}}))
     installCipher(t, defaultCipherName, cipherInstance)
 
-    otherRowsSeal, sealErr := cipherInstance.EncryptDeterministic("another account's email")
+    otherRowsSeal, sealErr := cipherInstance.EncryptDeterministic("another account's email", EncryptOptions{})
     if nil != sealErr {
         t.Fatalf("seal: %v", sealErr)
     }
