@@ -219,12 +219,62 @@ func TestRelayCommand_StopsOnContextCancellation(t *testing.T) {
     }
 }
 
-func TestRelayCommand_RejectsMalformedInterval(t *testing.T) {
-    relay := NewRelay(&fakeRepository{}, &fakeTransport{}, &stringCodec{}, RelayConfig{})
+func TestRelayCommand_RefusesADurationFlagThatIsNotAPositiveDurationAtTheParse(t *testing.T) {
+    for _, flagName := range []string{"interval", "idle-backoff"} {
+        for value, expected := range map[string]string{
+            "not-a-duration": "for flag -" + flagName,
+            "":               "for flag -" + flagName,
+            " 1s ":           "for flag -" + flagName,
+            "0s":             "duration flag must be positive",
+            "-1s":            "duration flag must be positive",
+        } {
+            relayCommand := NewRelayCommand(RelayCommandConfig{})
+            capturing := &capturingCommand{Command: relayCommand, runtimeInstance: relayTestRuntime()}
 
-    runErr := runRelayCommand(t, relayTestRuntime(), relay, []string{"--interval", "not-a-duration"})
-    if nil == runErr {
-        t.Fatalf("expected a malformed interval to be rejected")
+            commandErr := melodycli.DispatchCommand(context.Background(), capturing, capturing.runtimeInstance, []string{relayCommand.Name(), "--" + flagName, value, "--limit", "1"}, io.Discard, melodycli.DispatchConfig{})
+            if nil == commandErr || false == strings.Contains(commandErr.Error(), expected) || false == strings.Contains(commandErr.Error(), "-"+flagName) {
+                t.Fatalf("expected --%s %q refused at the parse with %q, got %v", flagName, value, expected, commandErr)
+            }
+            if nil != capturing.capturedErr {
+                t.Fatalf("expected the run never reached for --%s %q, got %v", flagName, value, capturing.capturedErr)
+            }
+        }
+    }
+}
+
+func TestRelayCommand_ReadsTheIntervalAndTheIdleBackoffWithTheirFallbacks(t *testing.T) {
+    for name, testCase := range map[string]struct {
+        arguments           []string
+        expectedInterval    time.Duration
+        expectedIdleBackoff time.Duration
+    }{
+        "both left out":      {arguments: nil, expectedInterval: defaultPollInterval, expectedIdleBackoff: defaultPollInterval},
+        "interval alone":     {arguments: []string{"--interval", "250ms"}, expectedInterval: 250 * time.Millisecond, expectedIdleBackoff: 250 * time.Millisecond},
+        "idle backoff alone": {arguments: []string{"--idle-backoff", "3s"}, expectedInterval: defaultPollInterval, expectedIdleBackoff: 3 * time.Second},
+        "both":               {arguments: []string{"--interval", "2s", "--idle-backoff", "5s"}, expectedInterval: 2 * time.Second, expectedIdleBackoff: 5 * time.Second},
+    } {
+        t.Run(name, func(t *testing.T) {
+            var interval, idleBackoff time.Duration
+
+            engineCommand := &clicontract.CommandContext{
+                Name:  "probe",
+                Flags: (&RelayCommand{}).Flags(),
+                ExitErrHandler: func(context.Context, *clicontract.CommandContext, error) {
+                },
+                Action: func(_ context.Context, actionCommand *clicontract.CommandContext) error {
+                    interval, idleBackoff = relayDurations(actionCommand)
+
+                    return nil
+                },
+            }
+
+            if runErr := engineCommand.Run(context.Background(), append([]string{"probe"}, testCase.arguments...)); nil != runErr {
+                t.Fatalf("expected %v to parse, got %v", testCase.arguments, runErr)
+            }
+            if testCase.expectedInterval != interval || testCase.expectedIdleBackoff != idleBackoff {
+                t.Fatalf("expected interval %s and idle backoff %s, got %s and %s", testCase.expectedInterval, testCase.expectedIdleBackoff, interval, idleBackoff)
+            }
+        })
     }
 }
 

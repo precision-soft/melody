@@ -63,9 +63,10 @@ func (instance *InternalSignCommand) Flags() []melodyclicontract.Flag {
             Value: defaultInternalSignActorAttributes,
             Usage: "the propagated actor's attributes, comma-separated key=value pairs, each key named once; empty for none; refused without --actor",
         },
-        &melodyclicontract.StringFlag{
-            Name:  "ttl",
-            Usage: "how long the envelope stays valid, as a go duration; defaults to the signer's 30s. It is not capped here: the firewall refuses an envelope whose expiry sits past its horizon, and an operator may mint one to see that refusal",
+        &melodyclicontract.DurationFlag{
+            Name:      internalSignFlagTtl,
+            Usage:     "how long the envelope stays valid, as a go duration of at least 1s; defaults to the signer's 30s. It is not capped here: the firewall refuses an envelope whose expiry sits past its horizon, and an operator may mint one to see that refusal",
+            Validator: internalSignTtl,
         },
     }
 }
@@ -117,7 +118,7 @@ func (instance *InternalSignCommand) Run(
         )
     }
 
-    signer, signerErr := instance.signerFor(runtimeInstance, commandContext.String("ttl"))
+    signer, signerErr := instance.signerFor(runtimeInstance, commandContext)
     if nil != signerErr {
         return signerErr
     }
@@ -138,20 +139,26 @@ func (instance *InternalSignCommand) Run(
     return writeErr
 }
 
-func (instance *InternalSignCommand) signerFor(runtimeInstance melodycontainercontract.Runtime, rawTtl string) (*melodysecurity.HmacEnvelopeSigner, error) {
-    if "" == rawTtl {
+/* signerFor answers the boot signer when --ttl is left out, else one built for the lifetime asked, which the flag's validator held at the parse to at least 1s */
+func (instance *InternalSignCommand) signerFor(runtimeInstance melodycontainercontract.Runtime, commandContext *melodyclicontract.CommandContext) (*melodysecurity.HmacEnvelopeSigner, error) {
+    if false == commandContext.IsSet(internalSignFlagTtl) {
         return instance.signer.Resolve(runtimeInstance)
     }
 
-    parsedTtl, parseErr := time.ParseDuration(rawTtl)
-    if nil != parseErr || bound.TtlMinimum > parsedTtl {
-        return nil, fmt.Errorf("internal:sign --ttl %q is not a go duration of at least 1s", rawTtl)
+    return instance.newSigner(runtimeInstance, bound.Of(commandContext.Duration(internalSignFlagTtl))), nil
+}
+
+func internalSignTtl(ttl time.Duration) error {
+    if bound.TtlMinimum > ttl {
+        return fmt.Errorf("internal:sign --ttl %s is not a go duration of at least 1s", ttl)
     }
 
-    return instance.newSigner(runtimeInstance, bound.Of(parsedTtl)), nil
+    return nil
 }
 
 const (
+    internalSignFlagTtl = "ttl"
+
     defaultInternalSignActorRoles      = "ROLE_BUYER"
     defaultInternalSignActorAttributes = "tenant=acme"
 )

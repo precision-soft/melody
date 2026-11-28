@@ -31,6 +31,7 @@ The [`cli`](../../cli) package provides core primitives for Melody's command-lin
 - [`clicontract.StringSliceFlag`](../../cli/contract/type.go) (alias)
 - [`clicontract.BoolFlag`](../../cli/contract/type.go) (alias)
 - [`clicontract.IntFlag`](../../cli/contract/type.go) (alias)
+- [`clicontract.DurationFlag`](../../cli/contract/type.go) (alias), read with `CommandContext.Duration(name)`; the engine parses the value with `time.ParseDuration`, untrimmed, and answers a value it cannot parse or its `Validator` refuses before the command runs, naming the flag
 
 ### Root command wiring (`cli`)
 

@@ -7,7 +7,6 @@ import (
     "errors"
     "fmt"
     "strconv"
-    "strings"
     "time"
 
     "github.com/precision-soft/melody/v4/.example/message"
@@ -25,7 +24,7 @@ const (
     messageBusDispatchFlagTimeout   = "timeout"
     messageBusDispatchFlagNoConsume = "no-consume"
 
-    messageBusDispatchDefaultTimeout = "30s"
+    messageBusDispatchDefaultTimeout = 30 * time.Second
     messageBusDispatchMinimumTimeout = time.Second
     messageBusDispatchRunIdBytes     = 16
 )
@@ -62,10 +61,12 @@ func (instance *MessageBusDispatchCommand) Description() string {
 
 func (instance *MessageBusDispatchCommand) Flags() []melodyclicontract.Flag {
     return []melodyclicontract.Flag{
-        &melodyclicontract.StringFlag{
-            Name:  messageBusDispatchFlagTimeout,
-            Usage: "how long to wait for the run's own messages, a go duration of at least 1s",
-            Value: messageBusDispatchDefaultTimeout,
+        &melodyclicontract.DurationFlag{
+            Name:             messageBusDispatchFlagTimeout,
+            Usage:            "how long to wait for the run's own messages, a go duration of at least 1s",
+            Value:            messageBusDispatchDefaultTimeout,
+            Validator:        messageBusDispatchTimeout,
+            ValidateDefaults: true,
         },
         &melodyclicontract.BoolFlag{
             Name:  messageBusDispatchFlagNoConsume,
@@ -80,10 +81,7 @@ func (instance *MessageBusDispatchCommand) Run(
 ) error {
     writer := commandContext.Writer
 
-    timeout, timeoutErr := messageBusDispatchTimeout(commandContext.String(messageBusDispatchFlagTimeout))
-    if nil != timeoutErr {
-        return timeoutErr
-    }
+    timeout := commandContext.Duration(messageBusDispatchFlagTimeout)
 
     runId, runIdErr := newMessageBusDispatchRunId()
     if nil != runIdErr {
@@ -190,27 +188,20 @@ func (instance *MessageBusDispatchCommand) Run(
     return nil
 }
 
-func messageBusDispatchTimeout(value string) (time.Duration, error) {
-    trimmed := strings.TrimSpace(value)
-
-    timeout, parseErr := time.ParseDuration(trimmed)
-    if nil != parseErr {
-        return 0, exception.NewError(
-            "the --timeout flag is not a go duration",
-            exceptioncontract.Context{"flag": messageBusDispatchFlagTimeout, "value": trimmed},
-            parseErr,
-        )
-    }
-
+func messageBusDispatchTimeout(timeout time.Duration) error {
     if timeout < messageBusDispatchMinimumTimeout {
-        return 0, exception.NewError(
+        return exception.NewError(
             "the --timeout flag is below its minimum of 1s",
-            exceptioncontract.Context{"flag": messageBusDispatchFlagTimeout, "value": trimmed},
+            exceptioncontract.Context{
+                "flag":    messageBusDispatchFlagTimeout,
+                "value":   timeout.String(),
+                "minimum": messageBusDispatchMinimumTimeout.String(),
+            },
             nil,
         )
     }
 
-    return timeout, nil
+    return nil
 }
 
 func newMessageBusDispatchRunId() (string, error) {

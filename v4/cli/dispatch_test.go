@@ -6,6 +6,7 @@ import (
     "errors"
     "strings"
     "testing"
+    "time"
 
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     "github.com/precision-soft/melody/v4/cli/output"
@@ -47,6 +48,39 @@ func TestDispatchCommand_ParsesTheArgumentsAgainstTheCommandsOwnFlags(t *testing
     }
     if 1 != len(observedArguments) || "alpha" != observedArguments[0] {
         t.Fatalf("expected the positional argument, got %v", observedArguments)
+    }
+}
+
+func TestDispatchCommand_ReadsADurationFlag(t *testing.T) {
+    observed := []time.Duration{}
+
+    command := &testCommand{
+        nameValue:        "probe",
+        descriptionValue: "probe",
+        flagsValue:       []clicontract.Flag{&clicontract.DurationFlag{Name: "wait", Value: 2 * time.Second}},
+        runCallback: func(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
+            observed = append(observed, commandContext.Duration("wait"))
+
+            return nil
+        },
+    }
+
+    for _, arguments := range [][]string{{"probe", "--wait", "1m30s"}, {"probe"}} {
+        runErr := DispatchCommand(context.Background(), command, newTestRuntime(t), arguments, nil, DispatchConfig{})
+        if nil != runErr {
+            t.Fatalf("expected %v to dispatch, got %v", arguments, runErr)
+        }
+    }
+    if 2 != len(observed) || 90*time.Second != observed[0] || 2*time.Second != observed[1] {
+        t.Fatalf("expected the parsed duration then the default, got %v", observed)
+    }
+
+    runErr := DispatchCommand(context.Background(), command, newTestRuntime(t), []string{"probe", "--wait", "soon"}, nil, DispatchConfig{})
+    if nil == runErr || false == strings.Contains(runErr.Error(), "for flag -wait") {
+        t.Fatalf("expected the parse to refuse the value naming the flag, got %v", runErr)
+    }
+    if 2 != len(observed) {
+        t.Fatalf("expected the command not to run on a refused value, got %v", observed)
     }
 }
 

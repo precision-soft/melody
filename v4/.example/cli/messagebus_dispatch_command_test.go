@@ -203,19 +203,9 @@ func (instance *manualTimer) Reset(duration time.Duration) bool {
 
 /* dispatchCommandContext parses the arguments against the command's own flags, so a flag left out reads its declared default */
 func dispatchCommandContext(command *MessageBusDispatchCommand, arguments []string, writer io.Writer) *melodyclicontract.CommandContext {
-    commandContext := &melodyclicontract.CommandContext{
-        Name:            "test",
-        Flags:           command.Flags(),
-        Writer:          writer,
-        ErrWriter:       writer,
-        HideHelpCommand: true,
-        Action: func(ctx context.Context, actionCommand *melodyclicontract.CommandContext) error {
-            return nil
-        },
-    }
-
-    if runErr := commandContext.Run(context.Background(), append([]string{"test"}, arguments...)); nil != runErr {
-        panic(runErr)
+    commandContext, parseErr := parseCommandFlags(command, arguments, writer)
+    if nil != parseErr {
+        panic(parseErr)
     }
 
     return commandContext
@@ -525,29 +515,44 @@ func TestMessageBusDispatchCommand_NoConsumeDispatchesAndNeverReceives(t *testin
 }
 
 func TestMessageBusDispatchCommand_RefusesATimeoutUnderOneSecond(t *testing.T) {
-    for _, value := range []string{"999ms", "0s", "-1s", "thirty seconds", ""} {
+    for _, value := range []string{"999ms", "0s", "-1s"} {
         t.Run(value, func(t *testing.T) {
-            fixture := newCommandFixture(t)
-            transport := newRecordingTransport(t)
-            dispatchBus := &sendingBus{transport: transport}
-
-            command := NewMessageBusDispatchCommand(dispatchBus, &acceptingBus{}, transport, newManualClock())
-            runErr := command.Run(fixture.runtime, dispatchCommandContext(command, []string{"--timeout", value}, io.Discard))
-            if nil == runErr || false == strings.Contains(runErr.Error(), "--timeout") {
-                t.Fatalf("expected the timeout %q refused naming the flag, got %v", value, runErr)
+            _, parseErr := parseCommandFlags(NewMessageBusDispatchCommand(nil, nil, nil, newManualClock()), []string{"--timeout", value}, io.Discard)
+            if nil == parseErr || false == strings.Contains(parseErr.Error(), "--timeout") || false == strings.Contains(parseErr.Error(), "minimum of 1s") {
+                t.Fatalf("expected the timeout %q refused by the flag's validator before the run, got %v", value, parseErr)
             }
+        })
+    }
 
-            if 0 != len(dispatchBus.dispatchedOptions()) {
-                t.Fatalf("expected nothing dispatched under a refused timeout, got %d", len(dispatchBus.dispatchedOptions()))
+    for _, value := range []string{"thirty seconds", "", " 1s "} {
+        t.Run(value, func(t *testing.T) {
+            _, parseErr := parseCommandFlags(NewMessageBusDispatchCommand(nil, nil, nil, newManualClock()), []string{"--timeout", value}, io.Discard)
+            if nil == parseErr || false == strings.Contains(parseErr.Error(), "for flag -timeout") {
+                t.Fatalf("expected the timeout %q refused by the flag's parse before the run, got %v", value, parseErr)
             }
         })
     }
 
     fixture := newCommandFixture(t)
     transport := newRecordingTransport(t)
-    command := NewMessageBusDispatchCommand(&sendingBus{transport: transport}, &acceptingBus{}, transport, newManualClock())
-    if runErr := command.Run(fixture.runtime, dispatchCommandContext(command, []string{"--timeout", " 1s "}, io.Discard)); nil != runErr {
-        t.Fatalf("expected a timeout of exactly 1s, padded, accepted, got %v", runErr)
+    clockInstance := newManualClock()
+    command := NewMessageBusDispatchCommand(&sendingBus{transport: transport}, &acceptingBus{}, transport, clockInstance)
+    if runErr := command.Run(fixture.runtime, dispatchCommandContext(command, []string{"--timeout", "1s"}, io.Discard)); nil != runErr {
+        t.Fatalf("expected a timeout of exactly 1s accepted, got %v", runErr)
+    }
+    if durations := clockInstance.timerDurations(); 1 != len(durations) || time.Second != durations[0] {
+        t.Fatalf("expected one timer of 1s, got %v", durations)
+    }
+}
+
+func TestMessageBusDispatchCommand_DeclaresADefaultItsOwnValidatorAccepts(t *testing.T) {
+    if validateErr := messageBusDispatchTimeout(messageBusDispatchDefaultTimeout); nil != validateErr {
+        t.Fatalf("expected the declared default accepted by the validator, got %v", validateErr)
+    }
+
+    timeoutFlag, isDuration := NewMessageBusDispatchCommand(nil, nil, nil, newManualClock()).Flags()[0].(*melodyclicontract.DurationFlag)
+    if false == isDuration || messageBusDispatchFlagTimeout != timeoutFlag.Name || false == timeoutFlag.ValidateDefaults || nil == timeoutFlag.Validator {
+        t.Fatalf("expected the --timeout flag a DurationFlag checking its default with its validator, got %#v", NewMessageBusDispatchCommand(nil, nil, nil, newManualClock()).Flags()[0])
     }
 }
 

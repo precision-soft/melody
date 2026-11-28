@@ -20,6 +20,12 @@ import (
 
 const defaultPollInterval = 1 * time.Second
 
+/* RelayIntervalFlagName and RelayIdleBackoffFlagName are the relay command's duration flags a deployment names in its scripts */
+const (
+    RelayIntervalFlagName    = "interval"
+    RelayIdleBackoffFlagName = "idle-backoff"
+)
+
 /* RelayCommandConfig configures the melody:outbox:relay command's run loop. The poll interval, the idle backoff and the batch limit stay the run's flags. */
 type RelayCommandConfig struct {
     /* ErrorBackoff is the delay between RunOnce retries after consecutive failures: Initial left out is the run's poll interval, capped at Max, doubled after every failure, capped at 1m, unlimited refused, since a persistent repository outage must neither tight-loop the relay nor push the retry horizon out for good. */
@@ -85,13 +91,15 @@ func (instance *RelayCommand) Description() string {
 
 func (instance *RelayCommand) Flags() []clicontract.Flag {
     return []clicontract.Flag{
-        &clicontract.StringFlag{
-            Name:  "interval",
-            Usage: "poll interval between batches (Go duration, default 1s)",
+        &clicontract.DurationFlag{
+            Name:      RelayIntervalFlagName,
+            Usage:     "poll interval between batches (Go duration, default 1s)",
+            Validator: positiveDuration(RelayIntervalFlagName),
         },
-        &clicontract.StringFlag{
-            Name:  "idle-backoff",
-            Usage: "sleep when a batch drained nothing (Go duration, defaults to the poll interval)",
+        &clicontract.DurationFlag{
+            Name:      RelayIdleBackoffFlagName,
+            Usage:     "sleep when a batch drained nothing (Go duration, defaults to the poll interval)",
+            Validator: positiveDuration(RelayIdleBackoffFlagName),
         },
         &clicontract.IntFlag{
             Name:   "limit",
@@ -105,15 +113,7 @@ func (instance *RelayCommand) Run(
     runtimeInstance containercontract.Runtime,
     commandContext *clicontract.CommandContext,
 ) error {
-    interval, intervalErr := parseDurationFlag(commandContext.String("interval"), defaultPollInterval, "interval")
-    if nil != intervalErr {
-        return intervalErr
-    }
-
-    idleBackoff, idleBackoffErr := parseDurationFlag(commandContext.String("idle-backoff"), interval, "idle-backoff")
-    if nil != idleBackoffErr {
-        return idleBackoffErr
-    }
+    interval, idleBackoff := relayDurations(commandContext)
 
     limit := commandContext.Int("limit")
 
@@ -205,35 +205,36 @@ func (instance *RelayCommand) logRunError(logger loggingcontract.Logger, runErr 
     )
 }
 
-func parseDurationFlag(value string, fallback time.Duration, flagName string) (time.Duration, error) {
-    if "" == value {
-        return fallback, nil
+/* relayDurations answers the poll interval, defaultPollInterval when left out, and the idle backoff, the interval when left out; the flags' validators refused a value that is not positive at the parse. */
+func relayDurations(commandContext *clicontract.CommandContext) (time.Duration, time.Duration) {
+    interval := defaultPollInterval
+    if true == commandContext.IsSet(RelayIntervalFlagName) {
+        interval = commandContext.Duration(RelayIntervalFlagName)
     }
 
-    parsed, parseErr := time.ParseDuration(value)
-    if nil != parseErr {
-        return 0, exception.NewError(
-            "invalid duration flag",
-            exceptioncontract.Context{
-                "flag":  flagName,
-                "value": value,
-            },
-            parseErr,
-        )
+    idleBackoff := interval
+    if true == commandContext.IsSet(RelayIdleBackoffFlagName) {
+        idleBackoff = commandContext.Duration(RelayIdleBackoffFlagName)
     }
 
-    if 0 >= parsed {
-        return 0, exception.NewError(
-            "duration flag must be positive",
-            exceptioncontract.Context{
-                "flag":  flagName,
-                "value": value,
-            },
-            nil,
-        )
-    }
+    return interval, idleBackoff
+}
 
-    return parsed, nil
+func positiveDuration(flagName string) func(time.Duration) error {
+    return func(value time.Duration) error {
+        if 0 >= value {
+            return exception.NewError(
+                "duration flag must be positive",
+                exceptioncontract.Context{
+                    "flag":  flagName,
+                    "value": value.String(),
+                },
+                nil,
+            )
+        }
+
+        return nil
+    }
 }
 
 func sleepInterruptible(runContext interface{ Done() <-chan struct{} }, delay time.Duration) bool {

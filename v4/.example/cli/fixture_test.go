@@ -256,6 +256,24 @@ func (instance parsedContextValues) parse() *melodyclicontract.CommandContext {
     return commandContext
 }
 
+/* parseCommandFlags parses the arguments against the command's own flags and answers the engine's parse error, the refusal a flag's own parse or validator writes before the command runs */
+func parseCommandFlags(command melodyclicontract.Command, arguments []string, writer io.Writer) (*melodyclicontract.CommandContext, error) {
+    commandContext := &melodyclicontract.CommandContext{
+        Name:            "test",
+        Flags:           command.Flags(),
+        Writer:          writer,
+        ErrWriter:       writer,
+        HideHelpCommand: true,
+        Action: func(ctx context.Context, actionCommand *melodyclicontract.CommandContext) error {
+            return nil
+        },
+    }
+
+    runErr := commandContext.Run(context.Background(), append([]string{"test"}, arguments...))
+
+    return commandContext, runErr
+}
+
 func sortedKeys[V any](values map[string]V) []string {
     keys := make([]string, 0, len(values))
     for key := range values {

@@ -102,7 +102,13 @@ func TestInternalSignCommandHandsTheSignerTheTtlAsked(t *testing.T) {
             return newInternalSignTestSigner(runtimeInstance, ttl)
         }
 
-        runErr := newInternalSignTestCommand(newSigner).Run(signTestRuntime(), newStringFlagContext(map[string]string{"ttl": rawTtl}, &bytes.Buffer{}))
+        command := newInternalSignTestCommand(newSigner)
+        commandContext, parseErr := parseCommandFlags(command, []string{"--ttl", rawTtl}, &bytes.Buffer{})
+        if nil != parseErr {
+            t.Fatalf("expected --ttl %q to parse, got %v", rawTtl, parseErr)
+        }
+
+        runErr := command.Run(signTestRuntime(), commandContext)
         if nil != runErr || expected != handed {
             t.Fatalf("expected --ttl %q to hand the signer %s, got %s and %v", rawTtl, expected, handed, runErr)
         }
@@ -119,7 +125,12 @@ func TestInternalSignCommandSignsWithTheBootSignerWhenNoTtlIsAsked(t *testing.T)
 
     command := newInternalSignTestCommand(newSigner)
     for run := 0; run < 2; run++ {
-        if runErr := command.Run(signTestRuntime(), newStringFlagContext(map[string]string{"ttl": ""}, &bytes.Buffer{})); nil != runErr {
+        commandContext, parseErr := parseCommandFlags(command, nil, &bytes.Buffer{})
+        if nil != parseErr {
+            t.Fatalf("expected no flag to parse, got %v", parseErr)
+        }
+
+        if runErr := command.Run(signTestRuntime(), commandContext); nil != runErr {
             t.Fatalf("expected the header minted, got %v", runErr)
         }
     }
@@ -130,11 +141,22 @@ func TestInternalSignCommandSignsWithTheBootSignerWhenNoTtlIsAsked(t *testing.T)
 }
 
 func TestInternalSignCommandRefusesATtlThatIsNotADurationOfAtLeastASecond(t *testing.T) {
-    for _, rawTtl := range []string{"soon", "-1s", "0s", "500ms"} {
-        runErr := newInternalSignTestCommand(newInternalSignTestSigner).Run(signTestRuntime(), newStringFlagContext(map[string]string{"ttl": rawTtl}, &bytes.Buffer{}))
-        if nil == runErr || false == strings.Contains(runErr.Error(), "is not a go duration of at least 1s") {
-            t.Fatalf("expected --ttl %q refused, got %v", rawTtl, runErr)
+    for rawTtl, expected := range map[string]string{
+        "soon":  "for flag -ttl",
+        "":      "for flag -ttl",
+        " 1s ":  "for flag -ttl",
+        "-1s":   "is not a go duration of at least 1s",
+        "0s":    "is not a go duration of at least 1s",
+        "999ms": "is not a go duration of at least 1s",
+    } {
+        _, parseErr := parseCommandFlags(newInternalSignTestCommand(newInternalSignTestSigner), []string{"--ttl", rawTtl}, &bytes.Buffer{})
+        if nil == parseErr || false == strings.Contains(parseErr.Error(), expected) {
+            t.Fatalf("expected --ttl %q refused at the parse with %q, got %v", rawTtl, expected, parseErr)
         }
+    }
+
+    if _, parseErr := parseCommandFlags(newInternalSignTestCommand(newInternalSignTestSigner), []string{"--ttl", "1s"}, &bytes.Buffer{}); nil != parseErr {
+        t.Fatalf("expected --ttl 1s accepted, got %v", parseErr)
     }
 }
 
@@ -327,11 +349,16 @@ func TestInternalSignCommandAsksTheProviderUnderTheBootRuntimeAtBootAndTheRunsRu
 
     command := NewInternalSignCommand(melodycontainer.Lazy[*melodysecurity.HmacEnvelopeSigner](containerInstance, internalSignTestSignerService), newSigner)
 
-    for _, rawTtl := range []string{"", "1m"} {
+    for rawTtl, arguments := range map[string][]string{"": nil, "1m": {"--ttl", "1m"}} {
         secrets.seen = nil
         runRuntime := signTestRuntime()
 
-        if runErr := command.Run(runRuntime, newStringFlagContext(map[string]string{"ttl": rawTtl}, &bytes.Buffer{})); nil != runErr {
+        commandContext, parseErr := parseCommandFlags(command, arguments, &bytes.Buffer{})
+        if nil != parseErr {
+            t.Fatalf("--ttl %q: expected the flags to parse, got %v", rawTtl, parseErr)
+        }
+
+        if runErr := command.Run(runRuntime, commandContext); nil != runErr {
             t.Fatalf("--ttl %q: expected the header minted, got %v", rawTtl, runErr)
         }
 

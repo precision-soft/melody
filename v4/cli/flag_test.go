@@ -6,6 +6,7 @@ import (
     "strings"
     "sync"
     "testing"
+    "time"
 
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
@@ -118,10 +119,11 @@ func TestPrepareCommandFlags_ChecksTheDefaultOfEveryFlagType(t *testing.T) {
     refusal := errors.New("refused")
 
     for name, flag := range map[string]clicontract.Flag{
-        "int":    &clicontract.IntFlag{Name: "limit", Value: 3, ValidateDefaults: true, Validator: func(int) error { return refusal }},
-        "string": &clicontract.StringFlag{Name: "format", Value: "xml", ValidateDefaults: true, Validator: func(string) error { return refusal }},
-        "bool":   &clicontract.BoolFlag{Name: "quiet", Value: true, ValidateDefaults: true, Validator: func(bool) error { return refusal }},
-        "slice":  &clicontract.StringSliceFlag{Name: "column", Value: []string{"a"}, ValidateDefaults: true, Validator: func([]string) error { return refusal }},
+        "int":      &clicontract.IntFlag{Name: "limit", Value: 3, ValidateDefaults: true, Validator: func(int) error { return refusal }},
+        "string":   &clicontract.StringFlag{Name: "format", Value: "xml", ValidateDefaults: true, Validator: func(string) error { return refusal }},
+        "bool":     &clicontract.BoolFlag{Name: "quiet", Value: true, ValidateDefaults: true, Validator: func(bool) error { return refusal }},
+        "slice":    &clicontract.StringSliceFlag{Name: "column", Value: []string{"a"}, ValidateDefaults: true, Validator: func([]string) error { return refusal }},
+        "duration": &clicontract.DurationFlag{Name: "timeout", Value: time.Second, ValidateDefaults: true, Validator: func(time.Duration) error { return refusal }},
     } {
         t.Run(name, func(t *testing.T) {
             defer func() {
@@ -152,6 +154,29 @@ func TestPrepareCommandFlags_ChecksTheDefaultOfEveryFlagType(t *testing.T) {
     })
     if 2 != len(prepared) {
         t.Fatalf("expected the two accepted flags, got %d", len(prepared))
+    }
+}
+
+func TestPrepareCommandFlags_HandsTheDurationValidatorTheDeclaredDefault(t *testing.T) {
+    seen := []time.Duration{}
+
+    prepared := prepareCommandFlags([]clicontract.Flag{
+        &clicontract.DurationFlag{
+            Name:             "timeout",
+            Value:            90 * time.Second,
+            ValidateDefaults: true,
+            Validator: func(value time.Duration) error {
+                seen = append(seen, value)
+
+                return nil
+            },
+        },
+    })
+    if 1 != len(prepared) {
+        t.Fatalf("expected the accepted flag, got %d", len(prepared))
+    }
+    if 1 != len(seen) || 90*time.Second != seen[0] {
+        t.Fatalf("expected the validator handed the declared default once, got %v", seen)
     }
 }
 
@@ -230,6 +255,34 @@ func TestFreshFlagInstance_CopiesTheDeclarationAndNotTheParseState(t *testing.T)
     }
     if "n" != fresh.Name || 1 != len(fresh.Aliases) || "count" != fresh.Aliases[0] || "a number" != fresh.Usage || 7 != fresh.Value || &destination != fresh.Destination || false == fresh.OnlyOnce {
         t.Fatalf("expected the declaration copied, got %+v", fresh)
+    }
+}
+
+func TestFreshFlagInstance_CopiesADurationFlagsDeclaration(t *testing.T) {
+    validated := []time.Duration{}
+    original := &clicontract.DurationFlag{
+        Name:             "timeout",
+        Value:            30 * time.Second,
+        ValidateDefaults: true,
+        Validator: func(value time.Duration) error {
+            validated = append(validated, value)
+
+            return nil
+        },
+    }
+
+    fresh, isDuration := freshFlagInstance(original).(*clicontract.DurationFlag)
+    if false == isDuration {
+        t.Fatalf("expected a DurationFlag, got %T", freshFlagInstance(original))
+    }
+    if fresh == original {
+        t.Fatalf("expected a new instance")
+    }
+    if "timeout" != fresh.Name || 30*time.Second != fresh.Value || false == fresh.ValidateDefaults || nil == fresh.Validator {
+        t.Fatalf("expected the declaration copied, got %+v", fresh)
+    }
+    if nil != fresh.Validator(time.Minute) || 1 != len(validated) || time.Minute != validated[0] {
+        t.Fatalf("expected the declared validator copied, got %v", validated)
     }
 }
 

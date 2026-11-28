@@ -8,6 +8,11 @@ import (
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
 )
 
+const (
+    exclusiveTickFlagHold    = "hold"
+    exclusiveTickDefaultHold = 2 * time.Second
+)
+
 /* ExclusiveTickCommand simulates a job whose runs must never overlap across instances: config/cli.go wraps it in lock.NewExclusiveCommand over lock.NewLazyLocker, which resolves the registered locker (redis when configured) at the first Acquire rather than at boot, so launching it from two shells at once runs the body once while the other exits zero with a "skipped" log line. */
 type ExclusiveTickCommand struct{}
 
@@ -25,9 +30,10 @@ func (instance *ExclusiveTickCommand) Description() string {
 
 func (instance *ExclusiveTickCommand) Flags() []melodyclicontract.Flag {
     return []melodyclicontract.Flag{
-        &melodyclicontract.StringFlag{
-            Name:  "hold",
+        &melodyclicontract.DurationFlag{
+            Name:  exclusiveTickFlagHold,
             Usage: "how long the tick holds the lock (Go duration, default 2s)",
+            Value: exclusiveTickDefaultHold,
         },
     }
 }
@@ -36,15 +42,7 @@ func (instance *ExclusiveTickCommand) Run(
     runtimeInstance melodycontainercontract.Runtime,
     commandContext *melodyclicontract.CommandContext,
 ) error {
-    hold := 2 * time.Second
-    if holdFlag := commandContext.String("hold"); "" != holdFlag {
-        parsed, parseErr := time.ParseDuration(holdFlag)
-        if nil != parseErr {
-            return parseErr
-        }
-
-        hold = parsed
-    }
+    hold := commandContext.Duration(exclusiveTickFlagHold)
 
     writer := commandContext.Writer
 
