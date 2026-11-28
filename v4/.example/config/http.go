@@ -256,8 +256,8 @@ func (instance *lateBoundRateLimiter) bind(limiter melodyhttpcontract.RateLimite
     instance.limiter = limiter
 }
 
-func (instance *lateBoundRateLimiter) Allow(runtimeInstance melodycontainercontract.Runtime, key string) (melodyhttpcontract.RateLimitDecision, error) {
-    return instance.limiter.Allow(runtimeInstance, key)
+func (instance *lateBoundRateLimiter) Allow(runtimeInstance melodycontainercontract.Runtime, key string, options melodyhttpcontract.AllowOptions) (melodyhttpcontract.RateLimitDecision, error) {
+    return instance.limiter.Allow(runtimeInstance, key, options)
 }
 
 func (instance *lateBoundRateLimiter) Reset(runtimeInstance melodycontainercontract.Runtime, key string) error {

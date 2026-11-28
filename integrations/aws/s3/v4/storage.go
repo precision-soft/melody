@@ -453,6 +453,7 @@ type rangeBody struct {
 func (instance *Storage) Stat(
     runtimeInstance containercontract.Runtime,
     key string,
+    _ storagecontract.StatOptions,
 ) (storagecontract.ObjectInfo, error) {
     if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance, "awss3.Storage.Stat"); nil != refuseErr {
         return storagecontract.ObjectInfo{}, refuseErr
@@ -505,6 +506,7 @@ func objectInfoOf(key string, minioInfo minio.ObjectInfo) storagecontract.Object
 func (instance *Storage) Delete(
     runtimeInstance containercontract.Runtime,
     key string,
+    _ storagecontract.DeleteOptions,
 ) error {
     if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance, "awss3.Storage.Delete"); nil != refuseErr {
         return refuseErr

@@ -34,8 +34,8 @@ func (instance *BackendService) Get(runtimeInstance containercontract.Runtime, k
     return instance.backend.Get(runtimeInstance, key)
 }
 
-func (instance *BackendService) Set(runtimeInstance containercontract.Runtime, key string, payload []byte, ttl bound.Duration) error {
-    return instance.backend.Set(runtimeInstance, key, payload, ttl)
+func (instance *BackendService) Set(runtimeInstance containercontract.Runtime, key string, payload []byte, ttl bound.Duration, options cachecontract.SetOptions) error {
+    return instance.backend.Set(runtimeInstance, key, payload, ttl, options)
 }
 
 func (instance *BackendService) Delete(runtimeInstance containercontract.Runtime, key string) error {
@@ -58,8 +58,8 @@ func (instance *BackendService) Many(runtimeInstance containercontract.Runtime, 
     return instance.backend.Many(runtimeInstance, keys)
 }
 
-func (instance *BackendService) SetMultiple(runtimeInstance containercontract.Runtime, items map[string][]byte, ttl bound.Duration) error {
-    return instance.backend.SetMultiple(runtimeInstance, items, ttl)
+func (instance *BackendService) SetMultiple(runtimeInstance containercontract.Runtime, items map[string][]byte, ttl bound.Duration, options cachecontract.SetOptions) error {
+    return instance.backend.SetMultiple(runtimeInstance, items, ttl, options)
 }
 
 func (instance *BackendService) DeleteMultiple(runtimeInstance containercontract.Runtime, keys []string) error {

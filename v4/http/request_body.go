@@ -94,7 +94,7 @@ func (instance *Request) BindJsonAndValidate(target any) error {
 func validateBoundBody(runtimeInstance containercontract.Runtime, target any) error {
     validatorInstance := validation.ValidatorMustFromRuntime(runtimeInstance)
 
-    return boundBodyValidationAnswer(validatorInstance.Validate(runtimeInstance, target))
+    return boundBodyValidationAnswer(validatorInstance.Validate(runtimeInstance, target, validation.ValidateOptions{}))
 }
 
 /* boundBodyValidationAnswer answers the client's 400 for validation errors alone; any other error of the validator, the refusal of a runtime carrying no context, is a server failure and travels as a plain error, so it answers 500 and is journaled as one. */

@@ -14,12 +14,12 @@ import (
 
 var _ interface {
     Get(key string, target any) (bool, error)
-    Set(key string, value any, ttl bound.Duration) error
+    Set(key string, value any, ttl bound.Duration, options cachecontract.SetOptions) error
     Delete(key string) error
     Has(key string) (bool, error)
     Clear() error
     Many(keys []string, target any) error
-    SetMultiple(items map[string]any, ttl bound.Duration) error
+    SetMultiple(items map[string]any, ttl bound.Duration, options cachecontract.SetOptions) error
     DeleteMultiple(keys []string) error
     Increment(key string, delta int64, options cachecontract.CounterOptions) (int64, error)
     Decrement(key string, delta int64, options cachecontract.CounterOptions) (int64, error)
@@ -105,7 +105,7 @@ func (instance *boundRecordingCache) Get(runtimeInstance containercontract.Runti
     return true, boundRecordedErr
 }
 
-func (instance *boundRecordingCache) Set(runtimeInstance containercontract.Runtime, key string, value any, ttl bound.Duration) error {
+func (instance *boundRecordingCache) Set(runtimeInstance containercontract.Runtime, key string, value any, ttl bound.Duration, _ cachecontract.SetOptions) error {
     instance.record("Set", runtimeInstance, key, value, ttl)
     return boundRecordedErr
 }
@@ -130,7 +130,7 @@ func (instance *boundRecordingCache) Many(runtimeInstance containercontract.Runt
     return boundRecordedErr
 }
 
-func (instance *boundRecordingCache) SetMultiple(runtimeInstance containercontract.Runtime, items map[string]any, ttl bound.Duration) error {
+func (instance *boundRecordingCache) SetMultiple(runtimeInstance containercontract.Runtime, items map[string]any, ttl bound.Duration, _ cachecontract.SetOptions) error {
     instance.record("SetMultiple", runtimeInstance, items, ttl)
     return boundRecordedErr
 }
@@ -178,12 +178,12 @@ func TestBound_EveryMethodReachesItsDoorWithTheBoundRuntimeAndItsArguments(t *te
     decrementOptions := cachecontract.CounterOptions{Ttl: bound.Of(11 * time.Minute), RefreshTtl: true}
 
     found, getErr := boundCache.Get("get.key", &target)
-    setErr := boundCache.Set("set.key", "set.value", setTtl)
+    setErr := boundCache.Set("set.key", "set.value", setTtl, cachecontract.SetOptions{})
     deleteErr := boundCache.Delete("delete.key")
     held, hasErr := boundCache.Has("has.key")
     clearErr := boundCache.Clear()
     manyErr := boundCache.Many(keys, &targets)
-    setMultipleErr := boundCache.SetMultiple(items, setMultipleTtl)
+    setMultipleErr := boundCache.SetMultiple(items, setMultipleTtl, cachecontract.SetOptions{})
     deleteMultipleErr := boundCache.DeleteMultiple(keys)
     incremented, incrementErr := boundCache.Increment("increment.key", 13, incrementOptions)
     decremented, decrementErr := boundCache.Decrement("decrement.key", 17, decrementOptions)
@@ -244,12 +244,12 @@ func TestBound_AViewOverNoCacheRefusesEveryDoor(t *testing.T) {
         var target any
         var targets map[string]any
         _, getErr := boundCache.Get("k", &target)
-        setErr := boundCache.Set("k", "v", bound.Of(time.Minute))
+        setErr := boundCache.Set("k", "v", bound.Of(time.Minute), cachecontract.SetOptions{})
         deleteErr := boundCache.Delete("k")
         _, hasErr := boundCache.Has("k")
         clearErr := boundCache.Clear()
         manyErr := boundCache.Many([]string{"k"}, &targets)
-        setMultipleErr := boundCache.SetMultiple(map[string]any{"k": "v"}, bound.Of(time.Minute))
+        setMultipleErr := boundCache.SetMultiple(map[string]any{"k": "v"}, bound.Of(time.Minute), cachecontract.SetOptions{})
         deleteMultipleErr := boundCache.DeleteMultiple([]string{"k"})
         _, incrementErr := boundCache.Increment("k", 1, cachecontract.CounterOptions{})
         _, decrementErr := boundCache.Decrement("k", 1, cachecontract.CounterOptions{})

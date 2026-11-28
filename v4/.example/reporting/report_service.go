@@ -151,7 +151,7 @@ func (instance *CatalogReportService) Refresh(runtimeInstance melodycontainercon
         " " + catalogReadingJournalCountField + strconv.Itoa(journalCount) +
         " " + catalogReadingRecordedAtField + recordedAt.UTC().Format(time.RFC3339)
 
-    setErr := melodycache.For(runtimeInstance, instance.cache).Set(catalogReadingCacheKey, payload, melodybound.Of(catalogReadingLifetime(instance.refreshInterval)))
+    setErr := melodycache.For(runtimeInstance, instance.cache).Set(catalogReadingCacheKey, payload, melodybound.Of(catalogReadingLifetime(instance.refreshInterval)), melodycachecontract.SetOptions{})
     if nil != setErr {
         return nil, setErr
     }

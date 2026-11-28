@@ -169,7 +169,7 @@ func LinkHandler(storage *melodycontainer.LazyService[storagecontract.Storage]) 
 
         boundStorage := melodystorage.For(runtimeInstance, storageInstance)
 
-        if _, statErr := boundStorage.Stat(key); nil != statErr {
+        if _, statErr := boundStorage.Stat(key, storagecontract.StatOptions{}); nil != statErr {
             if true == melodyexception.ChainIs(statErr, storagecontract.ErrObjectNotFound) {
                 return presenter.ApiError(runtimeInstance, request, nethttp.StatusNotFound, "object not found"), nil
             }

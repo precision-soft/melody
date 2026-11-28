@@ -23,9 +23,12 @@ type RateLimitDecision struct {
     Limit int
 }
 
+/* AllowOptions is what one Allow declares beside its key; it has no field yet, so that one can be added after the tag where a parameter could not. */
+type AllowOptions struct{}
+
 /* RateLimiter charges one call to a key and answers the decision. Both doors take the caller's runtime first and refuse a nil one. A store that could not answer returns an error carrying exception.MarkInfrastructureFailure beside the decision its failure policy gives; a denial beside such an error is answered 503 with Retry-After by the framework, never 429, and any other error beside a denial keeps 429. A limiter that makes no round trip need not read the runtime's context. Reset gives a key its whole budget back and reports a failure to do so. */
 type RateLimiter interface {
-    Allow(runtimeInstance containercontract.Runtime, key string) (RateLimitDecision, error)
+    Allow(runtimeInstance containercontract.Runtime, key string, options AllowOptions) (RateLimitDecision, error)
 
     Reset(runtimeInstance containercontract.Runtime, key string) error
 }

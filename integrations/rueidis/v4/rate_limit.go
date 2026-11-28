@@ -165,7 +165,7 @@ func (instance *RateLimiter) Name() string {
 }
 
 /* Allow charges one call to the key under the runtime's context, capped by CallTimeout. On a store failure the decision is the failure mode's, answered beside the error. */
-func (instance *RateLimiter) Allow(runtimeInstance containercontract.Runtime, key string) (httpcontract.RateLimitDecision, error) {
+func (instance *RateLimiter) Allow(runtimeInstance containercontract.Runtime, key string, _ httpcontract.AllowOptions) (httpcontract.RateLimitDecision, error) {
     if refusalErr := containercontract.RefuseNilRuntime(runtimeInstance, "rueidis.RateLimiter.Allow"); nil != refusalErr {
         return httpcontract.RateLimitDecision{Limit: instance.limit}, refusalErr
     }

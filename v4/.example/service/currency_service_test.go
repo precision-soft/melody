@@ -15,6 +15,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/persistence"
     "github.com/precision-soft/melody/v4/.example/repository"
     melodybound "github.com/precision-soft/melody/v4/bound"
+    melodycachecontract "github.com/precision-soft/melody/v4/cache/contract"
     melodyclock "github.com/precision-soft/melody/v4/clock"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyeventcontract "github.com/precision-soft/melody/v4/event/contract"
@@ -136,10 +137,10 @@ func TestCurrencyServiceUpdateRate_AnswersUnchangedWithoutWritingAndDropsTheCach
        never ran: both entries are planted holding the quote from BEFORE that write, which is the state the
        heal exists for, and must be dropped by the second call, not by an event */
     stale := entity.NewCurrency("cur-usd", "USD", "US Dollar", 1.08, currencyQuoteInstant)
-    if setErr := currencyService.cache.Set(exampleTestRuntime(), CacheKeyCurrencyById("cur-usd"), stale, melodybound.Of(time.Hour)); nil != setErr {
+    if setErr := currencyService.cache.Set(exampleTestRuntime(), CacheKeyCurrencyById("cur-usd"), stale, melodybound.Of(time.Hour), melodycachecontract.SetOptions{}); nil != setErr {
         t.Fatalf("planting the stale by-id entry failed: %v", setErr)
     }
-    if setErr := currencyService.cache.Set(exampleTestRuntime(), CacheKeyCurrencyList, []*entity.Currency{stale}, melodybound.Of(time.Hour)); nil != setErr {
+    if setErr := currencyService.cache.Set(exampleTestRuntime(), CacheKeyCurrencyList, []*entity.Currency{stale}, melodybound.Of(time.Hour), melodycachecontract.SetOptions{}); nil != setErr {
         t.Fatalf("planting the stale list failed: %v", setErr)
     }
 
@@ -217,10 +218,10 @@ func TestCurrencyServiceUpdateRate_DropsACachedEntryAtTheQuoteThatIsNotTheRow(t 
     }
 
     renamed := entity.NewCurrency("cur-usd", "USD", "Old Dollar Name", 1.0842, quotedAt)
-    if setErr := currencyService.cache.Set(exampleTestRuntime(), CacheKeyCurrencyById("cur-usd"), renamed, melodybound.Of(time.Hour)); nil != setErr {
+    if setErr := currencyService.cache.Set(exampleTestRuntime(), CacheKeyCurrencyById("cur-usd"), renamed, melodybound.Of(time.Hour), melodycachecontract.SetOptions{}); nil != setErr {
         t.Fatalf("planting the by-id entry failed: %v", setErr)
     }
-    if setErr := currencyService.cache.Set(exampleTestRuntime(), CacheKeyCurrencyList, []*entity.Currency{renamed}, melodybound.Of(time.Hour)); nil != setErr {
+    if setErr := currencyService.cache.Set(exampleTestRuntime(), CacheKeyCurrencyList, []*entity.Currency{renamed}, melodybound.Of(time.Hour), melodycachecontract.SetOptions{}); nil != setErr {
         t.Fatalf("planting the list failed: %v", setErr)
     }
 

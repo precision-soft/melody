@@ -50,7 +50,7 @@ type CreateUserInput struct {
 func validateInput(runtimeInstance containercontract.Runtime, input CreateUserInput) error {
     validator := validation.ValidatorMustFromRuntime(runtimeInstance)
 
-    validationErr := validator.Validate(runtimeInstance, input)
+    validationErr := validator.Validate(runtimeInstance, input, validation.ValidateOptions{})
     if nil == validationErr {
         return nil
     }
@@ -114,7 +114,7 @@ func validateInput(runtimeInstance containercontract.Runtime, input CreateUserIn
 
 - **validation.Validator**\
   Tag-driven validator that can register constraints.
-    - [`Validate(runtimeInstance containercontract.Runtime, data any) error`](../../validation/validator.go) — the door: it answers `ValidationErrors` when a field fails and nil when none does; a nil runtime, a typed nil and one carrying no context are refused with "the runtime is nil or carries no context"
+    - [`Validate(runtimeInstance containercontract.Runtime, data any, options ValidateOptions) error`](../../validation/validator.go) — the door, [`ValidateOptions`](../../validation/validator.go) empty on purpose, so a per-call value can be added after the tag as a field: it answers `ValidationErrors` when a field fails and nil when none does; a nil runtime, a typed nil and one carrying no context are refused with "the runtime is nil or carries no context"
     - [`VerifyType(targetType reflect.Type) error`](../../validation/validator.go) — reads the tags of the fields `Validate` walks for a value of the type (the same field selection), through pointers, sequences, map values and embeds, each type once, an interface member not followed; a tag that does not parse, an unknown rule, a parameter set the constraint refuses and a constraint answering a `DeclarationError` are each a fault, coded as `Validate` codes it. It answers nil for a sound type and for nil, else one `*exception.Error` wrapping [`ErrTypeDeclarationRefused`](../../validation/validator.go), its context `type` and `faults` (`field`, `tag`, `rule`, `code`, `cause`, sorted by field, a sequence or map member spelled `[]`, at most 50 with `faultCount` past them). Pure: no runtime, no I/O; a constraint registered after the call is not seen
 
 - **validation.ValidationError**\

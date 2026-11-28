@@ -137,13 +137,13 @@ type sequenceCache struct {
 
 const readingCacheKeyUnderTest = "catalog.reading"
 
-func (instance *sequenceCache) Set(runtimeInstance melodycontainercontract.Runtime, key string, value any, ttl bound.Duration) error {
+func (instance *sequenceCache) Set(runtimeInstance melodycontainercontract.Runtime, key string, value any, ttl bound.Duration, _ melodycachecontract.SetOptions) error {
     if readingCacheKeyUnderTest == key {
         instance.sequence.record("refresh")
         instance.sequence.recordRuntime(&instance.sequence.refreshRuntime, runtimeInstance)
     }
 
-    return instance.Cache.Set(runtimeInstance, key, value, ttl)
+    return instance.Cache.Set(runtimeInstance, key, value, ttl, melodycachecontract.SetOptions{})
 }
 
 /* sequenceArchive is the archive as the command reaches it: one row per instant, refused as the real ones refuse it, every append on the ledger */

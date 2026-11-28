@@ -119,13 +119,13 @@ type runtimeResolvedRateLimiter struct {
     serviceName string
 }
 
-func (instance *runtimeResolvedRateLimiter) Allow(runtimeInstance melodycontainercontract.Runtime, key string) (melodyhttpcontract.RateLimitDecision, error) {
+func (instance *runtimeResolvedRateLimiter) Allow(runtimeInstance melodycontainercontract.Runtime, key string, options melodyhttpcontract.AllowOptions) (melodyhttpcontract.RateLimitDecision, error) {
     limiter, resolveErr := melodyruntime.FromRuntime[melodyhttpcontract.RateLimiter](runtimeInstance, instance.serviceName)
     if nil != resolveErr {
         return melodyhttpcontract.RateLimitDecision{}, resolveErr
     }
 
-    return limiter.Allow(runtimeInstance, key)
+    return limiter.Allow(runtimeInstance, key, options)
 }
 
 func (instance *runtimeResolvedRateLimiter) Reset(runtimeInstance melodycontainercontract.Runtime, key string) error {

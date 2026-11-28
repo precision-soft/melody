@@ -95,7 +95,7 @@ func TestRedis_TwoNamespacesOverOneClientWriteDisjointKeys(t *testing.T) {
             _ = limiter.Reset(runtimeInstance, key)
         }()
 
-        if decision, allowErr := limiter.Allow(runtimeInstance, key); nil != allowErr || catalogWriteAllowance-1 != decision.Remaining {
+        if decision, allowErr := limiter.Allow(runtimeInstance, key, melodyhttpcontract.AllowOptions{}); nil != allowErr || catalogWriteAllowance-1 != decision.Remaining {
             t.Fatalf("%s: expected a fresh counter of its own, got %+v %v", namespace, decision, allowErr)
         }
 

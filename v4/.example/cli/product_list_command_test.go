@@ -198,7 +198,7 @@ func primeListing(t *testing.T, cacheInstance melodycachecontract.Cache, cacheKe
         t.Fatalf("read %s: %v", cacheKey, listingErr)
     }
 
-    if setErr := cacheInstance.Set(exampleTestRuntime(), cacheKey, listing, melodybound.UnlimitedDuration()); nil != setErr {
+    if setErr := cacheInstance.Set(exampleTestRuntime(), cacheKey, listing, melodybound.UnlimitedDuration(), melodycachecontract.SetOptions{}); nil != setErr {
         t.Fatalf("prime %s: %v", cacheKey, setErr)
     }
 }
@@ -310,7 +310,7 @@ func TestProductListCommand_RendersUnreadableViewsAsDashesAndJournalsOnce(t *tes
     }
 
     for _, product := range products {
-        if setErr := cacheInstance.Set(runtimeInstance, service.CacheKeyProductViews(product.Id), "not a count", melodybound.Of(time.Hour)); nil != setErr {
+        if setErr := cacheInstance.Set(runtimeInstance, service.CacheKeyProductViews(product.Id), "not a count", melodybound.Of(time.Hour), melodycachecontract.SetOptions{}); nil != setErr {
             t.Fatalf("prime: %v", setErr)
         }
     }

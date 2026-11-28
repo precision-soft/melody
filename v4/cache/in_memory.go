@@ -300,6 +300,7 @@ func (instance *InMemoryBackend) Set(
     key string,
     payload []byte,
     ttl bound.Duration,
+    _ cachecontract.SetOptions,
 ) error {
     if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, "cache.InMemoryBackend.Set"); nil != nilErr {
         return nilErr
@@ -465,7 +466,7 @@ func (instance *InMemoryBackend) Many(runtimeInstance containercontract.Runtime,
     return result, nil
 }
 
-func (instance *InMemoryBackend) SetMultiple(runtimeInstance containercontract.Runtime, items map[string][]byte, ttl bound.Duration) error {
+func (instance *InMemoryBackend) SetMultiple(runtimeInstance containercontract.Runtime, items map[string][]byte, ttl bound.Duration, _ cachecontract.SetOptions) error {
     if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, "cache.InMemoryBackend.SetMultiple"); nil != nilErr {
         return nilErr
     }

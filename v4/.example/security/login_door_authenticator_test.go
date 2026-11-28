@@ -1171,7 +1171,7 @@ func TestLoginHandler_SignInsNotYetStoredStillMeetTheCap(t *testing.T) {
 
 type unreadableBudgetLimiter struct{}
 
-func (instance *unreadableBudgetLimiter) Allow(runtimeInstance melodycontainercontract.Runtime, key string) (melodyhttpcontract.RateLimitDecision, error) {
+func (instance *unreadableBudgetLimiter) Allow(runtimeInstance melodycontainercontract.Runtime, key string, _ melodyhttpcontract.AllowOptions) (melodyhttpcontract.RateLimitDecision, error) {
     storeErr := melodyexception.NewError("redis rate limiter store failure", map[string]any{"key": key}, melodyexception.MarkInfrastructureFailure(errors.New("connection refused")))
 
     return melodyhttpcontract.RateLimitDecision{}, storeErr

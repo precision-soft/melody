@@ -182,7 +182,7 @@ func newRememberOperations[T any](
                 return newRememberFlightTypeError[T](key)
             }
 
-            return cacheInstance.Set(runtimeInstance, key, boxed.value, ttl)
+            return cacheInstance.Set(runtimeInstance, key, boxed.value, ttl, cachecontract.SetOptions{})
         },
         compute: func(runtimeInstance containercontract.Runtime, item *RememberItem) (any, error) {
             value, computeErr := callback(runtimeInstance, item)

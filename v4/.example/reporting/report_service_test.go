@@ -218,7 +218,7 @@ func (instance *readingCache) Get(runtimeInstance melodycontainercontract.Runtim
     return true, nil
 }
 
-func (instance *readingCache) Set(runtimeInstance melodycontainercontract.Runtime, key string, value any, ttl melodybound.Duration) error {
+func (instance *readingCache) Set(runtimeInstance melodycontainercontract.Runtime, key string, value any, ttl melodybound.Duration, _ melodycachecontract.SetOptions) error {
     instance.values[key] = value
 
     if nil == instance.ttls {
@@ -256,7 +256,7 @@ func (instance *readingCache) RoundTrip(value any, target any) error {
     return assignCachedTestValue("", target, value)
 }
 
-func (instance *readingCache) SetMultiple(runtimeInstance melodycontainercontract.Runtime, items map[string]any, ttl melodybound.Duration) error {
+func (instance *readingCache) SetMultiple(runtimeInstance melodycontainercontract.Runtime, items map[string]any, ttl melodybound.Duration, _ melodycachecontract.SetOptions) error {
     for key, value := range items {
         instance.values[key] = value
     }

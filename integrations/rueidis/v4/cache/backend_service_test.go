@@ -53,7 +53,7 @@ func TestNewBackendService_RefusesANilConnection(t *testing.T) {
 func TestBackendService_DelegatesEveryOperationToItsBackend(t *testing.T) {
     service := liveService(t)
 
-    if setErr := service.Set(testRuntime(), "one", []byte("first"), bound.Of(time.Minute)); nil != setErr {
+    if setErr := service.Set(testRuntime(), "one", []byte("first"), bound.Of(time.Minute), cachecontract.SetOptions{}); nil != setErr {
         t.Fatalf("Set: %v", setErr)
     }
 
@@ -79,7 +79,7 @@ func TestBackendService_DelegatesEveryOperationToItsBackend(t *testing.T) {
         "session:a": []byte("alpha"),
         "session:b": []byte("beta"),
         "profile:a": []byte("gamma"),
-    }, bound.Of(time.Minute)); nil != setMultipleErr {
+    }, bound.Of(time.Minute), cachecontract.SetOptions{}); nil != setMultipleErr {
         t.Fatalf("SetMultiple: %v", setMultipleErr)
     }
 
@@ -128,7 +128,7 @@ func TestBackendService_CloseRefusesLaterCallsAndLeavesTheClientOpen(t *testing.
         t.Fatalf("Close: %v", closeErr)
     }
 
-    setErr := service.Set(testRuntime(), "after-close", []byte("payload"), bound.Of(time.Minute))
+    setErr := service.Set(testRuntime(), "after-close", []byte("payload"), bound.Of(time.Minute), cachecontract.SetOptions{})
     if nil == setErr {
         t.Fatal("expected the closed service to refuse")
     }
@@ -145,7 +145,7 @@ func TestBackendService_CloseRefusesLaterCallsAndLeavesTheClientOpen(t *testing.
         _ = sibling.Clear(testRuntime())
     })
 
-    if siblingSetErr := sibling.Set(testRuntime(), "after-close", []byte("payload"), bound.Of(time.Minute)); nil != siblingSetErr {
+    if siblingSetErr := sibling.Set(testRuntime(), "after-close", []byte("payload"), bound.Of(time.Minute), cachecontract.SetOptions{}); nil != siblingSetErr {
         t.Fatalf("the provider-owned client must stay open, got %v", siblingSetErr)
     }
 }
@@ -190,13 +190,13 @@ func TestBackendService_EveryDoorHandsTheCallersContextToTheBackend(t *testing.T
 
     doors := map[string]func() error{
         "Get":            func() error { _, _, err := service.Get(testRuntimeUnder(canceledContext), "key"); return err },
-        "Set":            func() error { return service.Set(testRuntimeUnder(canceledContext), "key", []byte("value"), bound.Of(time.Minute)) },
+        "Set":            func() error { return service.Set(testRuntimeUnder(canceledContext), "key", []byte("value"), bound.Of(time.Minute), cachecontract.SetOptions{}) },
         "Delete":         func() error { return service.Delete(testRuntimeUnder(canceledContext), "key") },
         "Has":            func() error { _, err := service.Has(testRuntimeUnder(canceledContext), "key"); return err },
         "Clear":          func() error { return service.Clear(testRuntimeUnder(canceledContext)) },
         "ClearByPrefix":  func() error { return service.ClearByPrefix(testRuntimeUnder(canceledContext), "key") },
         "Many":           func() error { _, err := service.Many(testRuntimeUnder(canceledContext), []string{"key"}); return err },
-        "SetMultiple":    func() error { return service.SetMultiple(testRuntimeUnder(canceledContext), map[string][]byte{"key": []byte("value")}, bound.Of(time.Minute)) },
+        "SetMultiple":    func() error { return service.SetMultiple(testRuntimeUnder(canceledContext), map[string][]byte{"key": []byte("value")}, bound.Of(time.Minute), cachecontract.SetOptions{}) },
         "DeleteMultiple": func() error { return service.DeleteMultiple(testRuntimeUnder(canceledContext), []string{"key"}) },
         "Increment":      func() error { _, err := service.Increment(testRuntimeUnder(canceledContext), "counter", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()}); return err },
         "Decrement":      func() error { _, err := service.Decrement(testRuntimeUnder(canceledContext), "counter", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()}); return err },

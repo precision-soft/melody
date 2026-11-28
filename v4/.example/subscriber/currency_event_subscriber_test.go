@@ -9,6 +9,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/event"
     "github.com/precision-soft/melody/v4/.example/service"
     melodybound "github.com/precision-soft/melody/v4/bound"
+    melodycachecontract "github.com/precision-soft/melody/v4/cache/contract"
     melodyclock "github.com/precision-soft/melody/v4/clock"
     melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyevent "github.com/precision-soft/melody/v4/event"
@@ -27,7 +28,7 @@ func TestCurrencyEventSubscriber_EveryListenerDropsItsEntriesUnderACanceledEvent
 
         keyList := []string{service.CacheKeyCurrencyById(currencyInstance.Id), service.CacheKeyCurrencyList}
         for _, key := range keyList {
-            if setErr := cacheInstance.Set(exampleTestRuntime(), key, "stale", melodybound.UnlimitedDuration()); nil != setErr {
+            if setErr := cacheInstance.Set(exampleTestRuntime(), key, "stale", melodybound.UnlimitedDuration(), melodycachecontract.SetOptions{}); nil != setErr {
                 t.Fatalf("prime %s: %v", key, setErr)
             }
         }

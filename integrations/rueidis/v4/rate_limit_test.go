@@ -68,7 +68,7 @@ func closedTestClient(t *testing.T) rueidis.Client {
 func allowedBy(t *testing.T, limiter *RateLimiter, key string) bool {
     t.Helper()
 
-    decision, allowErr := limiter.Allow(rateLimiterTestRuntime(), key)
+    decision, allowErr := limiter.Allow(rateLimiterTestRuntime(), key, httpcontract.AllowOptions{})
     if nil != allowErr {
         t.Fatalf("unexpected limiter failure: %v", allowErr)
     }
@@ -150,13 +150,13 @@ func TestRateLimiter_TheRedisLimiterAnswersTheDecision(t *testing.T) {
         {Allowed: true, Remaining: 1, Limit: 2},
         {Allowed: true, Remaining: 0, Limit: 2},
     } {
-        decision, allowErr := limiter.Allow(rateLimiterTestRuntime(), t.Name())
+        decision, allowErr := limiter.Allow(rateLimiterTestRuntime(), t.Name(), httpcontract.AllowOptions{})
         if nil != allowErr || expected != decision {
             t.Fatalf("call %d: expected %+v, got %+v %v", index+1, expected, decision, allowErr)
         }
     }
 
-    decision, allowErr := limiter.Allow(rateLimiterTestRuntime(), t.Name())
+    decision, allowErr := limiter.Allow(rateLimiterTestRuntime(), t.Name(), httpcontract.AllowOptions{})
     if nil != allowErr || true == decision.Allowed || 0 != decision.Remaining || 2 != decision.Limit {
         t.Fatalf("expected the third call denied, got %+v %v", decision, allowErr)
     }
@@ -178,7 +178,7 @@ func TestRateLimiter_RedisRetryAfterIsTheCountersTtl(t *testing.T) {
         t.Fatalf("could not set the counter's ttl: %v", expireErr)
     }
 
-    decision, allowErr := limiter.Allow(rateLimiterTestRuntime(), t.Name())
+    decision, allowErr := limiter.Allow(rateLimiterTestRuntime(), t.Name(), httpcontract.AllowOptions{})
     if nil != allowErr || true == decision.Allowed {
         t.Fatalf("expected a denial, got %+v %v", decision, allowErr)
     }
@@ -200,7 +200,7 @@ func TestRateLimiter_AKeyWithoutATtlAnswersNoRetryAfterAndIsRearmed(t *testing.T
         t.Fatalf("could not strip the expiry: %v", persistErr)
     }
 
-    decision, allowErr := limiter.Allow(rateLimiterTestRuntime(), t.Name())
+    decision, allowErr := limiter.Allow(rateLimiterTestRuntime(), t.Name(), httpcontract.AllowOptions{})
     if nil != allowErr || true == decision.Allowed || 0 != decision.RetryAfter {
         t.Fatalf("expected a denial with no RetryAfter, got %+v %v", decision, allowErr)
     }
@@ -261,7 +261,7 @@ func TestRateLimiter_ALimitersCountersSurviveAChangeOfItsLimitAndWindow(t *testi
     allowedBy(t, before, t.Name())
 
     after := NewRateLimiter(newTestConnection(client), "survive", 3, 2*time.Minute, RateLimiterConfig{KeyPrefix: rateLimiterTestPrefix})
-    decision, allowErr := after.Allow(rateLimiterTestRuntime(), t.Name())
+    decision, allowErr := after.Allow(rateLimiterTestRuntime(), t.Name(), httpcontract.AllowOptions{})
     if nil != allowErr || false == decision.Allowed || 0 != decision.Remaining {
         t.Fatalf("expected the third call charged to the same counter, the last of the new limit, got %+v %v", decision, allowErr)
     }
@@ -274,7 +274,7 @@ func TestRateLimiter_ACallCutByTheCallTimeoutNamesTheBound(t *testing.T) {
     limiter := NewRateLimiter(newTestConnection(client), "timeout", 100, time.Minute, RateLimiterConfig{KeyPrefix: rateLimiterTestPrefix})
     limiter.callTimeout = time.Nanosecond
 
-    decision, allowErr := limiter.Allow(rateLimiterTestRuntime(), t.Name())
+    decision, allowErr := limiter.Allow(rateLimiterTestRuntime(), t.Name(), httpcontract.AllowOptions{})
     if nil == allowErr || true == decision.Allowed {
         t.Fatalf("expected the 1ns call timeout to deny with an error, got %+v %v", decision, allowErr)
     }
@@ -288,7 +288,7 @@ func TestRateLimiter_AStoreFailureIsReturnedMarked(t *testing.T) {
     for _, failureMode := range []RateLimiterFailureMode{FailureModeClosed, FailureModeOpen} {
         limiter := NewRateLimiter(newTestConnection(closedTestClient(t)), "failure", 100, time.Minute, RateLimiterConfig{FailureMode: failureMode})
 
-        decision, allowErr := limiter.Allow(rateLimiterTestRuntime(), "failure:marked")
+        decision, allowErr := limiter.Allow(rateLimiterTestRuntime(), "failure:marked", httpcontract.AllowOptions{})
         if false == exception.IsInfrastructureFailure(allowErr) {
             t.Fatalf("%s: expected the store failure marked, got %v", failureMode, allowErr)
         }
@@ -339,7 +339,7 @@ func TestRateLimiter_AllowRefusesANilRuntime(t *testing.T) {
         "typed nil":   typedNil,
         "nil context": &contextOnlyRuntime{},
     } {
-        decision, allowErr := limiter.Allow(runtimeInstance, "key")
+        decision, allowErr := limiter.Allow(runtimeInstance, "key", httpcontract.AllowOptions{})
         if nil == allowErr || true == decision.Allowed || true == exception.AnswersUnavailable(allowErr) {
             t.Fatalf("%s: expected an unmarked refusal and a denial, got %+v %v", name, decision, allowErr)
         }
@@ -441,7 +441,7 @@ func TestRateLimiter_TheCallersCancellationIsNotAStoreFailureAndTakesTheFailureM
 
     limiter := NewRateLimiter(newTestConnection(client), "cancel", 5, time.Minute, RateLimiterConfig{KeyPrefix: rateLimiterTestPrefix})
 
-    decision, allowErr := limiter.Allow(rateLimiterTestRuntimeWith(cancelledContext), "cancel-classification")
+    decision, allowErr := limiter.Allow(rateLimiterTestRuntimeWith(cancelledContext), "cancel-classification", httpcontract.AllowOptions{})
     if nil == allowErr || false == strings.Contains(allowErr.Error(), "cancelled by the caller") {
         t.Fatalf("expected the cancellation named apart from a store failure, got %v", allowErr)
     }
@@ -452,7 +452,7 @@ func TestRateLimiter_TheCallersCancellationIsNotAStoreFailureAndTakesTheFailureM
 
     openLimiter := NewRateLimiter(newTestConnection(client), "cancel", 5, time.Minute, RateLimiterConfig{KeyPrefix: rateLimiterTestPrefix, FailureMode: FailureModeOpen})
 
-    openDecision, openErr := openLimiter.Allow(rateLimiterTestRuntimeWith(cancelledContext), "cancel-classification")
+    openDecision, openErr := openLimiter.Allow(rateLimiterTestRuntimeWith(cancelledContext), "cancel-classification", httpcontract.AllowOptions{})
     if nil == openErr || false == openDecision.Allowed {
         t.Fatalf("expected a limiter that fails open to admit a cancelled call and still report it, got %+v %v", openDecision, openErr)
     }
@@ -467,7 +467,7 @@ func TestRateLimiter_TheCallersDeadlineIsNotAStoreFailure(t *testing.T) {
     expiredParent, cancelParent := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
     defer cancelParent()
 
-    _, allowErr := limiter.Allow(rateLimiterTestRuntimeWith(expiredParent), "deadline-classification")
+    _, allowErr := limiter.Allow(rateLimiterTestRuntimeWith(expiredParent), "deadline-classification", httpcontract.AllowOptions{})
     if nil == allowErr || false == strings.Contains(allowErr.Error(), "caller's deadline") || true == exception.IsInfrastructureFailure(allowErr) {
         t.Fatalf("expected the caller's deadline named apart from a store failure and unmarked, got %v", allowErr)
     }

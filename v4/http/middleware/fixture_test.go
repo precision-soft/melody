@@ -82,7 +82,7 @@ func rateLimitTestRuntime() containercontract.Runtime {
 }
 
 func allowedBy(limiter httpcontract.RateLimiter, key string) bool {
-    decision, _ := limiter.Allow(rateLimitTestRuntime(), key)
+    decision, _ := limiter.Allow(rateLimitTestRuntime(), key, httpcontract.AllowOptions{})
 
     return decision.Allowed
 }

@@ -335,7 +335,7 @@ func TestTheCatalogueListIsAnsweredTypedFromACacheWrittenByAnotherProcess(t *tes
 
     instant := time.Date(2026, 11, 18, 23, 0, 0, 0, time.UTC)
     stored := []*entity.Product{entity.NewProduct("prod-1", "Book", "A book", "cat-1", 12.5, "cur-1", 3, instant, instant)}
-    if setErr := writer.Set(exampleTestRuntime(), CacheKeyProductList, stored, melodybound.Of(entityCacheTtl)); nil != setErr {
+    if setErr := writer.Set(exampleTestRuntime(), CacheKeyProductList, stored, melodybound.Of(entityCacheTtl), melodycachecontract.SetOptions{}); nil != setErr {
         t.Fatalf("set: %v", setErr)
     }
 

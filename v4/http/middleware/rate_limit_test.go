@@ -594,7 +594,7 @@ type fakeRuntimeRateLimiter struct {
     seenRuntime  containercontract.Runtime
 }
 
-func (instance *fakeRuntimeRateLimiter) Allow(runtimeInstance containercontract.Runtime, key string) (httpcontract.RateLimitDecision, error) {
+func (instance *fakeRuntimeRateLimiter) Allow(runtimeInstance containercontract.Runtime, key string, _ httpcontract.AllowOptions) (httpcontract.RateLimitDecision, error) {
     instance.allowCalls++
     instance.seenRuntime = runtimeInstance
 
@@ -1234,7 +1234,7 @@ func TestRateLimitMiddleware_ACancelledLimiterCallIsRecordedAtWarning(t *testing
 
 type cancellingRuntimeLimiter struct{}
 
-func (instance *cancellingRuntimeLimiter) Allow(runtimeInstance containercontract.Runtime, key string) (httpcontract.RateLimitDecision, error) {
+func (instance *cancellingRuntimeLimiter) Allow(runtimeInstance containercontract.Runtime, key string, _ httpcontract.AllowOptions) (httpcontract.RateLimitDecision, error) {
     return httpcontract.RateLimitDecision{Allowed: true}, context.Canceled
 }
 
@@ -1264,7 +1264,7 @@ func (instance *alreadyReportingRuntimeLimiter) Reset(runtimeInstance containerc
     return nil
 }
 
-func (instance *alreadyReportingRuntimeLimiter) Allow(runtimeInstance containercontract.Runtime, key string) (httpcontract.RateLimitDecision, error) {
+func (instance *alreadyReportingRuntimeLimiter) Allow(runtimeInstance containercontract.Runtime, key string, _ httpcontract.AllowOptions) (httpcontract.RateLimitDecision, error) {
     instance.allowWithRuntimeCalls++
 
     return httpcontract.RateLimitDecision{Allowed: true}, exception.MarkLogged(
@@ -1489,7 +1489,7 @@ func assertReturnsOnACyclicChain(t *testing.T, callback func()) {
 
 type cyclicRuntimeLimiter struct{}
 
-func (instance *cyclicRuntimeLimiter) Allow(runtimeInstance containercontract.Runtime, key string) (httpcontract.RateLimitDecision, error) {
+func (instance *cyclicRuntimeLimiter) Allow(runtimeInstance containercontract.Runtime, key string, _ httpcontract.AllowOptions) (httpcontract.RateLimitDecision, error) {
     return httpcontract.RateLimitDecision{Allowed: true}, newCyclicChainError()
 }
 
@@ -1662,7 +1662,7 @@ func TestRateLimiter_TheInProcessLimitersAnswerTheDecision(t *testing.T) {
                 {Allowed: true, Remaining: 1, Limit: 3},
                 {Allowed: true, Remaining: 0, Limit: 3},
             } {
-                decision, allowErr := limiter.Allow(runtimeInstance, "client")
+                decision, allowErr := limiter.Allow(runtimeInstance, "client", httpcontract.AllowOptions{})
                 if nil != allowErr || expected != decision {
                     t.Fatalf("call %d: expected %+v, got %+v %v", index+1, expected, decision, allowErr)
                 }
@@ -1670,7 +1670,7 @@ func TestRateLimiter_TheInProcessLimitersAnswerTheDecision(t *testing.T) {
                 frozenClock.Advance(10 * time.Second)
             }
 
-            decision, allowErr := limiter.Allow(runtimeInstance, "client")
+            decision, allowErr := limiter.Allow(runtimeInstance, "client", httpcontract.AllowOptions{})
             if nil != allowErr || false != decision.Allowed || 0 != decision.Remaining || 3 != decision.Limit {
                 t.Fatalf("expected the fourth call denied, got %+v %v", decision, allowErr)
             }
@@ -1688,7 +1688,7 @@ func TestRateLimiter_ADenialAnswersTheRemainderOfTheWindow(t *testing.T) {
     allowedBy(fixed, "client")
     fixedClock.Advance(45 * time.Second)
 
-    if decision, _ := fixed.Allow(rateLimitTestRuntime(), "client"); 15*time.Second != decision.RetryAfter {
+    if decision, _ := fixed.Allow(rateLimitTestRuntime(), "client", httpcontract.AllowOptions{}); 15*time.Second != decision.RetryAfter {
         t.Fatalf("expected the fixed window to answer 15s, got %s", decision.RetryAfter)
     }
 
@@ -1699,7 +1699,7 @@ func TestRateLimiter_ADenialAnswersTheRemainderOfTheWindow(t *testing.T) {
     allowedBy(sliding, "client")
     slidingClock.Advance(5 * time.Second)
 
-    if decision, _ := sliding.Allow(rateLimitTestRuntime(), "client"); 35*time.Second != decision.RetryAfter {
+    if decision, _ := sliding.Allow(rateLimitTestRuntime(), "client", httpcontract.AllowOptions{}); 35*time.Second != decision.RetryAfter {
         t.Fatalf("expected the sliding window to answer the oldest live mark's remainder, 35s, got %s", decision.RetryAfter)
     }
 }
@@ -1716,7 +1716,7 @@ func TestRateLimiter_AllowRefusesANilRuntime(t *testing.T) {
         "sliding": NewSlidingWindowLimiter("test", 1, time.Minute, LimiterConfig{}),
     } {
         for runtimeName, runtimeInstance := range map[string]containercontract.Runtime{"nil": nil, "typed nil": typedNil} {
-            decision, allowErr := limiter.Allow(runtimeInstance, "client")
+            decision, allowErr := limiter.Allow(runtimeInstance, "client", httpcontract.AllowOptions{})
             if nil == allowErr || true == decision.Allowed || true == exception.AnswersUnavailable(allowErr) {
                 t.Fatalf("%s, %s runtime: expected an unmarked refusal and a denial, got %+v %v", name, runtimeName, decision, allowErr)
             }
@@ -1972,7 +1972,7 @@ func TestFixedWindowLimiter_AClockSteppedBackDeniesForAtMostOneWindow(t *testing
     allowedBy(limiter, "client")
     frozenClock.TravelTo(startedAt.Add(-30 * time.Minute))
 
-    decision, _ := limiter.Allow(rateLimitTestRuntime(), "client")
+    decision, _ := limiter.Allow(rateLimitTestRuntime(), "client", httpcontract.AllowOptions{})
     if true == decision.Allowed || time.Minute != decision.RetryAfter {
         t.Fatalf("expected a denial answering one window, got %+v", decision)
     }
@@ -1992,7 +1992,7 @@ func TestSlidingWindowLimiter_AClockSteppedBackDeniesForAtMostOneWindow(t *testi
     allowedBy(limiter, "client")
     frozenClock.TravelTo(startedAt.Add(-30 * time.Minute))
 
-    decision, _ := limiter.Allow(rateLimitTestRuntime(), "client")
+    decision, _ := limiter.Allow(rateLimitTestRuntime(), "client", httpcontract.AllowOptions{})
     if true == decision.Allowed || time.Minute != decision.RetryAfter {
         t.Fatalf("expected a denial answering at most one window, got %+v", decision)
     }

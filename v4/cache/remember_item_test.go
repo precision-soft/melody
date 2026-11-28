@@ -10,6 +10,7 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
+    cachecontract "github.com/precision-soft/melody/v4/cache/contract"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
 )
 
@@ -26,12 +27,12 @@ type rememberItemRecordingCache struct {
     onRoundTrip func()
 }
 
-func (instance *rememberItemRecordingCache) Set(runtimeInstance containercontract.Runtime, key string, value any, ttl bound.Duration) error {
+func (instance *rememberItemRecordingCache) Set(runtimeInstance containercontract.Runtime, key string, value any, ttl bound.Duration, _ cachecontract.SetOptions) error {
     instance.mutex.Lock()
     instance.setList = append(instance.setList, rememberItemTestSet{key: key, ttl: ttl})
     instance.mutex.Unlock()
 
-    return instance.Manager.Set(runtimeInstance, key, value, ttl)
+    return instance.Manager.Set(runtimeInstance, key, value, ttl, cachecontract.SetOptions{})
 }
 
 func (instance *rememberItemRecordingCache) RoundTrip(value any, target any) error {

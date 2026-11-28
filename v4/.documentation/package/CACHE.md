@@ -313,13 +313,13 @@ package main
 
 type Cache interface {
     Get(runtimeInstance containercontract.Runtime, key string, target any) (bool, error)
-    Set(runtimeInstance containercontract.Runtime, key string, value any, ttl bound.Duration) error
+    Set(runtimeInstance containercontract.Runtime, key string, value any, ttl bound.Duration, options SetOptions) error
     Delete(runtimeInstance containercontract.Runtime, key string) error
     Has(runtimeInstance containercontract.Runtime, key string) (bool, error)
     Clear(runtimeInstance containercontract.Runtime) error
 
     Many(runtimeInstance containercontract.Runtime, keys []string, target any) error
-    SetMultiple(runtimeInstance containercontract.Runtime, items map[string]any, ttl bound.Duration) error
+    SetMultiple(runtimeInstance containercontract.Runtime, items map[string]any, ttl bound.Duration, options SetOptions) error
     DeleteMultiple(runtimeInstance containercontract.Runtime, keys []string) error
 
     Increment(runtimeInstance containercontract.Runtime, key string, delta int64, options CounterOptions) (int64, error)
@@ -332,13 +332,14 @@ type Cache interface {
 }
 ```
 
-- **Backend** ([`cache/contract/backend.go`](../../cache/contract/backend.go))
+- **Backend** ([`cache/contract/backend.go`](../../cache/contract/backend.go)) — `Set(runtimeInstance, key, payload, ttl, options)` and `SetMultiple(runtimeInstance, items, ttl, options)` take the `SetOptions` the cache takes
+- **SetOptions** ([`cache/contract/cache.go`](../../cache/contract/cache.go)) — what one write declares beside its required ttl, at the cache and at the backend alike, empty on purpose so a per-call value can be added after the tag as a field; a wrapper hands it on
 - **TtlRule()** and **ResolveTtl** ([`cache/contract/ttl.go`](../../cache/contract/ttl.go)) — the reading every backend gives the ttl of a write: absent refused, at least 1s, unlimited answered as 0, no expiry
 - **Serializer** ([`cache/contract/serializer.go`](../../cache/contract/serializer.go)) — `Serialize(value) ([]byte, error)` and `Deserialize(payload, target) error`, decoding into the target, the signature of [`serializer/contract.Serializer`](../../serializer/contract/serializer.go), so `serializer.NewJsonSerializer()` serves as a cache serializer
 
 ### Types
 
-- **cache.Bound** ([`cache/bound.go`](../../cache/bound.go)) — the cache bound to one runtime: `Get`, `Set`, `Delete`, `Has`, `Clear`, `Many`, `SetMultiple`, `DeleteMultiple`, `Increment`, `Decrement`, `GetCounter` without the runtime, `Runtime()` and `Cache()`; a zero view or one over no cache is refused by its first door
+- **cache.Bound** ([`cache/bound.go`](../../cache/bound.go)) — the cache bound to one runtime: `Get`, `Set(key, value, ttl, options)`, `Delete`, `Has`, `Clear`, `Many`, `SetMultiple(items, ttl, options)`, `DeleteMultiple`, `Increment`, `Decrement`, `GetCounter` without the runtime, `Runtime()` and `Cache()`; a zero view or one over no cache is refused by its first door
 - **cache.Manager** ([`cache/manager.go`](../../cache/manager.go)) — every door refuses a nil runtime, a typed nil and one carrying no context before it reads anything; `GetCounter(runtimeInstance, key)` reads a counter
     - [`RoundTrip(value, target any) error`](../../cache/manager.go) — what a value stored through this manager reads back as, written into the target: one serializer round trip, run locally with no backend involved. `Remember` gives through it every caller of one flight a value of its own, the computing call the shape every hit answers, and refuses once a value the serializer writes but cannot read back
 - **cache.InMemoryBackend** ([`cache/in_memory.go`](../../cache/in_memory.go))

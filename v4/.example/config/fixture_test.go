@@ -138,7 +138,7 @@ func configTestRuntime() melodycontainercontract.Runtime {
 }
 
 func allowedBy(limiter melodyhttpcontract.RateLimiter, key string) bool {
-    decision, _ := limiter.Allow(configTestRuntime(), key)
+    decision, _ := limiter.Allow(configTestRuntime(), key, melodyhttpcontract.AllowOptions{})
 
     return decision.Allowed
 }

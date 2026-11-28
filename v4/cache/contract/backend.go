@@ -11,7 +11,7 @@ import (
 type Backend interface {
     Get(runtimeInstance containercontract.Runtime, key string) ([]byte, bool, error)
 
-    Set(runtimeInstance containercontract.Runtime, key string, payload []byte, ttl bound.Duration) error
+    Set(runtimeInstance containercontract.Runtime, key string, payload []byte, ttl bound.Duration, options SetOptions) error
 
     Delete(runtimeInstance containercontract.Runtime, key string) error
 
@@ -21,7 +21,7 @@ type Backend interface {
 
     Many(runtimeInstance containercontract.Runtime, keys []string) (map[string][]byte, error)
 
-    SetMultiple(runtimeInstance containercontract.Runtime, items map[string][]byte, ttl bound.Duration) error
+    SetMultiple(runtimeInstance containercontract.Runtime, items map[string][]byte, ttl bound.Duration, options SetOptions) error
 
     DeleteMultiple(runtimeInstance containercontract.Runtime, keys []string) error
 

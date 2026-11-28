@@ -67,7 +67,7 @@ func checkStorage(boundStorage melodystorage.Bound) ([]byte, error) {
         return nil, readErr
     }
 
-    if deleteErr := boundStorage.Delete(key); nil != deleteErr {
+    if deleteErr := boundStorage.Delete(key, melodystoragecontract.DeleteOptions{}); nil != deleteErr {
         return nil, deleteErr
     }
 

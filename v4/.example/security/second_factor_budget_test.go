@@ -93,7 +93,7 @@ type scriptedRuntimeLimiter struct {
     keyList    []string
 }
 
-func (instance *scriptedRuntimeLimiter) Allow(runtimeInstance melodycontainercontract.Runtime, key string) (melodyhttpcontract.RateLimitDecision, error) {
+func (instance *scriptedRuntimeLimiter) Allow(runtimeInstance melodycontainercontract.Runtime, key string, _ melodyhttpcontract.AllowOptions) (melodyhttpcontract.RateLimitDecision, error) {
     instance.keyList = append(instance.keyList, key)
 
     return melodyhttpcontract.RateLimitDecision{Allowed: instance.allowed, RetryAfter: instance.retryAfter}, instance.allowErr

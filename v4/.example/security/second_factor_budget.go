@@ -81,7 +81,7 @@ func (instance *SecondFactorBudget) Authenticate(runtimeInstance melodycontainer
 
 /* Spend counts one presented second factor against the account, at the sign-in and at every other door that reads one, and answers a SecondFactorBudgetSpentError past the allowance; a budget whose store could not answer answers ErrSecondFactorBudgetUnavailable marked as an outage, unless the limiter is fail-open, in which case the code is read uncounted and the failure journaled here, and any other error of the limiter is returned as it is. */
 func (instance *SecondFactorBudget) Spend(runtimeInstance melodycontainercontract.Runtime, userIdentifier string) error {
-    decision, allowErr := instance.limiter.Allow(runtimeInstance, secondFactorBudgetKey(userIdentifier))
+    decision, allowErr := instance.limiter.Allow(runtimeInstance, secondFactorBudgetKey(userIdentifier), melodyhttpcontract.AllowOptions{})
     if nil != allowErr {
         if true == decision.Allowed {
             journalBudgetFailure(runtimeInstance, "second factor budget unreadable, the code is read uncounted", allowErr)

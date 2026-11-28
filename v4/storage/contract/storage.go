@@ -17,6 +17,12 @@ type GetOptions struct {
     Range ByteRange
 }
 
+/* StatOptions is what one Stat declares beside its key; it has no field yet, so that one can be added after the tag where a parameter could not. */
+type StatOptions struct{}
+
+/* DeleteOptions is what one Delete declares beside its key; it has no field yet, so that one can be added after the tag where a parameter could not. */
+type DeleteOptions struct{}
+
 /* ByteRange names a part of an object, Length bytes from Offset, judged by ResolveByteRange. The zero value is the whole object, and a zero Length reads from Offset to the end. A negative Offset or Length is refused by RefuseNegativeByteRange before the backend is asked. An Offset at or past the end of an object answers an error whose chain carries ErrRangeNotSatisfiable, the offset 0 of an empty object excepted; a Length that runs past the end is clipped to it. Info.Size stays the whole object's size. */
 type ByteRange struct {
     Offset int64
@@ -56,9 +62,9 @@ type Storage interface {
     Get(runtimeInstance containercontract.Runtime, key string, options GetOptions) (Object, error)
 
     /* Stat answers what the storage knows about the object under the key, opening no body. It refuses exactly what Get refuses, by the same causes, and answers the Info a Get would answer at that instant. */
-    Stat(runtimeInstance containercontract.Runtime, key string) (ObjectInfo, error)
+    Stat(runtimeInstance containercontract.Runtime, key string, options StatOptions) (ObjectInfo, error)
 
-    Delete(runtimeInstance containercontract.Runtime, key string) error
+    Delete(runtimeInstance containercontract.Runtime, key string, options DeleteOptions) error
 
     /* PresignedUrl answers a url that carries its own authorization, for a client that reads or writes the object straight at the backend. A backend that cannot sign, or cannot sign the method asked, answers an error whose chain carries ErrPresignUnsupported. Whether the object exists is not asked. */
     PresignedUrl(runtimeInstance containercontract.Runtime, key string, config PresignConfig) (string, error)

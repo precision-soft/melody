@@ -147,7 +147,7 @@ func (instance *Manager) Get(runtimeInstance containercontract.Runtime, key stri
     return true, nil
 }
 
-func (instance *Manager) Set(runtimeInstance containercontract.Runtime, key string, value any, ttl bound.Duration) error {
+func (instance *Manager) Set(runtimeInstance containercontract.Runtime, key string, value any, ttl bound.Duration, options cachecontract.SetOptions) error {
     if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, "cache.Manager.Set"); nil != nilErr {
         return nilErr
     }
@@ -162,7 +162,7 @@ func (instance *Manager) Set(runtimeInstance containercontract.Runtime, key stri
         )
     }
 
-    return normalizeThirdPartyError(instance.backend.Set(runtimeInstance, key, payload, ttl))
+    return normalizeThirdPartyError(instance.backend.Set(runtimeInstance, key, payload, ttl, options))
 }
 
 func (instance *Manager) Delete(runtimeInstance containercontract.Runtime, key string) error {
@@ -262,7 +262,7 @@ func serializationErrorText(err error) (text string) {
 }
 
 /* SetMultiple serializes every entry before the backend sees any, so a refusal writes nothing. The refusal names every refused key under "keys", sorted, with "key" the first of them, and each key's own reason under "causeByKey"; every entry is serialized even after the first refusal, so the list is whole. */
-func (instance *Manager) SetMultiple(runtimeInstance containercontract.Runtime, items map[string]any, ttl bound.Duration) error {
+func (instance *Manager) SetMultiple(runtimeInstance containercontract.Runtime, items map[string]any, ttl bound.Duration, options cachecontract.SetOptions) error {
     if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, "cache.Manager.SetMultiple"); nil != nilErr {
         return nilErr
     }
@@ -300,7 +300,7 @@ func (instance *Manager) SetMultiple(runtimeInstance containercontract.Runtime, 
         )
     }
 
-    return normalizeThirdPartyError(instance.backend.SetMultiple(runtimeInstance, payloads, ttl))
+    return normalizeThirdPartyError(instance.backend.SetMultiple(runtimeInstance, payloads, ttl, options))
 }
 
 func (instance *Manager) DeleteMultiple(runtimeInstance containercontract.Runtime, keys []string) error {

@@ -33,7 +33,7 @@ type deadlineFailingCache struct {
     failure error
 }
 
-func (instance *deadlineFailingCache) Set(_ containercontract.Runtime, _ string, _ any, _ bound.Duration) error {
+func (instance *deadlineFailingCache) Set(_ containercontract.Runtime, _ string, _ any, _ bound.Duration, _ cachecontract.SetOptions) error {
     return instance.failure
 }
 
@@ -117,7 +117,7 @@ func TestCacheFailedAttemptStore_Increment_DeadlineAheadOfTheWindow_CappedAtTheW
     incrementOrFail(t, store, runtimeInstance, "2fa:user-1", time.Minute)
 
     farDeadline := frozen.Now().Add(time.Hour).UnixMilli()
-    if setErr := cacheInstance.Set(runtimeInstance, store.counterKey("2fa:user-1")+FailedAttemptDeadlineKeySuffix, farDeadline, bound.Of(time.Minute)); nil != setErr {
+    if setErr := cacheInstance.Set(runtimeInstance, store.counterKey("2fa:user-1")+FailedAttemptDeadlineKeySuffix, farDeadline, bound.Of(time.Minute), cachecontract.SetOptions{}); nil != setErr {
         t.Fatalf("set: %v", setErr)
     }
 

@@ -199,7 +199,7 @@ func (instance *FixedWindowLimiter) Name() string {
     return instance.name
 }
 
-func (instance *FixedWindowLimiter) Allow(runtimeInstance containercontract.Runtime, key string) (httpcontract.RateLimitDecision, error) {
+func (instance *FixedWindowLimiter) Allow(runtimeInstance containercontract.Runtime, key string, _ httpcontract.AllowOptions) (httpcontract.RateLimitDecision, error) {
     if refusalErr := containercontract.RefuseNilRuntime(runtimeInstance, "middleware.FixedWindowLimiter.Allow"); nil != refusalErr {
         return httpcontract.RateLimitDecision{Limit: instance.capacity}, refusalErr
     }
@@ -346,7 +346,7 @@ func (instance *SlidingWindowLimiter) Name() string {
     return instance.name
 }
 
-func (instance *SlidingWindowLimiter) Allow(runtimeInstance containercontract.Runtime, key string) (httpcontract.RateLimitDecision, error) {
+func (instance *SlidingWindowLimiter) Allow(runtimeInstance containercontract.Runtime, key string, _ httpcontract.AllowOptions) (httpcontract.RateLimitDecision, error) {
     if refusalErr := containercontract.RefuseNilRuntime(runtimeInstance, "middleware.SlidingWindowLimiter.Allow"); nil != refusalErr {
         return httpcontract.RateLimitDecision{Limit: instance.limit}, refusalErr
     }
@@ -752,7 +752,7 @@ func withDecisionRetryAfterError(limitErr error, decision httpcontract.RateLimit
 func allowRequestUnderLimit(settings rateLimitSettings, runtimeInstance containercontract.Runtime, request httpcontract.Request) (httpcontract.RateLimitDecision, error) {
     key := settings.keyExtractor(request)
 
-    decision, allowErr := settings.limiter.Allow(runtimeInstance, key)
+    decision, allowErr := settings.limiter.Allow(runtimeInstance, key, httpcontract.AllowOptions{})
     if nil != allowErr && false == exception.IsAlreadyLogged(allowErr) {
         logger := logging.LoggerFromRuntime(runtimeInstance)
         if nil != logger {

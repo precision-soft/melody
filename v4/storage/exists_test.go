@@ -53,7 +53,7 @@ type existsScriptedStorage struct {
     statErr error
 }
 
-func (instance *existsScriptedStorage) Stat(runtimeInstance containercontract.Runtime, key string) (storagecontract.ObjectInfo, error) {
+func (instance *existsScriptedStorage) Stat(runtimeInstance containercontract.Runtime, key string, _ storagecontract.StatOptions) (storagecontract.ObjectInfo, error) {
     instance.record("Stat", runtimeInstance, key)
 
     return storagecontract.ObjectInfo{}, instance.statErr

@@ -91,7 +91,7 @@ func (instance *CacheFailedAttemptStore) Increment(
 
     if 1 == count {
         deadline := now.Add(windowValue)
-        if setErr := cacheInstance.Set(runtimeInstance, deadlineKey, deadline.UnixMilli(), bound.Of(windowValue)); nil != setErr {
+        if setErr := cacheInstance.Set(runtimeInstance, deadlineKey, deadline.UnixMilli(), bound.Of(windowValue), cachecontract.SetOptions{}); nil != setErr {
             return securitycontract.FailedAttemptCount{}, setErr
         }
 

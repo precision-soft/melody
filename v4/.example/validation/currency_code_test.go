@@ -1,6 +1,7 @@
 package validation
 
 import (
+    melodyvalidation "github.com/precision-soft/melody/v4/validation"
     validationcontract "github.com/precision-soft/melody/v4/validation/contract"
     "testing"
 )
@@ -35,11 +36,11 @@ func TestNewValidator_CarriesTheCurrencyCodeRule(t *testing.T) {
         Code string `validate:"notBlank,currencyCode"`
     }
 
-    if validationErr := NewValidator().Validate(testValidationRuntime(), subject{Code: "EUR"}); nil != validationErr {
+    if validationErr := NewValidator().Validate(testValidationRuntime(), subject{Code: "EUR"}, melodyvalidation.ValidateOptions{}); nil != validationErr {
         t.Fatalf("expected EUR admitted, got %v", validationErr)
     }
 
-    if validationErr := NewValidator().Validate(testValidationRuntime(), subject{Code: "eu"}); nil == validationErr {
+    if validationErr := NewValidator().Validate(testValidationRuntime(), subject{Code: "eu"}, melodyvalidation.ValidateOptions{}); nil == validationErr {
         t.Fatal("expected eu refused by the registered rule")
     }
 }

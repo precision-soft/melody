@@ -85,7 +85,7 @@ func TestObjectStorage_PutGetExistsPresignDelete(t *testing.T) {
         t.Fatalf("expected the info the put declared, got %+v", object.Info)
     }
 
-    if objectInfo, statErr := store.Stat(runtimeInstance, key); nil != statErr || object.Info != objectInfo {
+    if objectInfo, statErr := store.Stat(runtimeInstance, key, storagecontract.StatOptions{}); nil != statErr || object.Info != objectInfo {
         t.Fatalf("expected Stat to answer the info Get answered, %+v, got %+v (%v)", object.Info, objectInfo, statErr)
     }
 
@@ -120,7 +120,7 @@ func TestObjectStorage_PutGetExistsPresignDelete(t *testing.T) {
         t.Fatalf("expected the uploaded body read back, got %q", string(uploadedContent))
     }
 
-    if deleteErr := store.Delete(runtimeInstance, key); nil != deleteErr {
+    if deleteErr := store.Delete(runtimeInstance, key, storagecontract.DeleteOptions{}); nil != deleteErr {
         t.Fatalf("delete: %v", deleteErr)
     }
 
@@ -742,7 +742,7 @@ func TestObjectStorage_RejectedPutPreservesTheStoredObject(t *testing.T) {
         }
     }
 
-    if deleteErr := store.Delete(runtimeInstance, key); nil != deleteErr {
+    if deleteErr := store.Delete(runtimeInstance, key, storagecontract.DeleteOptions{}); nil != deleteErr {
         t.Fatalf("delete: %v", deleteErr)
     }
 }
@@ -807,7 +807,7 @@ func TestObjectStorage_StreamedPutAboveTheSpoolLimitIsAllOrNothing(t *testing.T)
         }
     }
 
-    if deleteErr := store.Delete(runtimeInstance, key); nil != deleteErr {
+    if deleteErr := store.Delete(runtimeInstance, key, storagecontract.DeleteOptions{}); nil != deleteErr {
         t.Fatalf("delete: %v", deleteErr)
     }
 }
@@ -1098,9 +1098,9 @@ func TestStorage_RefusesAParentSegmentAtEveryDoorBeforeTouchingTheBucket(t *test
     key := "tenant-b/../tenant-a/secret.txt"
 
     _, getErr := store.Get(runtimeInstance, key, storagecontract.GetOptions{})
-    _, statErr := store.Stat(runtimeInstance, key)
+    _, statErr := store.Stat(runtimeInstance, key, storagecontract.StatOptions{})
     putErr := store.Put(runtimeInstance, key, strings.NewReader("B"), 1, storagecontract.PutOptions{})
-    deleteErr := store.Delete(runtimeInstance, key)
+    deleteErr := store.Delete(runtimeInstance, key, storagecontract.DeleteOptions{})
     _, existsErr := melodystorage.Exists(melodystorage.For(runtimeInstance, store), key)
     _, presignErr := store.PresignedUrl(runtimeInstance, key, storagecontract.PresignConfig{Expiry: bound.Of(time.Minute)})
     _, unsupportedPresignErr := store.PresignedUrl(runtimeInstance, key, storagecontract.PresignConfig{Method: http.MethodDelete, Expiry: bound.UnlimitedDuration()})
@@ -1232,7 +1232,7 @@ func TestObjectStorage_AStreamedSingleShotPutThatOverReadsLeavesTheObjectUntouch
     store := NewStorage(client, bucket, StorageConfig{PutSpoolLimit: bound.Of(1024)})
     runtimeInstance := newRuntime()
     key := "uploads/streamed-single-shot.bin"
-    defer func() { _ = store.Delete(runtimeInstance, key) }()
+    defer func() { _ = store.Delete(runtimeInstance, key, storagecontract.DeleteOptions{}) }()
 
     original := strings.Repeat("o", 2000)
     if putErr := store.Put(runtimeInstance, key, strings.NewReader(original), int64(len(original)), storagecontract.PutOptions{}); nil != putErr {
@@ -1513,7 +1513,7 @@ func TestStorage_StatSendsOneHeadAndAnswersItsHeaders(t *testing.T) {
     recorder := newScriptedObjectServer(t, http.StatusOK, http.StatusOK, "%PDF-1.7 body")
     store := recorder.newStorage(t)
 
-    objectInfo, statErr := store.Stat(newRuntime(), "reports/report.pdf")
+    objectInfo, statErr := store.Stat(newRuntime(), "reports/report.pdf", storagecontract.StatOptions{})
     if nil != statErr {
         t.Fatalf("stat: %v", statErr)
     }
@@ -1542,7 +1542,7 @@ func TestStorage_AnAbsentKeyAnswersObjectNotFoundAtGetAndStat(t *testing.T) {
         t.Fatalf("expected Get to answer ErrObjectNotFound and no body, got %v", getErr)
     }
 
-    if _, statErr := store.Stat(newRuntime(), "absent.pdf"); false == exception.ChainIs(statErr, storagecontract.ErrObjectNotFound) {
+    if _, statErr := store.Stat(newRuntime(), "absent.pdf", storagecontract.StatOptions{}); false == exception.ChainIs(statErr, storagecontract.ErrObjectNotFound) {
         t.Fatalf("expected Stat to answer ErrObjectNotFound, got %v", statErr)
     }
 
@@ -1562,13 +1562,13 @@ func TestStorage_AMissingBucketIsNotObjectNotFound(t *testing.T) {
         t.Fatalf("expected Get refused naming the bucket, without ErrObjectNotFound, got %v", getErr)
     }
 
-    if _, statErr := store.Stat(newRuntime(), "absent.pdf"); nil == statErr || true == exception.ChainIs(statErr, storagecontract.ErrObjectNotFound) || false == strings.Contains(statErr.Error(), "bucket does not exist") {
+    if _, statErr := store.Stat(newRuntime(), "absent.pdf", storagecontract.StatOptions{}); nil == statErr || true == exception.ChainIs(statErr, storagecontract.ErrObjectNotFound) || false == strings.Contains(statErr.Error(), "bucket does not exist") {
         t.Fatalf("expected Stat refused naming the bucket, without ErrObjectNotFound, got %v", statErr)
     }
 
     unaskable := newScriptedObjectServer(t, http.StatusNotFound, http.StatusOK, "")
     unaskable.bucketStatus = http.StatusForbidden
-    if _, statErr := unaskable.newStorage(t).Stat(newRuntime(), "absent.pdf"); nil == statErr || true == exception.ChainIs(statErr, storagecontract.ErrObjectNotFound) {
+    if _, statErr := unaskable.newStorage(t).Stat(newRuntime(), "absent.pdf", storagecontract.StatOptions{}); nil == statErr || true == exception.ChainIs(statErr, storagecontract.ErrObjectNotFound) {
         t.Fatalf("expected a bucket that cannot be asked to answer a failure, got %v", statErr)
     }
 }
@@ -1577,7 +1577,7 @@ func TestStorage_AMissingBucketIsNotObjectNotFound(t *testing.T) {
 func TestStorage_TheBucketIsAskedOnlyAfterANotFound(t *testing.T) {
     for _, headStatus := range []int{http.StatusOK, http.StatusForbidden} {
         recorder := newScriptedObjectServer(t, headStatus, http.StatusOK, "%PDF-1.7 body")
-        _, _ = recorder.newStorage(t).Stat(newRuntime(), "reports/report.pdf")
+        _, _ = recorder.newStorage(t).Stat(newRuntime(), "reports/report.pdf", storagecontract.StatOptions{})
 
         if pathList := recorder.paths(); false == reflect.DeepEqual([]string{"HEAD /melody-test/reports/report.pdf"}, pathList) {
             t.Fatalf("%d: expected one HEAD of the key and none of the bucket, got %v", headStatus, pathList)
@@ -1590,7 +1590,7 @@ func TestStorage_AnObjectStoredWithoutAContentTypeReadsTheStoreDefault(t *testin
     recorder := newScriptedObjectServer(t, http.StatusOK, http.StatusOK, "%PDF-1.7 body")
     recorder.noContentType = true
 
-    objectInfo, statErr := recorder.newStorage(t).Stat(newRuntime(), "reports/report.pdf")
+    objectInfo, statErr := recorder.newStorage(t).Stat(newRuntime(), "reports/report.pdf", storagecontract.StatOptions{})
     if nil != statErr || "application/octet-stream" != objectInfo.ContentType {
         t.Fatalf("expected application/octet-stream, got %q (%v)", objectInfo.ContentType, statErr)
     }
@@ -1606,7 +1606,7 @@ func TestStorage_AnOutageIsNotObjectNotFound(t *testing.T) {
             t.Fatalf("%d: expected Get refused without ErrObjectNotFound, got %v", headStatus, getErr)
         }
 
-        if _, statErr := store.Stat(newRuntime(), "object.pdf"); nil == statErr || true == exception.ChainIs(statErr, storagecontract.ErrObjectNotFound) {
+        if _, statErr := store.Stat(newRuntime(), "object.pdf", storagecontract.StatOptions{}); nil == statErr || true == exception.ChainIs(statErr, storagecontract.ErrObjectNotFound) {
             t.Fatalf("%d: expected Stat refused without ErrObjectNotFound, got %v", headStatus, statErr)
         }
     }
@@ -1615,7 +1615,7 @@ func TestStorage_AnOutageIsNotObjectNotFound(t *testing.T) {
 func TestStorage_DeleteOfAnAbsentKeyAnswersNil(t *testing.T) {
     store := newScriptedObjectServer(t, http.StatusNotFound, http.StatusNoContent, "").newStorage(t)
 
-    if deleteErr := store.Delete(newRuntime(), "absent.pdf"); nil != deleteErr {
+    if deleteErr := store.Delete(newRuntime(), "absent.pdf", storagecontract.DeleteOptions{}); nil != deleteErr {
         t.Fatalf("expected nil, got %v", deleteErr)
     }
 }
@@ -1792,13 +1792,13 @@ func TestStorage_EveryDoorRefusesANilRuntimeFirst(t *testing.T) {
     store := recorder.newStorage(t)
 
     _, getErr := store.Get(nil, "a.txt", storagecontract.GetOptions{})
-    _, statErr := store.Stat(nil, "a.txt")
+    _, statErr := store.Stat(nil, "a.txt", storagecontract.StatOptions{})
     _, presignErr := store.PresignedUrl(nil, "a.txt", storagecontract.PresignConfig{})
     for door, doorErr := range map[string]error{
         "Put":          store.Put(nil, "a.txt", strings.NewReader("x"), 1, storagecontract.PutOptions{}),
         "Get":          getErr,
         "Stat":         statErr,
-        "Delete":       store.Delete(nil, "a.txt"),
+        "Delete":       store.Delete(nil, "a.txt", storagecontract.DeleteOptions{}),
         "PresignedUrl": presignErr,
     } {
         if nil == doorErr || false == strings.Contains(doorErr.Error(), "the runtime is nil or carries no context") {

@@ -281,7 +281,7 @@ func (instance *Backend) Get(runtimeInstance containercontract.Runtime, key stri
     return payload, true, nil
 }
 
-func (instance *Backend) Set(runtimeInstance containercontract.Runtime, key string, payload []byte, ttl bound.Duration) error {
+func (instance *Backend) Set(runtimeInstance containercontract.Runtime, key string, payload []byte, ttl bound.Duration, _ cachecontract.SetOptions) error {
     if refusalErr := instance.refuseBeforeArguments(runtimeInstance, "cache.Backend.Set"); nil != refusalErr {
         return refusalErr
     }
@@ -488,7 +488,7 @@ func (instance *Backend) Many(runtimeInstance containercontract.Runtime, keys []
     return result, nil
 }
 
-func (instance *Backend) SetMultiple(runtimeInstance containercontract.Runtime, items map[string][]byte, ttl bound.Duration) error {
+func (instance *Backend) SetMultiple(runtimeInstance containercontract.Runtime, items map[string][]byte, ttl bound.Duration, _ cachecontract.SetOptions) error {
     if refusalErr := instance.refuseBeforeArguments(runtimeInstance, "cache.Backend.SetMultiple"); nil != refusalErr {
         return refusalErr
     }

@@ -9,6 +9,7 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
+    cachecontract "github.com/precision-soft/melody/v4/cache/contract"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
 )
@@ -103,7 +104,7 @@ func TestRemember_TwoTypesUnderOneKeyNeverShareAFlight(t *testing.T) {
 func TestRemember_AnEntryOfAnotherTypeIsAMissThatHeals(t *testing.T) {
     manager, _ := newCacheTestManager(t)
 
-    if setErr := manager.Set(testRuntime(), "k", "text", bound.Of(time.Minute)); nil != setErr {
+    if setErr := manager.Set(testRuntime(), "k", "text", bound.Of(time.Minute), cachecontract.SetOptions{}); nil != setErr {
         t.Fatalf("set error: %v", setErr)
     }
 

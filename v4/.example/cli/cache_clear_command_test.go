@@ -21,7 +21,7 @@ func TestCacheClearCommandEmptiesTheCacheAndSaysWhatItReached(t *testing.T) {
     runtimeInstance, cacheInstance := newResetRuntimeWithArchive(t, persistence.NewCatalogStorage(nil), persistence.NewArchiveStorage(nil))
 
     cache := melodyruntime.MustFromRuntime[melodycachecontract.Cache](runtimeInstance, melodycache.ServiceCache)
-    if setErr := cache.Set(exampleTestRuntime(), "zz-cached", "value", melodybound.Of(time.Hour)); nil != setErr {
+    if setErr := cache.Set(exampleTestRuntime(), "zz-cached", "value", melodybound.Of(time.Hour), melodycachecontract.SetOptions{}); nil != setErr {
         t.Fatalf("planting an entry failed: %v", setErr)
     }
 

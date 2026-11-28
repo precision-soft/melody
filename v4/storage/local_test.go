@@ -60,7 +60,7 @@ func TestLocalStorage_PutGetExistsDelete(t *testing.T) {
         t.Fatalf("content mismatch: %q", string(loaded))
     }
 
-    if deleteErr := local.Delete(runtimeInstance, key); nil != deleteErr {
+    if deleteErr := local.Delete(runtimeInstance, key, storagecontract.DeleteOptions{}); nil != deleteErr {
         t.Fatalf("delete: %v", deleteErr)
     }
 
@@ -181,7 +181,7 @@ func TestLocalStorage_RefusesAParentSegmentAtEveryDoor(t *testing.T) {
             t.Fatalf("expected Put of %q to be refused by name, got %v", key, putErr)
         }
 
-        if deleteErr := local.Delete(runtimeInstance, key); nil == deleteErr || false == strings.Contains(deleteErr.Error(), `".." segment`) {
+        if deleteErr := local.Delete(runtimeInstance, key, storagecontract.DeleteOptions{}); nil == deleteErr || false == strings.Contains(deleteErr.Error(), `".." segment`) {
             t.Fatalf("expected Delete of %q to be refused by name, got %v", key, deleteErr)
         }
 
@@ -190,7 +190,7 @@ func TestLocalStorage_RefusesAParentSegmentAtEveryDoor(t *testing.T) {
             t.Fatalf("expected Exists of %q to be refused by name, got %v, %v", key, exists, existsErr)
         }
 
-        if objectInfo, statErr := local.Stat(runtimeInstance, key); nil == statErr || false == strings.Contains(statErr.Error(), `".." segment`) || (storagecontract.ObjectInfo{}) != objectInfo {
+        if objectInfo, statErr := local.Stat(runtimeInstance, key, storagecontract.StatOptions{}); nil == statErr || false == strings.Contains(statErr.Error(), `".." segment`) || (storagecontract.ObjectInfo{}) != objectInfo {
             t.Fatalf("expected Stat of %q to be refused by name, got %v, %v", key, objectInfo, statErr)
         }
     }
@@ -689,7 +689,7 @@ func TestLocalStorage_RefusesAKeySpelledLikeAReservedTemporaryObject(t *testing.
     if _, existsErr := Exists(For(runtimeInstance, storage), reservedKey); nil == existsErr {
         t.Fatalf("expected Exists to refuse the reserved spelling too")
     }
-    if _, statErr := storage.Stat(runtimeInstance, reservedKey); nil == statErr || false == strings.Contains(statErr.Error(), "reserved .melody-storage- namespace") {
+    if _, statErr := storage.Stat(runtimeInstance, reservedKey, storagecontract.StatOptions{}); nil == statErr || false == strings.Contains(statErr.Error(), "reserved .melody-storage- namespace") {
         t.Fatalf("expected Stat to refuse the reserved spelling too, got %v", statErr)
     }
     if _, getErr := storage.Get(runtimeInstance, reservedKey, storagecontract.GetOptions{}); nil == getErr || false == strings.Contains(getErr.Error(), "reserved .melody-storage- namespace") {
@@ -829,7 +829,7 @@ func TestLocalStorage_DeleteOfAKeyNamingADirectoryIsRefused(t *testing.T) {
         t.Fatalf("put: %v", putErr)
     }
 
-    deleteErr := local.Delete(runtimeInstance, "prefix")
+    deleteErr := local.Delete(runtimeInstance, "prefix", storagecontract.DeleteOptions{})
     if false == exception.ChainIs(deleteErr, storagecontract.ErrKeyIsDirectory) {
         t.Fatalf("expected the refusal to carry ErrKeyIsDirectory, got %v", deleteErr)
     }
@@ -849,7 +849,7 @@ func TestLocalStorage_DeleteOfAKeyNamingADirectoryIsRefused(t *testing.T) {
         t.Fatalf("mkdir: %v", mkdirErr)
     }
 
-    if emptyErr := local.Delete(runtimeInstance, "empty"); false == exception.ChainIs(emptyErr, storagecontract.ErrKeyIsDirectory) {
+    if emptyErr := local.Delete(runtimeInstance, "empty", storagecontract.DeleteOptions{}); false == exception.ChainIs(emptyErr, storagecontract.ErrKeyIsDirectory) {
         t.Fatalf("expected the empty directory refused with ErrKeyIsDirectory, got %v", emptyErr)
     }
 
@@ -871,7 +871,7 @@ func TestLocalStorage_DeleteRemovesASymlinkToADirectoryAsALink(t *testing.T) {
         t.Skipf("symlinks not supported: %v", linkErr)
     }
 
-    if deleteErr := local.Delete(runtimeInstance, "link"); nil != deleteErr {
+    if deleteErr := local.Delete(runtimeInstance, "link", storagecontract.DeleteOptions{}); nil != deleteErr {
         t.Fatalf("expected the link deleted, got %v", deleteErr)
     }
 
@@ -897,7 +897,7 @@ func TestLocalStorage_AKeyUnderARegularFileIsAbsent(t *testing.T) {
         t.Fatalf("expected the key absent, got %v %v", exists, existsErr)
     }
 
-    if deleteErr := local.Delete(runtimeInstance, "object.bin/child"); nil != deleteErr {
+    if deleteErr := local.Delete(runtimeInstance, "object.bin/child", storagecontract.DeleteOptions{}); nil != deleteErr {
         t.Fatalf("expected nil, got %v", deleteErr)
     }
 }
@@ -1008,7 +1008,7 @@ func TestLocalStorage_TheEntityTagMovesWithEveryStore(t *testing.T) {
         t.Fatalf("put: %v", putErr)
     }
 
-    firstInfo, firstErr := local.Stat(runtimeInstance, "report.txt")
+    firstInfo, firstErr := local.Stat(runtimeInstance, "report.txt", storagecontract.StatOptions{})
     if nil != firstErr {
         t.Fatalf("stat: %v", firstErr)
     }
@@ -1018,7 +1018,7 @@ func TestLocalStorage_TheEntityTagMovesWithEveryStore(t *testing.T) {
         t.Fatalf("chtimes: %v", touchErr)
     }
 
-    secondInfo, secondErr := local.Stat(runtimeInstance, "report.txt")
+    secondInfo, secondErr := local.Stat(runtimeInstance, "report.txt", storagecontract.StatOptions{})
     if nil != secondErr || firstInfo.EntityTag == secondInfo.EntityTag {
         t.Fatalf("expected another modification time to move the tag, got %q and %q (%v)", firstInfo.EntityTag, secondInfo.EntityTag, secondErr)
     }
@@ -1027,7 +1027,7 @@ func TestLocalStorage_TheEntityTagMovesWithEveryStore(t *testing.T) {
         t.Fatalf("put: %v", putErr)
     }
 
-    thirdInfo, thirdErr := local.Stat(runtimeInstance, "report.txt")
+    thirdInfo, thirdErr := local.Stat(runtimeInstance, "report.txt", storagecontract.StatOptions{})
     if nil != thirdErr || secondInfo.EntityTag == thirdInfo.EntityTag || 14 != thirdInfo.Size {
         t.Fatalf("expected a second store to move the tag and the size, got %v (%v)", thirdInfo, thirdErr)
     }
@@ -1068,7 +1068,7 @@ func TestLocalStorage_StatAnswersTheInfoGetAnswers(t *testing.T) {
     }
     _ = object.Body.Close()
 
-    objectInfo, statErr := local.Stat(runtimeInstance, "reports/2026/report.csv")
+    objectInfo, statErr := local.Stat(runtimeInstance, "reports/2026/report.csv", storagecontract.StatOptions{})
     if nil != statErr || object.Info != objectInfo {
         t.Fatalf("expected Stat to answer the info Get answered, %v, got %v (%v)", object.Info, objectInfo, statErr)
     }
@@ -1113,7 +1113,7 @@ func TestLocalStorage_StatRefusesWhatGetRefuses(t *testing.T) {
         if nil != object.Body {
             _ = object.Body.Close()
         }
-        objectInfo, statErr := local.Stat(runtimeInstance, testCase.key)
+        objectInfo, statErr := local.Stat(runtimeInstance, testCase.key, storagecontract.StatOptions{})
 
         if testCase.refused != (nil != getErr) || testCase.refused != (nil != statErr) {
             t.Fatalf("%s: expected both doors refused %v, got %v and %v", name, testCase.refused, getErr, statErr)
@@ -1160,7 +1160,7 @@ func TestLocalStorage_AnAbsentKeyAnswersObjectNotFoundAtGetAndStat(t *testing.T)
             t.Fatalf("%s: expected Get to answer ErrObjectNotFound and no body, got %v", name, getErr)
         }
 
-        if _, statErr := local.Stat(runtimeInstance, key); false == exception.ChainIs(statErr, storagecontract.ErrObjectNotFound) {
+        if _, statErr := local.Stat(runtimeInstance, key, storagecontract.StatOptions{}); false == exception.ChainIs(statErr, storagecontract.ErrObjectNotFound) {
             t.Fatalf("%s: expected Stat to answer ErrObjectNotFound, got %v", name, statErr)
         }
     }
@@ -1180,7 +1180,7 @@ func TestLocalStorage_DeleteOfAnAbsentKeyAnswersNil(t *testing.T) {
     local := NewLocalStorage(base, LocalStorageConfig{})
     runtimeInstance := testRuntime()
 
-    if deleteErr := local.Delete(runtimeInstance, "never/stored.bin"); nil != deleteErr {
+    if deleteErr := local.Delete(runtimeInstance, "never/stored.bin", storagecontract.DeleteOptions{}); nil != deleteErr {
         t.Fatalf("expected nil for a key never stored, got %v", deleteErr)
     }
 
@@ -1188,7 +1188,7 @@ func TestLocalStorage_DeleteOfAnAbsentKeyAnswersNil(t *testing.T) {
         t.Fatalf("remove: %v", removeErr)
     }
 
-    if deleteErr := local.Delete(runtimeInstance, "object.bin"); nil != deleteErr {
+    if deleteErr := local.Delete(runtimeInstance, "object.bin", storagecontract.DeleteOptions{}); nil != deleteErr {
         t.Fatalf("expected nil once the base directory is gone, got %v", deleteErr)
     }
 }
@@ -1231,7 +1231,7 @@ func TestLocalStorage_GetReadsTheRangeAsked(t *testing.T) {
         t.Fatalf("expected a range at the end refused with no body, got %v", getErr)
     }
 
-    if deleteErr := local.Delete(runtimeInstance, "digits.txt"); nil != deleteErr {
+    if deleteErr := local.Delete(runtimeInstance, "digits.txt", storagecontract.DeleteOptions{}); nil != deleteErr {
         t.Fatalf("expected the object deleted after its ranged reads, got %v", deleteErr)
     }
 
@@ -1261,7 +1261,7 @@ func TestLocalStorage_TheContentTypeDeclaredAtPutIsReadBack(t *testing.T) {
     }
     _ = object.Body.Close()
 
-    objectInfo, statErr := local.Stat(runtimeInstance, "labels/awb-1.pdf")
+    objectInfo, statErr := local.Stat(runtimeInstance, "labels/awb-1.pdf", storagecontract.StatOptions{})
     if nil != statErr || "application/pdf" != object.Info.ContentType || "application/pdf" != objectInfo.ContentType {
         t.Fatalf("expected the declared content type at Get and Stat, got %q and %q (%v)", object.Info.ContentType, objectInfo.ContentType, statErr)
     }
@@ -1270,7 +1270,7 @@ func TestLocalStorage_TheContentTypeDeclaredAtPutIsReadBack(t *testing.T) {
         t.Fatalf("put: %v", putErr)
     }
 
-    if replacedInfo, replacedErr := local.Stat(runtimeInstance, "labels/awb-1.pdf"); nil != replacedErr || "application/x-pdf" != replacedInfo.ContentType {
+    if replacedInfo, replacedErr := local.Stat(runtimeInstance, "labels/awb-1.pdf", storagecontract.StatOptions{}); nil != replacedErr || "application/x-pdf" != replacedInfo.ContentType {
         t.Fatalf("expected the content type of the second put, got %q (%v)", replacedInfo.ContentType, replacedErr)
     }
 }
@@ -1292,7 +1292,7 @@ func TestLocalStorage_APutWithoutAContentTypeClearsThePreviousOne(t *testing.T) 
         t.Fatalf("put: %v", putErr)
     }
 
-    if objectInfo, statErr := local.Stat(runtimeInstance, "labels/awb-1.pdf"); nil != statErr || "" != objectInfo.ContentType {
+    if objectInfo, statErr := local.Stat(runtimeInstance, "labels/awb-1.pdf", storagecontract.StatOptions{}); nil != statErr || "" != objectInfo.ContentType {
         t.Fatalf("expected no content type after a put that declared none, got %q (%v)", objectInfo.ContentType, statErr)
     }
 
@@ -1353,7 +1353,7 @@ func TestLocalStorage_DeleteRemovesTheMetadata(t *testing.T) {
         t.Fatalf("put: %v", putErr)
     }
 
-    if deleteErr := local.Delete(runtimeInstance, "labels/awb-1.pdf"); nil != deleteErr {
+    if deleteErr := local.Delete(runtimeInstance, "labels/awb-1.pdf", storagecontract.DeleteOptions{}); nil != deleteErr {
         t.Fatalf("delete: %v", deleteErr)
     }
 
@@ -1369,8 +1369,8 @@ func TestLocalStorage_RefusesAKeySpelledLikeAMetadataObject(t *testing.T) {
     for _, key := range []string{reservedMetadataName("report.pdf"), "sub/" + reservedMetadataName("any leaf at all")} {
         putErr := local.Put(runtimeInstance, key, strings.NewReader("x"), 1, storagecontract.PutOptions{})
         _, getErr := local.Get(runtimeInstance, key, storagecontract.GetOptions{})
-        _, statErr := local.Stat(runtimeInstance, key)
-        deleteErr := local.Delete(runtimeInstance, key)
+        _, statErr := local.Stat(runtimeInstance, key, storagecontract.StatOptions{})
+        deleteErr := local.Delete(runtimeInstance, key, storagecontract.DeleteOptions{})
 
         for door, doorErr := range map[string]error{"Put": putErr, "Get": getErr, "Stat": statErr, "Delete": deleteErr} {
             if nil == doorErr || false == strings.Contains(doorErr.Error(), "metadata object of the reserved .melody-storage- namespace") {
@@ -1407,7 +1407,7 @@ func TestLocalStorage_UnreadableMetadataIsNoContentType(t *testing.T) {
             t.Fatalf("write: %v", writeErr)
         }
 
-        objectInfo, statErr := local.Stat(runtimeInstance, "report.pdf")
+        objectInfo, statErr := local.Stat(runtimeInstance, "report.pdf", storagecontract.StatOptions{})
         if nil != statErr || "" != objectInfo.ContentType {
             t.Fatalf("%s: expected no content type and no error, got %q (%v)", name, objectInfo.ContentType, statErr)
         }
@@ -1417,7 +1417,7 @@ func TestLocalStorage_UnreadableMetadataIsNoContentType(t *testing.T) {
         t.Fatalf("write: %v", writeErr)
     }
 
-    if objectInfo, statErr := local.Stat(runtimeInstance, "report.pdf"); nil != statErr || "application/pdf" != objectInfo.ContentType {
+    if objectInfo, statErr := local.Stat(runtimeInstance, "report.pdf", storagecontract.StatOptions{}); nil != statErr || "application/pdf" != objectInfo.ContentType {
         t.Fatalf("expected metadata of exactly the bound honoured, got %q (%v)", objectInfo.ContentType, statErr)
     }
 }
@@ -1442,7 +1442,7 @@ func TestLocalStorage_AMetadataObjectIsReadNoFurtherThanItsBound(t *testing.T) {
 
     var before, after goruntime.MemStats
     goruntime.ReadMemStats(&before)
-    objectInfo, statErr := local.Stat(runtimeInstance, "report.pdf")
+    objectInfo, statErr := local.Stat(runtimeInstance, "report.pdf", storagecontract.StatOptions{})
     goruntime.ReadMemStats(&after)
 
     if nil != statErr || "" != objectInfo.ContentType {
@@ -1490,7 +1490,7 @@ func TestLocalStorage_PutRefusesAContentTypeTooLongToBeReadBack(t *testing.T) {
         t.Fatalf("put: %v", putErr)
     }
 
-    if objectInfo, statErr := local.Stat(runtimeInstance, "labels/longest.txt"); nil != statErr || longest != objectInfo.ContentType {
+    if objectInfo, statErr := local.Stat(runtimeInstance, "labels/longest.txt", storagecontract.StatOptions{}); nil != statErr || longest != objectInfo.ContentType {
         t.Fatalf("expected the longest content type read back whole, got %d bytes (%v)", len(objectInfo.ContentType), statErr)
     }
 
@@ -1509,8 +1509,8 @@ func TestLocalStorage_RefusesAReservedNameAsAnySegmentOfTheKey(t *testing.T) {
     } {
         putErr := local.Put(runtimeInstance, key, strings.NewReader("x"), 1, storagecontract.PutOptions{})
         _, getErr := local.Get(runtimeInstance, key, storagecontract.GetOptions{})
-        _, statErr := local.Stat(runtimeInstance, key)
-        deleteErr := local.Delete(runtimeInstance, key)
+        _, statErr := local.Stat(runtimeInstance, key, storagecontract.StatOptions{})
+        deleteErr := local.Delete(runtimeInstance, key, storagecontract.DeleteOptions{})
 
         for door, doorErr := range map[string]error{"Put": putErr, "Get": getErr, "Stat": statErr, "Delete": deleteErr} {
             if nil == doorErr || false == strings.Contains(doorErr.Error(), expected) {
@@ -1584,7 +1584,7 @@ func TestLocalStorage_AMetadataWriteThatFailsAnswersAnErrorOverTheStoredObject(t
         t.Fatalf("expected the content type failure answered, got %v", putErr)
     }
 
-    objectInfo, statErr := local.Stat(runtimeInstance, "labels/awb-1.pdf")
+    objectInfo, statErr := local.Stat(runtimeInstance, "labels/awb-1.pdf", storagecontract.StatOptions{})
     if nil != statErr || 4 != objectInfo.Size || "" != objectInfo.ContentType {
         t.Fatalf("expected the object stored without a content type, got %+v (%v)", objectInfo, statErr)
     }
@@ -1598,13 +1598,13 @@ func TestLocalStorage_EveryDoorRefusesANilRuntimeFirst(t *testing.T) {
     local := NewLocalStorage(t.TempDir(), LocalStorageConfig{})
 
     _, getErr := local.Get(nil, "a.txt", storagecontract.GetOptions{})
-    _, statErr := local.Stat(nil, "a.txt")
+    _, statErr := local.Stat(nil, "a.txt", storagecontract.StatOptions{})
     _, presignErr := local.PresignedUrl(nil, "a.txt", storagecontract.PresignConfig{})
     for door, doorErr := range map[string]error{
         "Put":          local.Put(nil, "a.txt", strings.NewReader("x"), 1, storagecontract.PutOptions{}),
         "Get":          getErr,
         "Stat":         statErr,
-        "Delete":       local.Delete(nil, "a.txt"),
+        "Delete":       local.Delete(nil, "a.txt", storagecontract.DeleteOptions{}),
         "PresignedUrl": presignErr,
     } {
         if nil == doorErr || false == strings.Contains(doorErr.Error(), "the runtime is nil or carries no context") {

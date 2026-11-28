@@ -476,8 +476,11 @@ func (instance *Validator) validationLimits() validationLimits {
     return instance.limits
 }
 
+/* ValidateOptions is what one Validate declares beside its data; it has no field yet, so that one can be added after the tag where a parameter could not. */
+type ValidateOptions struct{}
+
 /* Validate judges the data under the runtime, which every constraint is handed; a nil runtime, a typed nil and one carrying no context are refused. */
-func (instance *Validator) Validate(runtimeInstance containercontract.Runtime, data any) error {
+func (instance *Validator) Validate(runtimeInstance containercontract.Runtime, data any, _ ValidateOptions) error {
     if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, "validation.Validator.Validate"); nil != nilErr {
         return nilErr
     }

@@ -55,20 +55,20 @@ func (instance Bound) Get(key string, options storagecontract.GetOptions) (stora
     return instance.storageInstance.Get(instance.runtimeInstance, key, options)
 }
 
-func (instance Bound) Stat(key string) (storagecontract.ObjectInfo, error) {
+func (instance Bound) Stat(key string, options storagecontract.StatOptions) (storagecontract.ObjectInfo, error) {
     if nilErr := instance.refuseNilStorage(); nil != nilErr {
         return storagecontract.ObjectInfo{}, nilErr
     }
 
-    return instance.storageInstance.Stat(instance.runtimeInstance, key)
+    return instance.storageInstance.Stat(instance.runtimeInstance, key, options)
 }
 
-func (instance Bound) Delete(key string) error {
+func (instance Bound) Delete(key string, options storagecontract.DeleteOptions) error {
     if nilErr := instance.refuseNilStorage(); nil != nilErr {
         return nilErr
     }
 
-    return instance.storageInstance.Delete(instance.runtimeInstance, key)
+    return instance.storageInstance.Delete(instance.runtimeInstance, key, options)
 }
 
 func (instance Bound) PresignedUrl(key string, config storagecontract.PresignConfig) (string, error) {

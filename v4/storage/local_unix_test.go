@@ -57,7 +57,7 @@ func TestLocalStorage_StatRefusesANamedPipeWithoutOpeningIt(t *testing.T) {
 
     answered := make(chan error, 1)
     go func() {
-        _, statErr := local.Stat(runtimeInstance, "pipe")
+        _, statErr := local.Stat(runtimeInstance, "pipe", storagecontract.StatOptions{})
         answered <- statErr
     }()
 

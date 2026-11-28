@@ -420,6 +420,7 @@ type localRangeBody struct {
 func (instance *LocalStorage) Stat(
     runtimeInstance containercontract.Runtime,
     key string,
+    _ storagecontract.StatOptions,
 ) (storagecontract.ObjectInfo, error) {
     if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance, "storage.LocalStorage.Stat"); nil != refuseErr {
         return storagecontract.ObjectInfo{}, refuseErr
@@ -583,6 +584,7 @@ func storageAbsenceCause(err error) error {
 func (instance *LocalStorage) Delete(
     runtimeInstance containercontract.Runtime,
     key string,
+    _ storagecontract.DeleteOptions,
 ) error {
     if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance, "storage.LocalStorage.Delete"); nil != refuseErr {
         return refuseErr

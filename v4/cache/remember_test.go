@@ -32,7 +32,7 @@ func TestRemember_ReturnsCachedValueWithoutCallingCallback(t *testing.T) {
 
     cacheInstance := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
-    setErr := cacheInstance.Set(testRuntime(), "k", "v", bound.UnlimitedDuration())
+    setErr := cacheInstance.Set(testRuntime(), "k", "v", bound.UnlimitedDuration(), cachecontract.SetOptions{})
     if nil != setErr {
         t.Fatalf("set error: %v", setErr)
     }
@@ -734,7 +734,7 @@ func TestRemember_RecomputesOverACorruptPayload(t *testing.T) {
 
     cacheManager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
-    if setErr := backend.Set(testRuntime(), "poisoned", []byte("{not json"), bound.UnlimitedDuration()); nil != setErr {
+    if setErr := backend.Set(testRuntime(), "poisoned", []byte("{not json"), bound.UnlimitedDuration(), cachecontract.SetOptions{}); nil != setErr {
         t.Fatalf("set error: %v", setErr)
     }
 
@@ -807,8 +807,8 @@ func (instance testValueKindCache) Get(runtimeInstance containercontract.Runtime
     return instance.inner.Get(runtimeInstance, key, target)
 }
 
-func (instance testValueKindCache) Set(runtimeInstance containercontract.Runtime, key string, value any, ttl bound.Duration) error {
-    return instance.inner.Set(runtimeInstance, key, value, ttl)
+func (instance testValueKindCache) Set(runtimeInstance containercontract.Runtime, key string, value any, ttl bound.Duration, _ cachecontract.SetOptions) error {
+    return instance.inner.Set(runtimeInstance, key, value, ttl, cachecontract.SetOptions{})
 }
 
 func (instance testValueKindCache) Delete(runtimeInstance containercontract.Runtime, key string) error {
@@ -831,8 +831,8 @@ func (instance testValueKindCache) RoundTrip(value any, target any) error {
     return instance.inner.RoundTrip(value, target)
 }
 
-func (instance testValueKindCache) SetMultiple(runtimeInstance containercontract.Runtime, items map[string]any, ttl bound.Duration) error {
-    return instance.inner.SetMultiple(runtimeInstance, items, ttl)
+func (instance testValueKindCache) SetMultiple(runtimeInstance containercontract.Runtime, items map[string]any, ttl bound.Duration, _ cachecontract.SetOptions) error {
+    return instance.inner.SetMultiple(runtimeInstance, items, ttl, cachecontract.SetOptions{})
 }
 
 func (instance testValueKindCache) DeleteMultiple(runtimeInstance containercontract.Runtime, keys []string) error {
@@ -927,7 +927,7 @@ func (instance *testPanickingSetCache) Get(runtimeInstance containercontract.Run
     return instance.inner.Get(runtimeInstance, key, target)
 }
 
-func (instance *testPanickingSetCache) Set(runtimeInstance containercontract.Runtime, key string, value any, ttl bound.Duration) error {
+func (instance *testPanickingSetCache) Set(runtimeInstance containercontract.Runtime, key string, value any, ttl bound.Duration, _ cachecontract.SetOptions) error {
     panic("backend exploded")
 }
 
@@ -951,8 +951,8 @@ func (instance *testPanickingSetCache) RoundTrip(value any, target any) error {
     return instance.inner.RoundTrip(value, target)
 }
 
-func (instance *testPanickingSetCache) SetMultiple(runtimeInstance containercontract.Runtime, items map[string]any, ttl bound.Duration) error {
-    return instance.inner.SetMultiple(runtimeInstance, items, ttl)
+func (instance *testPanickingSetCache) SetMultiple(runtimeInstance containercontract.Runtime, items map[string]any, ttl bound.Duration, _ cachecontract.SetOptions) error {
+    return instance.inner.SetMultiple(runtimeInstance, items, ttl, cachecontract.SetOptions{})
 }
 
 func (instance *testPanickingSetCache) DeleteMultiple(runtimeInstance containercontract.Runtime, keys []string) error {
@@ -1042,7 +1042,7 @@ func (instance *testScriptedCache) Get(runtimeInstance containercontract.Runtime
     return true, nil
 }
 
-func (instance *testScriptedCache) Set(runtimeInstance containercontract.Runtime, key string, value any, ttl bound.Duration) error {
+func (instance *testScriptedCache) Set(runtimeInstance containercontract.Runtime, key string, value any, ttl bound.Duration, _ cachecontract.SetOptions) error {
     instance.stateMutex.Lock()
     defer instance.stateMutex.Unlock()
 
@@ -1082,7 +1082,7 @@ func (instance *testScriptedCache) RoundTrip(value any, target any) error {
     return assignTestValue(target, value)
 }
 
-func (instance *testScriptedCache) SetMultiple(runtimeInstance containercontract.Runtime, items map[string]any, ttl bound.Duration) error {
+func (instance *testScriptedCache) SetMultiple(runtimeInstance containercontract.Runtime, items map[string]any, ttl bound.Duration, _ cachecontract.SetOptions) error {
     return nil
 }
 
@@ -2277,7 +2277,7 @@ func TestRemember_ADoneCallerContextStillAnswersAHit(t *testing.T) {
     defer backend.CloseWithContext(context.Background())
 
     cacheManager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
-    if setErr := cacheManager.Set(testRuntime(), "report.hit", "stored", bound.Of(time.Minute)); nil != setErr {
+    if setErr := cacheManager.Set(testRuntime(), "report.hit", "stored", bound.Of(time.Minute), cachecontract.SetOptions{}); nil != setErr {
         t.Fatalf("planting: %v", setErr)
     }
 

@@ -20,8 +20,8 @@ import (
 var _ interface {
     Put(key string, reader io.Reader, size int64, options storagecontract.PutOptions) error
     Get(key string, options storagecontract.GetOptions) (storagecontract.Object, error)
-    Stat(key string) (storagecontract.ObjectInfo, error)
-    Delete(key string) error
+    Stat(key string, options storagecontract.StatOptions) (storagecontract.ObjectInfo, error)
+    Delete(key string, options storagecontract.DeleteOptions) error
     PresignedUrl(key string, config storagecontract.PresignConfig) (string, error)
     Runtime() containercontract.Runtime
     Storage() storagecontract.Storage
@@ -104,13 +104,13 @@ func (instance *boundRecordingStorage) Get(runtimeInstance containercontract.Run
     return storagecontract.Object{Body: instance.body, Info: boundStorageObjectInfo("got")}, boundStorageRecordedErr
 }
 
-func (instance *boundRecordingStorage) Stat(runtimeInstance containercontract.Runtime, key string) (storagecontract.ObjectInfo, error) {
+func (instance *boundRecordingStorage) Stat(runtimeInstance containercontract.Runtime, key string, _ storagecontract.StatOptions) (storagecontract.ObjectInfo, error) {
     instance.record("Stat", runtimeInstance, key)
 
     return boundStorageObjectInfo("stated"), boundStorageRecordedErr
 }
 
-func (instance *boundRecordingStorage) Delete(runtimeInstance containercontract.Runtime, key string) error {
+func (instance *boundRecordingStorage) Delete(runtimeInstance containercontract.Runtime, key string, _ storagecontract.DeleteOptions) error {
     instance.record("Delete", runtimeInstance, key)
 
     return boundStorageRecordedErr
@@ -145,8 +145,8 @@ func TestBound_EveryMethodReachesItsDoorWithTheBoundRuntimeAndAnswersWhatItAnswe
     putErr := boundStorage.Put("put-key", reader, 7, putOptions)
     getOptions := storagecontract.GetOptions{Range: storagecontract.ByteRange{Offset: 3, Length: 4}}
     object, getErr := boundStorage.Get("got-key", getOptions)
-    objectInfo, statErr := boundStorage.Stat("stated-key")
-    deleteErr := boundStorage.Delete("deleted-key")
+    objectInfo, statErr := boundStorage.Stat("stated-key", storagecontract.StatOptions{})
+    deleteErr := boundStorage.Delete("deleted-key", storagecontract.DeleteOptions{})
     url, presignErr := boundStorage.PresignedUrl("signed-key", presignConfig)
 
     expected := []boundStorageRecordedCall{
@@ -201,8 +201,8 @@ func TestBound_AViewOverNoStorageRefusesEveryDoor(t *testing.T) {
     for _, boundStorage := range []Bound{{}, For(testRuntime(), nil), For(testRuntime(), typedNilStorage)} {
         putErr := boundStorage.Put("key", strings.NewReader("x"), 1, storagecontract.PutOptions{})
         object, getErr := boundStorage.Get("key", storagecontract.GetOptions{})
-        objectInfo, statErr := boundStorage.Stat("key")
-        deleteErr := boundStorage.Delete("key")
+        objectInfo, statErr := boundStorage.Stat("key", storagecontract.StatOptions{})
+        deleteErr := boundStorage.Delete("key", storagecontract.DeleteOptions{})
         exists, existsErr := Exists(boundStorage, "key")
         url, presignErr := boundStorage.PresignedUrl("key", storagecontract.PresignConfig{})
 
@@ -226,10 +226,10 @@ func TestBound_BindingAddsNoAllocationToTheContractsCall(t *testing.T) {
     boundAllocationStorage = &boundCountingStorage{}
 
     directAllocations := testing.AllocsPerRun(1000, func() {
-        _, _ = boundAllocationStorage.Stat(runtimeInstance, "key")
+        _, _ = boundAllocationStorage.Stat(runtimeInstance, "key", storagecontract.StatOptions{})
     })
     boundAllocations := testing.AllocsPerRun(1000, func() {
-        _, _ = For(runtimeInstance, boundAllocationStorage).Stat("key")
+        _, _ = For(runtimeInstance, boundAllocationStorage).Stat("key", storagecontract.StatOptions{})
     })
     if directAllocations != boundAllocations {
         t.Fatalf("expected a bind and a call to allocate what the direct call does, %v, got %v", directAllocations, boundAllocations)
@@ -240,7 +240,7 @@ type boundCountingStorage struct {
     boundRecordingStorage
 }
 
-func (instance *boundCountingStorage) Stat(runtimeInstance containercontract.Runtime, key string) (storagecontract.ObjectInfo, error) {
+func (instance *boundCountingStorage) Stat(runtimeInstance containercontract.Runtime, key string, _ storagecontract.StatOptions) (storagecontract.ObjectInfo, error) {
     return storagecontract.ObjectInfo{}, nil
 }
 

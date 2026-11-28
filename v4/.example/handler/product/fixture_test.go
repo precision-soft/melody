@@ -309,7 +309,7 @@ func primeProduct(t *testing.T, fixture *productDoorFixture, id string) {
         t.Fatalf("product %s is not seeded", id)
     }
 
-    if setErr := fixture.cache.Set(exampleTestRuntime(), service.CacheKeyProductById(id), product, melodybound.UnlimitedDuration()); nil != setErr {
+    if setErr := fixture.cache.Set(exampleTestRuntime(), service.CacheKeyProductById(id), product, melodybound.UnlimitedDuration(), melodycachecontract.SetOptions{}); nil != setErr {
         t.Fatalf("prime the product: %v", setErr)
     }
 }

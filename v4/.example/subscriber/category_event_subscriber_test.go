@@ -10,6 +10,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/repository"
     "github.com/precision-soft/melody/v4/.example/service"
     melodybound "github.com/precision-soft/melody/v4/bound"
+    melodycachecontract "github.com/precision-soft/melody/v4/cache/contract"
     melodyclock "github.com/precision-soft/melody/v4/clock"
     melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyevent "github.com/precision-soft/melody/v4/event"
@@ -28,7 +29,7 @@ func TestCategoryEventSubscriber_EveryListenerDropsItsEntriesUnderACanceledEvent
 
         keyList := []string{service.CacheKeyCategoryById(categoryInstance.Id), service.CacheKeyCategoryList}
         for _, key := range keyList {
-            if setErr := cacheInstance.Set(exampleTestRuntime(), key, "stale", melodybound.UnlimitedDuration()); nil != setErr {
+            if setErr := cacheInstance.Set(exampleTestRuntime(), key, "stale", melodybound.UnlimitedDuration(), melodycachecontract.SetOptions{}); nil != setErr {
                 t.Fatalf("prime %s: %v", key, setErr)
             }
         }
@@ -56,7 +57,7 @@ func assertCategoryChangeHandled(t *testing.T, eventName string, payload any, ac
 
     keyList := []string{service.CacheKeyCategoryById("category-7"), service.CacheKeyCategoryList}
     for _, key := range keyList {
-        if setErr := cacheInstance.Set(exampleTestRuntime(), key, "stale", melodybound.UnlimitedDuration()); nil != setErr {
+        if setErr := cacheInstance.Set(exampleTestRuntime(), key, "stale", melodybound.UnlimitedDuration(), melodycachecontract.SetOptions{}); nil != setErr {
             t.Fatalf("prime %s: %v", key, setErr)
         }
     }

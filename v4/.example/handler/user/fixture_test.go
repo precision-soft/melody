@@ -242,7 +242,7 @@ func (instance *valueCache) Get(runtimeInstance melodycontainercontract.Runtime,
     return true, nil
 }
 
-func (instance *valueCache) Set(runtimeInstance melodycontainercontract.Runtime, key string, value any, ttl melodybound.Duration) error {
+func (instance *valueCache) Set(runtimeInstance melodycontainercontract.Runtime, key string, value any, ttl melodybound.Duration, _ melodycachecontract.SetOptions) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
@@ -290,7 +290,7 @@ func (instance *valueCache) RoundTrip(value any, target any) error {
     return assignCachedTestValue("", target, value)
 }
 
-func (instance *valueCache) SetMultiple(runtimeInstance melodycontainercontract.Runtime, items map[string]any, ttl melodybound.Duration) error {
+func (instance *valueCache) SetMultiple(runtimeInstance melodycontainercontract.Runtime, items map[string]any, ttl melodybound.Duration, _ melodycachecontract.SetOptions) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 

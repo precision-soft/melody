@@ -94,7 +94,7 @@ func (instance *ttlRecordingCache) Get(runtimeInstance melodycontainercontract.R
     return true, nil
 }
 
-func (instance *ttlRecordingCache) Set(runtimeInstance melodycontainercontract.Runtime, key string, value any, ttl melodybound.Duration) error {
+func (instance *ttlRecordingCache) Set(runtimeInstance melodycontainercontract.Runtime, key string, value any, ttl melodybound.Duration, _ melodycachecontract.SetOptions) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
@@ -152,9 +152,9 @@ func (instance *ttlRecordingCache) RoundTrip(value any, target any) error {
     return assignCachedTestValue("", target, value)
 }
 
-func (instance *ttlRecordingCache) SetMultiple(runtimeInstance melodycontainercontract.Runtime, items map[string]any, ttl melodybound.Duration) error {
+func (instance *ttlRecordingCache) SetMultiple(runtimeInstance melodycontainercontract.Runtime, items map[string]any, ttl melodybound.Duration, _ melodycachecontract.SetOptions) error {
     for key, value := range items {
-        if setErr := instance.Set(runtimeInstance, key, value, ttl); nil != setErr {
+        if setErr := instance.Set(runtimeInstance, key, value, ttl, melodycachecontract.SetOptions{}); nil != setErr {
             return setErr
         }
     }
@@ -510,7 +510,7 @@ func (instance *catalogueUnderTest) prime(t *testing.T, keyList ...string) {
     t.Helper()
 
     for _, key := range keyList {
-        if setErr := instance.cache.Set(exampleTestRuntime(), key, "stale", melodybound.UnlimitedDuration()); nil != setErr {
+        if setErr := instance.cache.Set(exampleTestRuntime(), key, "stale", melodybound.UnlimitedDuration(), melodycachecontract.SetOptions{}); nil != setErr {
             t.Fatalf("prime %s: %v", key, setErr)
         }
     }
@@ -594,7 +594,7 @@ func (instance *userServiceUnderTest) prime(t *testing.T, keyList ...string) {
     t.Helper()
 
     for _, key := range keyList {
-        if setErr := instance.cache.Set(exampleTestRuntime(), key, "stale", melodybound.UnlimitedDuration()); nil != setErr {
+        if setErr := instance.cache.Set(exampleTestRuntime(), key, "stale", melodybound.UnlimitedDuration(), melodycachecontract.SetOptions{}); nil != setErr {
             t.Fatalf("prime %s: %v", key, setErr)
         }
     }

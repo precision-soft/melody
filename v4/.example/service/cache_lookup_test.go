@@ -1,6 +1,7 @@
 package service
 
 import (
+    melodycachecontract "github.com/precision-soft/melody/v4/cache/contract"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     "context"
     "sync"
@@ -118,7 +119,7 @@ func TestRememberEntityOrAbsenceLeavesAFoundEntityUnbounded(t *testing.T) {
 /* a found entity re-stored on a hit would cost one cache write per request served from memory */
 func TestRememberEntityOrAbsenceAnswersAFoundHitWithoutWritingItBack(t *testing.T) {
     cacheInstance := newTtlRecordingCache()
-    if setErr := cacheInstance.Set(exampleTestRuntime(), "hit-key", lookupTestEntity(), melodybound.Of(entityCacheTtl)); nil != setErr {
+    if setErr := cacheInstance.Set(exampleTestRuntime(), "hit-key", lookupTestEntity(), melodybound.Of(entityCacheTtl), melodycachecontract.SetOptions{}); nil != setErr {
         t.Fatalf("seed: %v", setErr)
     }
 
@@ -156,7 +157,7 @@ func TestRememberEntityOrAbsenceAnswersAFoundHitWithoutWritingItBack(t *testing.
    keeps trying still lapses on its own schedule. */
 func TestRememberEntityOrAbsenceLeavesARememberedAbsenceUntouched(t *testing.T) {
     cacheInstance := newTtlRecordingCache()
-    if setErr := cacheInstance.Set(exampleTestRuntime(), "absent-hit-key", nil, melodybound.Of(absenceCacheTtl)); nil != setErr {
+    if setErr := cacheInstance.Set(exampleTestRuntime(), "absent-hit-key", nil, melodybound.Of(absenceCacheTtl), melodycachecontract.SetOptions{}); nil != setErr {
         t.Fatalf("seed: %v", setErr)
     }
 

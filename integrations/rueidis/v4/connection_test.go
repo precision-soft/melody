@@ -13,6 +13,7 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyhttp "github.com/precision-soft/melody/v4/http"
+    httpcontract "github.com/precision-soft/melody/v4/http/contract"
     lockcontract "github.com/precision-soft/melody/v4/lock/contract"
 )
 
@@ -180,7 +181,7 @@ func TestConnection_TwoNamespacesOnOneClientShareNothing(t *testing.T) {
     }()
 
     for label, limiter := range map[string]*RateLimiter{"shop": shopLimiter, "store": storeLimiter} {
-        if decision, allowErr := limiter.Allow(runtimeInstance, "client"); nil != allowErr || false == decision.Allowed {
+        if decision, allowErr := limiter.Allow(runtimeInstance, "client", httpcontract.AllowOptions{}); nil != allowErr || false == decision.Allowed {
             t.Fatalf("%s: expected the first request of its own counter admitted, got %+v %v", label, decision, allowErr)
         }
     }

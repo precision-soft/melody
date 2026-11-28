@@ -46,12 +46,12 @@ func (instance Bound) Get(key string, target any) (bool, error) {
     return instance.cacheInstance.Get(instance.runtimeInstance, key, target)
 }
 
-func (instance Bound) Set(key string, value any, ttl bound.Duration) error {
+func (instance Bound) Set(key string, value any, ttl bound.Duration, options cachecontract.SetOptions) error {
     if nilErr := instance.refuseNilCache(); nil != nilErr {
         return nilErr
     }
 
-    return instance.cacheInstance.Set(instance.runtimeInstance, key, value, ttl)
+    return instance.cacheInstance.Set(instance.runtimeInstance, key, value, ttl, options)
 }
 
 func (instance Bound) Delete(key string) error {
@@ -86,12 +86,12 @@ func (instance Bound) Many(keys []string, target any) error {
     return instance.cacheInstance.Many(instance.runtimeInstance, keys, target)
 }
 
-func (instance Bound) SetMultiple(items map[string]any, ttl bound.Duration) error {
+func (instance Bound) SetMultiple(items map[string]any, ttl bound.Duration, options cachecontract.SetOptions) error {
     if nilErr := instance.refuseNilCache(); nil != nilErr {
         return nilErr
     }
 
-    return instance.cacheInstance.SetMultiple(instance.runtimeInstance, items, ttl)
+    return instance.cacheInstance.SetMultiple(instance.runtimeInstance, items, ttl, options)
 }
 
 func (instance Bound) DeleteMultiple(keys []string) error {

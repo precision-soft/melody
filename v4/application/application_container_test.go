@@ -490,7 +490,7 @@ func TestApplicationRegisterCache_TheFallbackBackendIsBoundedAtTheDefaultCeiling
         key := "key-" + strconv.Itoa(index)
         keys = append(keys, key)
 
-        if setErr := backend.Set(runtimeInstance, key, []byte("1"), bound.UnlimitedDuration()); nil != setErr {
+        if setErr := backend.Set(runtimeInstance, key, []byte("1"), bound.UnlimitedDuration(), cachecontract.SetOptions{}); nil != setErr {
             t.Fatalf("set error: %v", setErr)
         }
     }

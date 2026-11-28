@@ -146,7 +146,7 @@ func compileOneCsrfFirewall(t *testing.T, global security.CsrfConfig, tokenSourc
 
 type allowingRateLimiter struct{}
 
-func (instance *allowingRateLimiter) Allow(runtimeInstance containercontract.Runtime, key string) (httpcontract.RateLimitDecision, error) {
+func (instance *allowingRateLimiter) Allow(runtimeInstance containercontract.Runtime, key string, _ httpcontract.AllowOptions) (httpcontract.RateLimitDecision, error) {
     return httpcontract.RateLimitDecision{Allowed: true}, nil
 }
 

@@ -74,7 +74,7 @@ func TestUserEventSubscriber_DropsBothSpellingsOnARename(t *testing.T) {
         service.CacheKeyUserList,
     }
     for _, key := range keyList {
-        if setErr := cacheInstance.Set(exampleTestRuntime(), key, "stale", melodybound.UnlimitedDuration()); nil != setErr {
+        if setErr := cacheInstance.Set(exampleTestRuntime(), key, "stale", melodybound.UnlimitedDuration(), melodycachecontract.SetOptions{}); nil != setErr {
             t.Fatalf("prime %s: %v", key, setErr)
         }
     }
@@ -103,7 +103,7 @@ func TestUserEventSubscriber_DropsTheEntriesUnderACanceledEvent(t *testing.T) {
 
     keyList := []string{service.CacheKeyUserById("user-7"), service.CacheKeyUserList}
     for _, key := range keyList {
-        if setErr := cacheInstance.Set(exampleTestRuntime(), key, "stale", melodybound.UnlimitedDuration()); nil != setErr {
+        if setErr := cacheInstance.Set(exampleTestRuntime(), key, "stale", melodybound.UnlimitedDuration(), melodycachecontract.SetOptions{}); nil != setErr {
             t.Fatalf("prime %s: %v", key, setErr)
         }
     }

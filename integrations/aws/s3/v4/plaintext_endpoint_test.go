@@ -297,7 +297,7 @@ func TestStorage_StatWritesThePlaintextEndpointWarning(t *testing.T) {
     storage := NewStorage(newClientFor(t, "s3.example.com", false), "bucket", StorageConfig{})
 
     for range 2 {
-        if _, statErr := storage.Stat(runtimeInstance, "object.txt"); nil == statErr {
+        if _, statErr := storage.Stat(runtimeInstance, "object.txt", storagecontract.StatOptions{}); nil == statErr {
             t.Fatalf("expected the stat refused under a done context")
         }
     }

@@ -473,7 +473,7 @@ func TestRateLimitGate_AnUnmarkedDenialBesideAnErrorStays429(t *testing.T) {
 
 type rateLimitListenerTestPanickingLimiter struct{}
 
-func (instance *rateLimitListenerTestPanickingLimiter) Allow(runtimeInstance containercontract.Runtime, key string) (httpcontract.RateLimitDecision, error) {
+func (instance *rateLimitListenerTestPanickingLimiter) Allow(runtimeInstance containercontract.Runtime, key string, _ httpcontract.AllowOptions) (httpcontract.RateLimitDecision, error) {
     panic("the limiter's store broke")
 }
 

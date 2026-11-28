@@ -13,6 +13,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/repository"
     "github.com/precision-soft/melody/v4/.example/service"
     melodybound "github.com/precision-soft/melody/v4/bound"
+    melodycachecontract "github.com/precision-soft/melody/v4/cache/contract"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
@@ -323,7 +324,7 @@ func TestApiReadDoorsEndWithTheRequest(t *testing.T) {
         if nil != currencyListErr {
             t.Fatalf("read the currencies: %v", currencyListErr)
         }
-        if setErr := fixture.cache.Set(exampleTestRuntime(), service.CacheKeyCurrencyList, currencyList, melodybound.UnlimitedDuration()); nil != setErr {
+        if setErr := fixture.cache.Set(exampleTestRuntime(), service.CacheKeyCurrencyList, currencyList, melodybound.UnlimitedDuration(), melodycachecontract.SetOptions{}); nil != setErr {
             t.Fatalf("prime the currencies: %v", setErr)
         }
         fixture.requestContext = endedRequestContext()
@@ -347,7 +348,7 @@ func TestApiReadDoorsEndWithTheRequest(t *testing.T) {
         if nil != categoryListErr {
             t.Fatalf("read the categories: %v", categoryListErr)
         }
-        if setErr := fixture.cache.Set(exampleTestRuntime(), service.CacheKeyCategoryList, categoryList, melodybound.UnlimitedDuration()); nil != setErr {
+        if setErr := fixture.cache.Set(exampleTestRuntime(), service.CacheKeyCategoryList, categoryList, melodybound.UnlimitedDuration(), melodycachecontract.SetOptions{}); nil != setErr {
             t.Fatalf("prime the categories: %v", setErr)
         }
         fixture.requestContext = endedRequestContext()

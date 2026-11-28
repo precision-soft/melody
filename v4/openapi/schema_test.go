@@ -3649,7 +3649,7 @@ func TestLockstepMirrorNeverAdvertisesWhatTheValidatorRefuses(t *testing.T) {
 
             if false == lockstepRequired(schema) && false == lockstepTagNamesAnUnmodeledRule(tag) {
                 zeroStruct := reflect.New(structType).Elem()
-                if validateErr := validatorInstance.Validate(testValidationRuntime(), zeroStruct.Interface()); nil != validateErr {
+                if validateErr := validatorInstance.Validate(testValidationRuntime(), zeroStruct.Interface(), validation.ValidateOptions{}); nil != validateErr {
                     t.Errorf(
                         "tag %q on %v: the spec leaves the field optional, the validator refuses the absent zero value: %v",
                         tag, fieldType, validateErr,
@@ -3668,7 +3668,7 @@ func TestLockstepMirrorNeverAdvertisesWhatTheValidatorRefuses(t *testing.T) {
 
                 structValue := reflect.New(structType).Elem()
                 structValue.Field(0).Set(candidate)
-                if validateErr := validatorInstance.Validate(testValidationRuntime(), structValue.Interface()); nil != validateErr {
+                if validateErr := validatorInstance.Validate(testValidationRuntime(), structValue.Interface(), validation.ValidateOptions{}); nil != validateErr {
                     t.Errorf(
                         "tag %q on %v: the spec advertises %#v, the validator refuses it: %v",
                         tag, fieldType, candidate.Interface(), validateErr,
@@ -3721,7 +3721,7 @@ func TestLockstepMirrorStillAdvertisesSatisfiableValues(t *testing.T) {
 
         structValue := reflect.New(structType).Elem()
         structValue.Field(0).Set(candidate)
-        if validateErr := validatorInstance.Validate(testValidationRuntime(), structValue.Interface()); nil != validateErr {
+        if validateErr := validatorInstance.Validate(testValidationRuntime(), structValue.Interface(), validation.ValidateOptions{}); nil != validateErr {
             t.Errorf("tag %q on %v: the row is meant to be satisfiable on both sides, the validator refuses %#v: %v", row.tag, row.fieldType, row.value, validateErr)
         }
     }
@@ -3749,7 +3749,7 @@ func TestLockstepMirrorStillAdvertisesSatisfiableValues(t *testing.T) {
         }
 
         structValue := reflect.New(structType).Elem()
-        if validateErr := validatorInstance.Validate(testValidationRuntime(), structValue.Interface()); nil != validateErr {
+        if validateErr := validatorInstance.Validate(testValidationRuntime(), structValue.Interface(), validation.ValidateOptions{}); nil != validateErr {
             t.Errorf("tag %q on %v: the validator is meant to skip the nil pointer and does not: %v", row.tag, row.fieldType, validateErr)
         }
     }
@@ -3775,7 +3775,7 @@ func TestLockstepNumericBoundAgreesWithValidator(t *testing.T) {
 
                 structValue := reflect.New(structType).Elem()
                 structValue.Field(0).Set(candidate)
-                validatorAccepts := nil == validatorInstance.Validate(testValidationRuntime(), structValue.Interface())
+                validatorAccepts := nil == validatorInstance.Validate(testValidationRuntime(), structValue.Interface(), validation.ValidateOptions{})
 
                 if mirrorAccepts != validatorAccepts {
                     t.Errorf(

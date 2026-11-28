@@ -157,7 +157,7 @@ func TestCurrencyRefreshRatesCommandNamesTheCacheDropThatFailedOverAnUnchangedQu
     runtimeInstance := rateRefreshCommandRuntime(t, `{"base":"EUR","asOf":"2026-01-01T00:00:00Z","rates":{"EUR":1,"USD":1.1,"RON":5.05}}`, nil, func(cache melodycachecontract.Cache) melodycachecontract.Cache {
         for _, currencyId := range []string{"cur-eur", "cur-usd", "cur-ron"} {
             stale := entity.NewCurrency(currencyId, "", "", 9.9, time.Date(2025, time.January, 1, 0, 0, 0, 0, time.UTC))
-            if setErr := cache.Set(exampleTestRuntime(), service.CacheKeyCurrencyById(currencyId), stale, bound.Of(time.Hour)); nil != setErr {
+            if setErr := cache.Set(exampleTestRuntime(), service.CacheKeyCurrencyById(currencyId), stale, bound.Of(time.Hour), melodycachecontract.SetOptions{}); nil != setErr {
                 t.Fatalf("planting the stale entry of %s failed: %v", currencyId, setErr)
             }
         }

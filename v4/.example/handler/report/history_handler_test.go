@@ -221,7 +221,7 @@ func TestApiHistoryHandler_ServesTheCachedReadingAsTheCurrentOne(t *testing.T) {
     cacheInstance := melodycache.NewManager(melodycache.NewInMemoryBackend(melodycache.InMemoryBackendConfig{MaxItems: melodybound.Of(16), CleanupInterval: melodybound.Of(time.Minute), Clock: melodyclock.NewSystemClock()}), examplecache.NewGobSerializer(), melodycache.ManagerConfig{OwnsBackend: true})
     t.Cleanup(func() { _ = cacheInstance.CloseWithContext(context.Background()) })
 
-    if setErr := cacheInstance.Set(exampleTestRuntime(), "catalog.reading", "products=7 journal=3 recorded_at=2026-10-06T10:00:00Z", melodybound.Of(time.Hour)); nil != setErr {
+    if setErr := cacheInstance.Set(exampleTestRuntime(), "catalog.reading", "products=7 journal=3 recorded_at=2026-10-06T10:00:00Z", melodybound.Of(time.Hour), melodycachecontract.SetOptions{}); nil != setErr {
         t.Fatalf("prime the reading: %v", setErr)
     }
 

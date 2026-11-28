@@ -58,7 +58,7 @@ func TestManager_SetGetManySetMultipleDeleteMultipleClearDeleteHasClose(t *testi
 
     cacheInstance := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
-    setErr := cacheInstance.Set(testRuntime(), "a", "1", bound.UnlimitedDuration())
+    setErr := cacheInstance.Set(testRuntime(), "a", "1", bound.UnlimitedDuration(), cachecontract.SetOptions{})
     if nil != setErr {
         t.Fatalf("set error: %v", setErr)
     }
@@ -100,6 +100,7 @@ func TestManager_SetGetManySetMultipleDeleteMultipleClearDeleteHasClose(t *testi
             "c": "3",
         },
         bound.UnlimitedDuration(),
+        cachecontract.SetOptions{},
     )
     if nil != setMultipleErr {
         t.Fatalf("setMultiple error: %v", setMultipleErr)
@@ -142,7 +143,7 @@ func TestManager_SetGetManySetMultipleDeleteMultipleClearDeleteHasClose(t *testi
         t.Fatalf("expected a deleted")
     }
 
-    setErr = cacheInstance.Set(testRuntime(), "x", "y", bound.UnlimitedDuration())
+    setErr = cacheInstance.Set(testRuntime(), "x", "y", bound.UnlimitedDuration(), cachecontract.SetOptions{})
     if nil != setErr {
         t.Fatalf("set error: %v", setErr)
     }
@@ -178,7 +179,7 @@ func TestNewManager_DoesNotCloseTheBackend(t *testing.T) {
         t.Fatalf("close error: %v", closeErr)
     }
 
-    if setErr := backend.Set(testRuntime(), "a", []byte("1"), bound.UnlimitedDuration()); nil != setErr {
+    if setErr := backend.Set(testRuntime(), "a", []byte("1"), bound.UnlimitedDuration(), cachecontract.SetOptions{}); nil != setErr {
         t.Fatalf("expected the backend to stay open after the non-owning manager closed, got: %v", setErr)
     }
 }
@@ -194,7 +195,7 @@ func TestNewManager_AnOwnedBackendIsClosedWithTheManager(t *testing.T) {
         t.Fatalf("close error: %v", closeErr)
     }
 
-    if setErr := backend.Set(testRuntime(), "a", []byte("1"), bound.UnlimitedDuration()); nil == setErr {
+    if setErr := backend.Set(testRuntime(), "a", []byte("1"), bound.UnlimitedDuration(), cachecontract.SetOptions{}); nil == setErr {
         t.Fatalf("expected the backend to be closed by the owning manager")
     }
 }
@@ -207,7 +208,7 @@ func TestManager_Get_TypesTheDeserializationFailure(t *testing.T) {
 
     manager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
-    if setErr := backend.Set(testRuntime(), "corrupt", []byte("{not json"), bound.UnlimitedDuration()); nil != setErr {
+    if setErr := backend.Set(testRuntime(), "corrupt", []byte("{not json"), bound.UnlimitedDuration(), cachecontract.SetOptions{}); nil != setErr {
         t.Fatalf("set error: %v", setErr)
     }
 
@@ -231,13 +232,13 @@ func TestManager_Many_SkipsCorruptEntriesAndNamesThem(t *testing.T) {
 
     manager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
-    if setErr := manager.Set(testRuntime(), "good.one", "1", bound.UnlimitedDuration()); nil != setErr {
+    if setErr := manager.Set(testRuntime(), "good.one", "1", bound.UnlimitedDuration(), cachecontract.SetOptions{}); nil != setErr {
         t.Fatalf("set error: %v", setErr)
     }
-    if setErr := manager.Set(testRuntime(), "good.two", "2", bound.UnlimitedDuration()); nil != setErr {
+    if setErr := manager.Set(testRuntime(), "good.two", "2", bound.UnlimitedDuration(), cachecontract.SetOptions{}); nil != setErr {
         t.Fatalf("set error: %v", setErr)
     }
-    if setErr := backend.Set(testRuntime(), "corrupt", []byte("{not json"), bound.UnlimitedDuration()); nil != setErr {
+    if setErr := backend.Set(testRuntime(), "corrupt", []byte("{not json"), bound.UnlimitedDuration(), cachecontract.SetOptions{}); nil != setErr {
         t.Fatalf("set error: %v", setErr)
     }
 
@@ -277,7 +278,7 @@ func TestManager_SetMultipleNamesTheRefusedKeysDeterministically(t *testing.T) {
     manager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
     for round := 0; round < 50; round++ {
-        setErr := manager.SetMultiple(testRuntime(), map[string]any{"b.bad": make(chan int), "a.bad": make(chan int), "good": "kept"}, bound.UnlimitedDuration())
+        setErr := manager.SetMultiple(testRuntime(), map[string]any{"b.bad": make(chan int), "a.bad": make(chan int), "good": "kept"}, bound.UnlimitedDuration(), cachecontract.SetOptions{})
         if nil == setErr {
             t.Fatalf("expected a serialization error from SetMultiple")
         }
@@ -323,7 +324,7 @@ func TestManager_SetMultipleAnswersARefusalWhenTheSerializersErrorTextPanics(t *
             recoveredValue = recover()
         }()
 
-        setErr = manager.SetMultiple(testRuntime(), map[string]any{"a.bad": "first", "b.bad": "second"}, bound.UnlimitedDuration())
+        setErr = manager.SetMultiple(testRuntime(), map[string]any{"a.bad": "first", "b.bad": "second"}, bound.UnlimitedDuration(), cachecontract.SetOptions{})
     }()
 
     if nil != recoveredValue {
@@ -376,7 +377,7 @@ func TestManager_Set_NamesTheKeyOnSerializationFailure(t *testing.T) {
 
     manager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
-    setErr := manager.Set(testRuntime(), "unserializable", make(chan int), bound.UnlimitedDuration())
+    setErr := manager.Set(testRuntime(), "unserializable", make(chan int), bound.UnlimitedDuration(), cachecontract.SetOptions{})
     if nil == setErr {
         t.Fatalf("expected a serialization error")
     }
@@ -389,7 +390,7 @@ func TestManager_Set_NamesTheKeyOnSerializationFailure(t *testing.T) {
         t.Fatalf("expected the error context to name the key, got: %v", exceptionErr.Context())
     }
 
-    setMultipleErr := manager.SetMultiple(testRuntime(), map[string]any{"multi.bad": make(chan int)}, bound.UnlimitedDuration())
+    setMultipleErr := manager.SetMultiple(testRuntime(), map[string]any{"multi.bad": make(chan int)}, bound.UnlimitedDuration(), cachecontract.SetOptions{})
     if nil == setMultipleErr {
         t.Fatalf("expected a serialization error from SetMultiple")
     }
@@ -416,8 +417,8 @@ func (instance *cacheTestTypedNilErrorBackend) Get(runtimeInstance containercont
     return payload, exists, instance.typedNilError()
 }
 
-func (instance *cacheTestTypedNilErrorBackend) Set(runtimeInstance containercontract.Runtime, key string, payload []byte, ttl bound.Duration) error {
-    _ = instance.inner.Set(runtimeInstance, key, payload, ttl)
+func (instance *cacheTestTypedNilErrorBackend) Set(runtimeInstance containercontract.Runtime, key string, payload []byte, ttl bound.Duration, _ cachecontract.SetOptions) error {
+    _ = instance.inner.Set(runtimeInstance, key, payload, ttl, cachecontract.SetOptions{})
     return instance.typedNilError()
 }
 
@@ -440,7 +441,7 @@ func (instance *cacheTestTypedNilErrorBackend) Many(runtimeInstance containercon
     return result, instance.typedNilError()
 }
 
-func (instance *cacheTestTypedNilErrorBackend) SetMultiple(runtimeInstance containercontract.Runtime, items map[string][]byte, ttl bound.Duration) error {
+func (instance *cacheTestTypedNilErrorBackend) SetMultiple(runtimeInstance containercontract.Runtime, items map[string][]byte, ttl bound.Duration, _ cachecontract.SetOptions) error {
     return instance.typedNilError()
 }
 
@@ -470,7 +471,7 @@ func TestManager_ReadsTypedNilBackendErrorsAsSuccess(t *testing.T) {
 
     manager := NewManager(&cacheTestTypedNilErrorBackend{inner: inner}, NewJsonSerializer(), ManagerConfig{})
 
-    if setErr := manager.Set(testRuntime(), "a", "1", bound.UnlimitedDuration()); nil != setErr {
+    if setErr := manager.Set(testRuntime(), "a", "1", bound.UnlimitedDuration(), cachecontract.SetOptions{}); nil != setErr {
         t.Fatalf("expected the typed-nil Set error to read as success, got: %v", setErr)
     }
 
@@ -521,7 +522,7 @@ func TestManager_GetCounterRejectsANonCounterPayload(t *testing.T) {
     manager := NewManager(NewInMemoryBackend(InMemoryBackendConfig{CleanupInterval: bound.Of(time.Hour), Clock: clockInstance}), NewJsonSerializer(), ManagerConfig{OwnsBackend: true})
     defer manager.CloseWithContext(context.Background())
 
-    if setErr := manager.Set(testRuntime(), "greeting", "hello", bound.Of(time.Hour)); nil != setErr {
+    if setErr := manager.Set(testRuntime(), "greeting", "hello", bound.Of(time.Hour), cachecontract.SetOptions{}); nil != setErr {
         t.Fatalf("unexpected set error: %v", setErr)
     }
 
@@ -536,7 +537,7 @@ func TestManager_GetCounterKeepsThePayloadOutOfTheChain(t *testing.T) {
     manager := NewManager(NewInMemoryBackend(InMemoryBackendConfig{CleanupInterval: bound.Of(time.Hour), Clock: clockInstance}), NewJsonSerializer(), ManagerConfig{OwnsBackend: true})
     defer manager.CloseWithContext(context.Background())
 
-    if setErr := manager.Set(testRuntime(), "greeting", "a-secret-greeting", bound.Of(time.Hour)); nil != setErr {
+    if setErr := manager.Set(testRuntime(), "greeting", "a-secret-greeting", bound.Of(time.Hour), cachecontract.SetOptions{}); nil != setErr {
         t.Fatalf("unexpected set error: %v", setErr)
     }
 
@@ -619,7 +620,7 @@ func TestManager_ABackendFailureTravelsOutOfEveryRead(t *testing.T) {
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
     manager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
-    if setErr := manager.Set(testRuntime(), "key", "value", bound.UnlimitedDuration()); nil != setErr {
+    if setErr := manager.Set(testRuntime(), "key", "value", bound.UnlimitedDuration(), cachecontract.SetOptions{}); nil != setErr {
         t.Fatalf("unexpected set error: %v", setErr)
     }
 
@@ -670,7 +671,7 @@ func TestManager_ManyDeserializesARepeatedKeyOnlyOnce(t *testing.T) {
     countingSerializer := &cacheTestCountingSerializer{inner: NewJsonSerializer()}
     manager := NewManager(backend, countingSerializer, ManagerConfig{})
 
-    if setErr := manager.Set(testRuntime(), "key", "value", bound.UnlimitedDuration()); nil != setErr {
+    if setErr := manager.Set(testRuntime(), "key", "value", bound.UnlimitedDuration(), cachecontract.SetOptions{}); nil != setErr {
         t.Fatalf("unexpected set error: %v", setErr)
     }
 
@@ -757,7 +758,7 @@ func TestManager_SetMultipleCarriesTheReasonOfEveryRefusedKey(t *testing.T) {
         "":     make(chan int),
         "mmm":  func() {},
         "fine": "value",
-    }, bound.Of(time.Minute))
+    }, bound.Of(time.Minute), cachecontract.SetOptions{})
 
     if nil == setErr {
         t.Fatalf("expected the unserializable entries to be refused")
@@ -785,7 +786,7 @@ func TestManager_GetCounterRefusesWhatIncrementRefuses(t *testing.T) {
     defer manager.CloseWithContext(context.Background())
 
     for _, payload := range []string{" 7", "+7", "07", "7\n"} {
-        if setErr := backend.Set(testRuntime(), "visits", []byte(payload), bound.UnlimitedDuration()); nil != setErr {
+        if setErr := backend.Set(testRuntime(), "visits", []byte(payload), bound.UnlimitedDuration(), cachecontract.SetOptions{}); nil != setErr {
             t.Fatalf("unexpected set error: %v", setErr)
         }
 
@@ -810,12 +811,12 @@ func TestManager_EveryDoorHandsTheCallersContextToTheBackend(t *testing.T) {
 
     doors := map[string]func() error{
         "Get":            func() error { _, _, err := Get[any](For(testRuntimeUnder(canceledContext), manager), "key"); return err },
-        "Set":            func() error { return manager.Set(testRuntimeUnder(canceledContext), "key", "value", bound.Of(time.Minute)) },
+        "Set":            func() error { return manager.Set(testRuntimeUnder(canceledContext), "key", "value", bound.Of(time.Minute), cachecontract.SetOptions{}) },
         "Delete":         func() error { return manager.Delete(testRuntimeUnder(canceledContext), "key") },
         "Has":            func() error { _, err := manager.Has(testRuntimeUnder(canceledContext), "key"); return err },
         "Clear":          func() error { return manager.Clear(testRuntimeUnder(canceledContext)) },
         "Many":           func() error { _, err := Many[any](For(testRuntimeUnder(canceledContext), manager), []string{"key"}); return err },
-        "SetMultiple":    func() error { return manager.SetMultiple(testRuntimeUnder(canceledContext), map[string]any{"key": "value"}, bound.Of(time.Minute)) },
+        "SetMultiple":    func() error { return manager.SetMultiple(testRuntimeUnder(canceledContext), map[string]any{"key": "value"}, bound.Of(time.Minute), cachecontract.SetOptions{}) },
         "DeleteMultiple": func() error { return manager.DeleteMultiple(testRuntimeUnder(canceledContext), []string{"key"}) },
         "Increment":      func() error { _, err := manager.Increment(testRuntimeUnder(canceledContext), "counter", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()}); return err },
         "Decrement":      func() error { _, err := manager.Decrement(testRuntimeUnder(canceledContext), "counter", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()}); return err },
@@ -846,11 +847,11 @@ func TestManager_ANilRuntimeIsRefusedBeforeTheValueIsSerialized(t *testing.T) {
     manager := NewManager(backend, refusingSerializer{}, ManagerConfig{})
 
     for _, refusedRuntime := range refusedTestRuntimes() {
-        if setErr := manager.Set(refusedRuntime, "key", "value", bound.Of(time.Minute)); nil == setErr || refusedRuntimeMessage != setErr.Error() {
+        if setErr := manager.Set(refusedRuntime, "key", "value", bound.Of(time.Minute), cachecontract.SetOptions{}); nil == setErr || refusedRuntimeMessage != setErr.Error() {
             t.Fatalf("Set: expected the runtime refused first, got %v", setErr)
         }
 
-        if setErr := manager.SetMultiple(refusedRuntime, map[string]any{"key": "value"}, bound.Of(time.Minute)); nil == setErr || refusedRuntimeMessage != setErr.Error() {
+        if setErr := manager.SetMultiple(refusedRuntime, map[string]any{"key": "value"}, bound.Of(time.Minute), cachecontract.SetOptions{}); nil == setErr || refusedRuntimeMessage != setErr.Error() {
             t.Fatalf("SetMultiple: expected the runtime refused first, got %v", setErr)
         }
     }
@@ -863,12 +864,12 @@ func TestManager_EveryDoorRefusesAnAbsentRuntime(t *testing.T) {
         var target any
         var targets map[string]any
         _, getErr := manager.Get(refusedRuntime, "k", &target)
-        setErr := manager.Set(refusedRuntime, "k", "v", bound.Of(time.Minute))
+        setErr := manager.Set(refusedRuntime, "k", "v", bound.Of(time.Minute), cachecontract.SetOptions{})
         deleteErr := manager.Delete(refusedRuntime, "k")
         _, hasErr := manager.Has(refusedRuntime, "k")
         clearErr := manager.Clear(refusedRuntime)
         manyErr := manager.Many(refusedRuntime, []string{"k"}, &targets)
-        setMultipleErr := manager.SetMultiple(refusedRuntime, map[string]any{"k": "v"}, bound.Of(time.Minute))
+        setMultipleErr := manager.SetMultiple(refusedRuntime, map[string]any{"k": "v"}, bound.Of(time.Minute), cachecontract.SetOptions{})
         deleteMultipleErr := manager.DeleteMultiple(refusedRuntime, []string{"k"})
         _, incrementErr := manager.Increment(refusedRuntime, "c", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()})
         _, decrementErr := manager.Decrement(refusedRuntime, "c", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()})

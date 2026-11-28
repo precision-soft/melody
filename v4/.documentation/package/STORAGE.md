@@ -14,7 +14,7 @@ Storage is opt-in. Userland builds a `Storage` and registers it under [`ServiceS
 ## Responsibilities
 
 - Define the abstraction:
-    - [`Storage`](../../storage/contract/storage.go) — `Put`, `Get`, `Stat`, `Delete`, `PresignedUrl`
+    - [`Storage`](../../storage/contract/storage.go) — `Put`, `Get`, `Stat(runtimeInstance, key, StatOptions)`, `Delete(runtimeInstance, key, DeleteOptions)`, `PresignedUrl`; [`StatOptions`](../../storage/contract/storage.go) and [`DeleteOptions`](../../storage/contract/storage.go) are empty on purpose, so a per-call value can be added after the tag as a field
     - [`PutOptions`](../../storage/contract/storage.go), [`GetOptions`](../../storage/contract/storage.go) with its [`ByteRange`](../../storage/contract/storage.go), [`Object`](../../storage/contract/storage.go), [`ObjectInfo`](../../storage/contract/storage.go), [`PresignConfig`](../../storage/contract/storage.go)
     - [`ResolveByteRange`](../../storage/contract/range.go), [`PresignExpiryRule()`](../../storage/contract/presign.go), [`ResolvePresignExpiry`](../../storage/contract/presign.go), [`ResolvePresignMethod`](../../storage/contract/presign.go)
     - [`ErrKeyIsDirectory`](../../storage/contract/error.go) — the cause of a refusal of a key that names a directory, a prefix of other keys and not an object
@@ -46,7 +46,7 @@ if nil == getErr {
     defer object.Body.Close()
 }
 
-objectInfo, statErr := labels.Stat("labels/awb-123.pdf")
+objectInfo, statErr := labels.Stat("labels/awb-123.pdf", storagecontract.StatOptions{})
 
 exists, existsErr := storage.Exists(labels, "labels/awb-123.pdf")
 

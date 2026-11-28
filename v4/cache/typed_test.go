@@ -28,16 +28,16 @@ type cacheTestCountingBackend struct {
     manyErr   error
 }
 
-func (instance *cacheTestCountingBackend) Set(runtimeInstance containercontract.Runtime, key string, payload []byte, ttl bound.Duration) error {
+func (instance *cacheTestCountingBackend) Set(runtimeInstance containercontract.Runtime, key string, payload []byte, ttl bound.Duration, _ cachecontract.SetOptions) error {
     instance.setCalls.Add(1)
 
-    return instance.Backend.Set(runtimeInstance, key, payload, ttl)
+    return instance.Backend.Set(runtimeInstance, key, payload, ttl, cachecontract.SetOptions{})
 }
 
-func (instance *cacheTestCountingBackend) SetMultiple(runtimeInstance containercontract.Runtime, items map[string][]byte, ttl bound.Duration) error {
+func (instance *cacheTestCountingBackend) SetMultiple(runtimeInstance containercontract.Runtime, items map[string][]byte, ttl bound.Duration, _ cachecontract.SetOptions) error {
     instance.setCalls.Add(1)
 
-    return instance.Backend.SetMultiple(runtimeInstance, items, ttl)
+    return instance.Backend.SetMultiple(runtimeInstance, items, ttl, cachecontract.SetOptions{})
 }
 
 func (instance *cacheTestCountingBackend) Get(runtimeInstance containercontract.Runtime, key string) ([]byte, bool, error) {
@@ -69,7 +69,7 @@ func newCacheTestManager(t *testing.T) (*Manager, *cacheTestCountingBackend) {
 func TestGet_AnswersTheTypeAsked(t *testing.T) {
     manager, _ := newCacheTestManager(t)
 
-    if setErr := manager.Set(testRuntime(), "k", cacheTestUser{Name: "a", Tags: []string{"x"}}, bound.Of(time.Minute)); nil != setErr {
+    if setErr := manager.Set(testRuntime(), "k", cacheTestUser{Name: "a", Tags: []string{"x"}}, bound.Of(time.Minute), cachecontract.SetOptions{}); nil != setErr {
         t.Fatalf("set error: %v", setErr)
     }
 
@@ -87,7 +87,7 @@ func TestGet_AnswersTheTypeAsked(t *testing.T) {
 func TestGet_AnswersTheZeroValueBesideAnError(t *testing.T) {
     manager, _ := newCacheTestManager(t)
 
-    if setErr := manager.Set(testRuntime(), "k", "text", bound.Of(time.Minute)); nil != setErr {
+    if setErr := manager.Set(testRuntime(), "k", "text", bound.Of(time.Minute), cachecontract.SetOptions{}); nil != setErr {
         t.Fatalf("set error: %v", setErr)
     }
 
@@ -150,7 +150,7 @@ type cacheTestSummary struct {
 func TestGet_UnderJsonAnObjectWrittenAsOneStructReadsAsAnotherStruct(t *testing.T) {
     manager, _ := newCacheTestManager(t)
 
-    if setErr := manager.Set(testRuntime(), "k", cacheTestUser{Name: "a"}, bound.Of(time.Minute)); nil != setErr {
+    if setErr := manager.Set(testRuntime(), "k", cacheTestUser{Name: "a"}, bound.Of(time.Minute), cachecontract.SetOptions{}); nil != setErr {
         t.Fatalf("set error: %v", setErr)
     }
 
@@ -184,7 +184,7 @@ func TestGetAndMany_RefuseATypedNilCache(t *testing.T) {
 func TestGet_ANilStoredValueIsAHitOfTheZeroValue(t *testing.T) {
     manager, _ := newCacheTestManager(t)
 
-    if setErr := manager.Set(testRuntime(), "k", nil, bound.Of(time.Minute)); nil != setErr {
+    if setErr := manager.Set(testRuntime(), "k", nil, bound.Of(time.Minute), cachecontract.SetOptions{}); nil != setErr {
         t.Fatalf("set error: %v", setErr)
     }
 
@@ -197,7 +197,7 @@ func TestGet_ANilStoredValueIsAHitOfTheZeroValue(t *testing.T) {
 func TestManager_Get_OverwritesTheTargetWhole(t *testing.T) {
     manager, _ := newCacheTestManager(t)
 
-    if setErr := manager.Set(testRuntime(), "k", cacheTestUser{Name: "new"}, bound.Of(time.Minute)); nil != setErr {
+    if setErr := manager.Set(testRuntime(), "k", cacheTestUser{Name: "new"}, bound.Of(time.Minute), cachecontract.SetOptions{}); nil != setErr {
         t.Fatalf("set error: %v", setErr)
     }
 
@@ -248,7 +248,7 @@ func TestManager_Get_LeavesTheTargetOnAMissAFailureAndACorruptPayload(t *testing
         defer func() { _ = inner.CloseWithContext(context.Background()) }()
 
         manager := NewManager(inner, writingRefusingSerializer{JsonSerializer: &JsonSerializer{}}, ManagerConfig{})
-        if setErr := inner.Set(testRuntime(), "corrupt", []byte("{"), bound.Of(time.Minute)); nil != setErr {
+        if setErr := inner.Set(testRuntime(), "corrupt", []byte("{"), bound.Of(time.Minute), cachecontract.SetOptions{}); nil != setErr {
             t.Fatalf("set error: %v", setErr)
         }
 
@@ -284,7 +284,7 @@ func TestManager_Get_RefusesATargetThatIsNoNonNilPointer(t *testing.T) {
 func TestManager_Get_APayloadOfAnotherTypeIsADeserializationError(t *testing.T) {
     manager, _ := newCacheTestManager(t)
 
-    if setErr := manager.Set(testRuntime(), "k", "text", bound.Of(time.Minute)); nil != setErr {
+    if setErr := manager.Set(testRuntime(), "k", "text", bound.Of(time.Minute), cachecontract.SetOptions{}); nil != setErr {
         t.Fatalf("set error: %v", setErr)
     }
 
@@ -307,7 +307,7 @@ func TestManager_Get_ANilRuntimeIsRefusedBeforeTheTarget(t *testing.T) {
 func TestManager_Many_ReplacesTheMapWithTheDecodedEntries(t *testing.T) {
     manager, _ := newCacheTestManager(t)
 
-    if setErr := manager.Set(testRuntime(), "a", cacheTestUser{Name: "a"}, bound.Of(time.Minute)); nil != setErr {
+    if setErr := manager.Set(testRuntime(), "a", cacheTestUser{Name: "a"}, bound.Of(time.Minute), cachecontract.SetOptions{}); nil != setErr {
         t.Fatalf("set error: %v", setErr)
     }
 
