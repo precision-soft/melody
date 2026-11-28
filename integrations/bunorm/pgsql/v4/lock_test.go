@@ -14,6 +14,7 @@ import (
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
+    lockcontract "github.com/precision-soft/melody/v4/lock/contract"
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect/pgdialect"
     "github.com/uptrace/bun/driver/pgdriver"
@@ -439,5 +440,11 @@ func TestPgsqlLock_AnUnlockTheServerAnswersFalseIsAnErrorAndEndsTheSession(t *te
 
     if _, closes, releases := connector.counts(); 1 != releases || 1 != closes {
         t.Fatalf("expected one unlock and the session ended, got %d unlocks and %d closes", releases, closes)
+    }
+}
+
+func TestLocker_DoesNotAnswerTheSharedLeaseMark(t *testing.T) {
+    if _, isSharedLease := any((*Locker)(nil)).(lockcontract.SharedLeaseLocker); true == isSharedLease {
+        t.Fatalf("expected a session locker not to answer a lease shared by the replicas")
     }
 }

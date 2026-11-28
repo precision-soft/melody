@@ -11,6 +11,7 @@ import (
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/container/runtime"
+    "github.com/precision-soft/melody/v4/exception"
     lockcontract "github.com/precision-soft/melody/v4/lock/contract"
 )
 
@@ -291,5 +292,90 @@ func TestLazyLocker_AnInnerLockerAnsweringNoLockIsTheErrorOfEveryDoor(t *testing
         if true == acquired || false == namesNoLock(acquireErr) {
             t.Fatalf("attempt %d: expected the no-lock refusal, got %v %v", attempt, acquired, acquireErr)
         }
+    }
+}
+
+type sharedLeaseTestLocker struct {
+    lockcontract.Locker
+}
+
+func (instance *sharedLeaseTestLocker) LeasesAcrossReplicas(runtimeInstance containercontract.Runtime) (bool, error) {
+    return true, nil
+}
+
+func registeredLazyLocker(provide func() (lockcontract.Locker, error)) (lockcontract.Locker, *atomic.Int64) {
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    provided := &atomic.Int64{}
+
+    container.MustRegister[lockcontract.Locker](
+        serviceContainer,
+        ServiceLocker,
+        func(resolver containercontract.Resolver) (lockcontract.Locker, error) {
+            provided.Add(1)
+
+            return provide()
+        },
+        container.RegisterOptions{},
+    )
+
+    return NewLazyLocker(serviceContainer), provided
+}
+
+func TestLazyLocker_ForwardsTheSharedLeaseAnswerOfTheLockerItResolves(t *testing.T) {
+    runtimeInstance := testRuntimeWithContext(context.Background())
+
+    sharedLazyLocker, provided := registeredLazyLocker(func() (lockcontract.Locker, error) {
+        return &sharedLeaseTestLocker{Locker: NewInMemoryLocker(InMemoryLockerConfig{})}, nil
+    })
+
+    shared, err := lockcontract.LeasesAcrossReplicas(runtimeInstance, sharedLazyLocker)
+    if nil != err || false == shared {
+        t.Fatalf("expected the lazy locker to forward the shared lease answer, got %v and %v", shared, err)
+    }
+
+    lock := mustCreateLock(sharedLazyLocker.CreateLock("job", bound.Of(time.Minute)))
+    if _, acquireErr := lock.Acquire(runtimeInstance); nil != acquireErr {
+        t.Fatalf("unexpected acquire error: %v", acquireErr)
+    }
+
+    if 1 != provided.Load() {
+        t.Fatalf("expected the ask and the later Acquire to share one resolution, got %d", provided.Load())
+    }
+
+    inMemoryLazyLocker, _ := registeredLazyLocker(func() (lockcontract.Locker, error) {
+        return NewInMemoryLocker(InMemoryLockerConfig{}), nil
+    })
+
+    shared, err = lockcontract.LeasesAcrossReplicas(runtimeInstance, inMemoryLazyLocker)
+    if nil != err || true == shared {
+        t.Fatalf("expected the lazy locker over the in-process locker to answer false, got %v and %v", shared, err)
+    }
+}
+
+func TestLazyLocker_AnswersTheResolutionFailureWhenAsked(t *testing.T) {
+    providerErr := errors.New("lock store not reachable yet")
+
+    failingLazyLocker, _ := registeredLazyLocker(func() (lockcontract.Locker, error) {
+        return nil, providerErr
+    })
+
+    shared, err := lockcontract.LeasesAcrossReplicas(testRuntimeWithContext(context.Background()), failingLazyLocker)
+    if true == shared || false == errors.Is(err, providerErr) {
+        t.Fatalf("expected the resolution failure when asked, got %v and %v", shared, err)
+    }
+
+    shared, err = lockcontract.LeasesAcrossReplicas(nil, failingLazyLocker)
+    if true == shared || nil == err || "runtime is required to resolve the lazy locker" != err.Error() || ServiceLocker != exception.LogContext(err, exception.LogContextConfig{})["serviceName"] {
+        t.Fatalf("expected a nil runtime to be refused naming the service, got %v and %v", shared, err)
+    }
+
+    var typedNilLocker *InMemoryLocker
+    nilLazyLocker, _ := registeredLazyLocker(func() (lockcontract.Locker, error) {
+        return typedNilLocker, nil
+    })
+
+    shared, err = lockcontract.LeasesAcrossReplicas(testRuntimeWithContext(context.Background()), nilLazyLocker)
+    if true == shared || nil == err {
+        t.Fatalf("expected a provider answering a typed nil locker to be an error when asked, got %v and %v", shared, err)
     }
 }

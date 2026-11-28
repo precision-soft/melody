@@ -113,8 +113,15 @@ func (instance *Module) RegisterCliCommands(kernelInstance kernelcontract.Kernel
     return commands
 }
 
+/* the codes are declared whatever the locker, which only Run reads, so MELODY_BOOT_WARNINGS_IGNORED may name them in every environment the module is registered in */
+func (instance *Module) RegisterBootWarnings(registrar applicationcontract.BootWarningRegistrar) {
+    registrar.DeclareBootWarning(TickDedupNoLockerBootWarningName, applicationcontract.BootWarningConfig{})
+    registrar.DeclareBootWarning(TickDedupLockerNotSharedLeaseBootWarningName, applicationcontract.BootWarningConfig{})
+}
+
 var (
     _ applicationcontract.Module               = (*Module)(nil)
     _ applicationcontract.EnvironmentKeyModule = (*Module)(nil)
     _ applicationcontract.CliModule            = (*Module)(nil)
+    _ applicationcontract.BootWarningModule    = (*Module)(nil)
 )

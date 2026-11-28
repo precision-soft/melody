@@ -33,6 +33,45 @@ func (instance *lazyLocker) CreateLock(name string, ttl bound.Duration) (lockcon
     }, nil
 }
 
+/* LeasesAcrossReplicas resolves the registered locker under the runtime handed and answers what it answers; the resolution is the one every later lock reuses. */
+func (instance *lazyLocker) LeasesAcrossReplicas(runtimeInstance containercontract.Runtime) (bool, error) {
+    locker, resolveErr := instance.resolveLocker(runtimeInstance)
+    if nil != resolveErr {
+        return false, resolveErr
+    }
+
+    return lockcontract.LeasesAcrossReplicas(runtimeInstance, locker)
+}
+
+func (instance *lazyLocker) resolveLocker(runtimeInstance containercontract.Runtime) (lockcontract.Locker, error) {
+    if true == internal.IsNilInterface(runtimeInstance) {
+        return nil, exception.NewError(
+            "runtime is required to resolve the lazy locker",
+            exceptioncontract.Context{
+                "serviceName": ServiceLocker,
+            },
+            nil,
+        )
+    }
+
+    locker, resolveErr := instance.locker.Resolve(runtimeInstance)
+    if nil != resolveErr {
+        return nil, resolveErr
+    }
+
+    if true == internal.IsNilInterface(locker) {
+        return nil, exception.NewError(
+            "lazy locker resolved to nil",
+            exceptioncontract.Context{
+                "serviceName": ServiceLocker,
+            },
+            nil,
+        )
+    }
+
+    return locker, nil
+}
+
 type deferredLock struct {
     owner *lazyLocker
     name  string
@@ -51,29 +90,9 @@ func (instance *deferredLock) resolvedLock(runtimeInstance containercontract.Run
         return lock, nil
     }
 
-    if true == internal.IsNilInterface(runtimeInstance) {
-        return nil, exception.NewError(
-            "runtime is required to resolve the lazy locker",
-            exceptioncontract.Context{
-                "serviceName": ServiceLocker,
-            },
-            nil,
-        )
-    }
-
-    locker, resolveErr := instance.owner.locker.Resolve(runtimeInstance)
+    locker, resolveErr := instance.owner.resolveLocker(runtimeInstance)
     if nil != resolveErr {
         return nil, resolveErr
-    }
-
-    if true == internal.IsNilInterface(locker) {
-        return nil, exception.NewError(
-            "lazy locker resolved to nil",
-            exceptioncontract.Context{
-                "serviceName": ServiceLocker,
-            },
-            nil,
-        )
     }
 
     createdLock, createErr := CreateLock(locker, instance.name, instance.ttl)
@@ -119,6 +138,6 @@ func (instance *deferredLock) Refresh(runtimeInstance containercontract.Runtime,
 }
 
 var (
-    _ lockcontract.Locker = (*lazyLocker)(nil)
-    _ lockcontract.Lock   = (*deferredLock)(nil)
+    _ lockcontract.SharedLeaseLocker = (*lazyLocker)(nil)
+    _ lockcontract.Lock              = (*deferredLock)(nil)
 )

@@ -95,6 +95,11 @@ type Locker struct {
     callTimeout time.Duration
 }
 
+/* LeasesAcrossReplicas answers true: a lease lives in redis under its key, reached by every replica of the namespace. */
+func (instance *Locker) LeasesAcrossReplicas(runtimeInstance containercontract.Runtime) (bool, error) {
+    return true, nil
+}
+
 /* CreateLock answers a lease lock, refusing an unlimited ttl through lockcontract.ResolveLeaseTtl, since a redis lease that never lapses outlives a crashed holder. */
 func (instance *Locker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
     if _, ttlErr := lockcontract.ResolveLeaseTtl(ttl); nil != ttlErr {
@@ -296,5 +301,5 @@ func newLockToken() string {
     return hex.EncodeToString(buffer)
 }
 
-var _ lockcontract.Locker = (*Locker)(nil)
+var _ lockcontract.SharedLeaseLocker = (*Locker)(nil)
 var _ lockcontract.Lock = (*redisLock)(nil)

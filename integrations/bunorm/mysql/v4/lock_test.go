@@ -17,6 +17,7 @@ import (
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
+    lockcontract "github.com/precision-soft/melody/v4/lock/contract"
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect/mysqldialect"
 )
@@ -1027,5 +1028,11 @@ func TestLocker_CreateLockAdmitsAnUnlimitedTtlSoASessionGateIsAdmitted(t *testin
     lock, createErr := (&Locker{}).CreateLock("session", bound.UnlimitedDuration())
     if nil != createErr || nil == lock {
         t.Fatalf("expected a session lock for an unlimited ttl, got %v %v", lock, createErr)
+    }
+}
+
+func TestLocker_DoesNotAnswerTheSharedLeaseMark(t *testing.T) {
+    if _, isSharedLease := any((*Locker)(nil)).(lockcontract.SharedLeaseLocker); true == isSharedLease {
+        t.Fatalf("expected a session locker not to answer a lease shared by the replicas")
     }
 }

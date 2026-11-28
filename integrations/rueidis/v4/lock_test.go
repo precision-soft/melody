@@ -861,3 +861,13 @@ func TestLocker_TheKeyIsPrefixedAndTheDoorKeysTheBareName(t *testing.T) {
         NewLocker(connection, LockerConfig{KeyPrefix: "legacy:", KeyPrefixDisabled: true})
     })
 }
+
+func TestLocker_AnswersTheSharedLeaseMark(t *testing.T) {
+    /* fakeClient embeds a nil client: a round trip would panic */
+    locker := NewLocker(newTestConnection(fakeClient{}), LockerConfig{})
+
+    shared, err := lockcontract.LeasesAcrossReplicas(newLockRuntime(), locker)
+    if nil != err || false == shared {
+        t.Fatalf("expected the rueidis locker to answer a lease shared by the replicas, got %v and %v", shared, err)
+    }
+}

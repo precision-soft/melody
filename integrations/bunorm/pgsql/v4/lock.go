@@ -27,7 +27,7 @@ var lockerReleaseTimeoutRule = bound.Rule[time.Duration]{
     Minimum: bound.TimeoutMinimum,
 }
 
-/* NewLocker returns a lockcontract.Locker backed by PostgreSQL session advisory locks (pg_try_advisory_lock / pg_advisory_unlock). A session advisory lock has no expiry: it is held by the backend session that took it until it is explicitly released or that session ends. Each lock therefore pins a dedicated *sql.Conn for its lifetime so the lock stays bound to one backend session, and every release runs on a context without the caller's cancellation so a canceled request context can never strand a held lock on a connection that is returning to the pool. A ReleaseTimeout outside its rule and a nil database panic, the former naming the field. */
+/* NewLocker returns a lockcontract.Locker backed by PostgreSQL session advisory locks (pg_try_advisory_lock / pg_advisory_unlock). A session advisory lock has no expiry: it is held by the backend session that took it until it is explicitly released or that session ends; a session lock is no lease, so it does not answer SharedLeaseLocker. Each lock therefore pins a dedicated *sql.Conn for its lifetime so the lock stays bound to one backend session, and every release runs on a context without the caller's cancellation so a canceled request context can never strand a held lock on a connection that is returning to the pool. A ReleaseTimeout outside its rule and a nil database panic, the former naming the field. */
 func NewLocker(database *bun.DB, config LockerConfig) *Locker {
     return newLocker(database, mustResolveLockerReleaseTimeout(config))
 }

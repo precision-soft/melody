@@ -32,7 +32,7 @@ var inMemoryLockerPurgeIntervalRule = bound.Rule[int]{
     UnlimitedAdmitted: true,
 }
 
-/* NewInMemoryLocker answers a locker holding its leases in the process; a typed nil clock and a PurgeInterval its rule does not admit panic naming the field. */
+/* NewInMemoryLocker answers a locker holding its leases in the process, not shared by replicas, so it does not answer SharedLeaseLocker; a typed nil clock and a PurgeInterval its rule does not admit panic naming the field. */
 func NewInMemoryLocker(config InMemoryLockerConfig) *InMemoryLocker {
     clockInstance, clockErr := clock.ResolveOptionalClock(config.Clock, "in-memory locker", "InMemoryLockerConfig.Clock")
     if nil != clockErr {

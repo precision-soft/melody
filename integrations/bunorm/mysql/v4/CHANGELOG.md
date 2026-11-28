@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- `lock.go`, `README.md`: the locker's GoDoc and the readme say a session lock is not a shared lease: the locker does not answer `lockcontract.SharedLeaseLocker`, and the cron tick dedup warns over it.
 - **Breaking** — `module.go`, `service_resolver.go`: `ModuleConfig.Locker` is a `*LockerConfig`, nil registering no locker and a pointer registering it, one handed with a nil database refused at `RegisterServices` naming `ModuleConfig.Locker`; `AsLocker`, the refusal of a locker configuration with the locker off, the exported `RegisterLockerService` and `ServiceRegistrar` are removed, the module being the door.
 - **Breaking** — `provider.go`: `Open` and `OpenForMigration` refuse a typed-nil logger as `mysql provider logger is a typed nil`, naming `mysql.Provider.Open.logger`, where it read as the emergency logger; a nil logger is still the emergency logger.
 - **Breaking** — `lock.go`: `CreateLock` answers `(lockcontract.Lock, error)`, a nil error for any ttl.

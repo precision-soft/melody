@@ -6,6 +6,7 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
 )
 
@@ -60,6 +61,61 @@ func TestResolveLeaseTtl_AnUnlimitedTtlIsRefusedWithItsCause(t *testing.T) {
     for name, resolve := range map[string]func(bound.Duration) (time.Duration, error){"acquire": ResolveLeaseTtl, "refresh": ResolveLeaseRefreshTtl} {
         if _, refusedErr := resolve(bound.UnlimitedDuration()); false == errors.Is(refusedErr, ErrUnlimitedTtlRefused) {
             t.Fatalf("%s: expected ErrUnlimitedTtlRefused, got %v", name, refusedErr)
+        }
+    }
+}
+
+type unmarkedLocker struct{}
+
+func (instance *unmarkedLocker) CreateLock(name string, ttl bound.Duration) (Lock, error) {
+    return nil, nil
+}
+
+type markedLocker struct {
+    unmarkedLocker
+    shared   bool
+    err      error
+    received containercontract.Runtime
+}
+
+func (instance *markedLocker) LeasesAcrossReplicas(runtimeInstance containercontract.Runtime) (bool, error) {
+    instance.received = runtimeInstance
+
+    return instance.shared, instance.err
+}
+
+type identityRuntime struct {
+    containercontract.Runtime
+}
+
+func TestLeasesAcrossReplicas_AnswersFalseForALockerWithoutTheMark(t *testing.T) {
+    var typedNilLocker *markedLocker
+
+    for name, locker := range map[string]Locker{"unmarked": &unmarkedLocker{}, "nil": nil, "typed nil": typedNilLocker} {
+        shared, err := LeasesAcrossReplicas(&identityRuntime{}, locker)
+        if nil != err || true == shared {
+            t.Fatalf("expected the %s locker to answer false without an error, got %v and %v", name, shared, err)
+        }
+    }
+}
+
+func TestLeasesAcrossReplicas_AnswersWhatTheLockerAnswersUnderTheRuntimeHanded(t *testing.T) {
+    askErr := errors.New("the wrapped locker cannot be reached")
+
+    for _, testCase := range []struct {
+        shared bool
+        err    error
+    }{{true, nil}, {false, nil}, {false, askErr}} {
+        locker := &markedLocker{shared: testCase.shared, err: testCase.err}
+        runtimeInstance := &identityRuntime{}
+
+        shared, err := LeasesAcrossReplicas(runtimeInstance, locker)
+        if testCase.shared != shared || testCase.err != err {
+            t.Fatalf("expected %v and %v, got %v and %v", testCase.shared, testCase.err, shared, err)
+        }
+
+        if runtimeInstance != locker.received {
+            t.Fatalf("expected the locker to be asked under the runtime handed")
         }
     }
 }

@@ -322,3 +322,41 @@ func TestModule_TheGeneratorTakesTheConfiguredGenerator(t *testing.T) {
         t.Fatalf("expected the module's generator configuration handed to the command, got %v", generator)
     }
 }
+
+type spyBootWarningRegistrar struct {
+    declared []string
+    configs  []applicationcontract.BootWarningConfig
+    added    int
+}
+
+func (instance *spyBootWarningRegistrar) DeclareBootWarning(name string, config applicationcontract.BootWarningConfig) {
+    instance.declared = append(instance.declared, name)
+    instance.configs = append(instance.configs, config)
+}
+
+func (instance *spyBootWarningRegistrar) AddBootWarning(warning applicationcontract.BootWarning) {
+    instance.added++
+}
+
+func TestModule_DeclaresTheTickDedupWarningCodes(t *testing.T) {
+    if "cron.tickDedup.noLocker" != TickDedupNoLockerBootWarningName || "cron.tickDedup.lockerNotSharedLease" != TickDedupLockerNotSharedLeaseBootWarningName {
+        t.Fatalf("expected the codes cron.tickDedup.noLocker and cron.tickDedup.lockerNotSharedLease, got %s and %s", TickDedupNoLockerBootWarningName, TickDedupLockerNotSharedLeaseBootWarningName)
+    }
+
+    registrar := &spyBootWarningRegistrar{}
+    NewModule(ModuleConfig{}).RegisterBootWarnings(registrar)
+
+    if 2 != len(registrar.declared) || TickDedupNoLockerBootWarningName != registrar.declared[0] || TickDedupLockerNotSharedLeaseBootWarningName != registrar.declared[1] {
+        t.Fatalf("expected the two tick dedup codes declared, got %v", registrar.declared)
+    }
+
+    for _, config := range registrar.configs {
+        if (applicationcontract.BootWarningConfig{}) != config {
+            t.Fatalf("expected the codes declared with the zero config, got %+v", config)
+        }
+    }
+
+    if 0 != registrar.added {
+        t.Fatalf("expected no warning added at the boot, got %d", registrar.added)
+    }
+}

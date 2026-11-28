@@ -343,6 +343,7 @@ func (instance *RunnerCommand) Run(
     dedupRun := instance.resolveTickDedupRun(runtimeInstance)
     instance.tickDedupRun.Store(dedupRun)
     instance.warnWithoutTickDedupLocker(runtimeInstance, dedupRun)
+    instance.warnOverALockerThatIsNotASharedLease(runtimeInstance, dedupRun)
 
     applicationVersion := output.ApplicationVersionOf(commandContext)
     instance.applicationVersion.Store(&applicationVersion)

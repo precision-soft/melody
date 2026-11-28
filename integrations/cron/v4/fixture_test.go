@@ -22,7 +22,9 @@ import (
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/container/runtime"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
+    "github.com/precision-soft/melody/v4/lock"
     lockcontract "github.com/precision-soft/melody/v4/lock/contract"
+    "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
 
@@ -272,7 +274,8 @@ func (instance *stubConfiguration) Names() []string {
 }
 
 type stubKernelConfiguration struct {
-    projectDirectory string
+    projectDirectory    string
+    bootWarningsIgnored []string
     /* empty reads as the default namespace */
     namespace string
 }
@@ -322,7 +325,7 @@ func (instance *stubKernelConfiguration) CacheDirectoryMode() os.FileMode {
 }
 
 func (instance *stubKernelConfiguration) BootWarningsIgnored() []string {
-    return nil
+    return instance.bootWarningsIgnored
 }
 
 func (instance *stubKernelConfiguration) TeardownTimeout() bound.Duration {
@@ -688,4 +691,59 @@ func (instance *sessionTickLock) Release(runtimeInstance containercontract.Runti
 
 func (instance *sessionTickLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
     return nil
+}
+
+/* sharedLeaseTickLocker is a recordingTickLocker that answers the shared lease mark as told, counting the asks */
+type sharedLeaseTickLocker struct {
+    recordingTickLocker
+    shared bool
+    err    error
+    panics bool
+    asks   atomic.Int64
+}
+
+func (instance *sharedLeaseTickLocker) LeasesAcrossReplicas(runtimeInstance containercontract.Runtime) (bool, error) {
+    instance.asks.Add(1)
+
+    if true == instance.panics {
+        panic("the shared lease ask panicked")
+    }
+
+    return instance.shared, instance.err
+}
+
+/* newTickDedupWarningRuntime answers a run runtime holding the logger, the configuration listing the ignored codes and, when not nil, the registered locker */
+func newTickDedupWarningRuntime(logger loggingcontract.Logger, registeredLocker lockcontract.Locker, bootWarningsIgnored []string) containercontract.Runtime {
+    configuration := &stubConfigurationWithKernel{
+        stubConfiguration: newStubConfiguration(nil),
+        kernel:            &stubKernelConfiguration{bootWarningsIgnored: bootWarningsIgnored},
+    }
+
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    serviceContainer.MustRegister(
+        logging.ServiceLogger,
+        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+            return logger, nil
+        },
+        container.RegisterOptions{},
+    )
+    serviceContainer.MustRegister(
+        melodyconfig.ServiceConfig,
+        func(resolver containercontract.Resolver) (configcontract.Configuration, error) {
+            return configuration, nil
+        },
+        container.RegisterOptions{},
+    )
+
+    if nil != registeredLocker {
+        serviceContainer.MustRegister(
+            lock.ServiceLocker,
+            func(resolver containercontract.Resolver) (lockcontract.Locker, error) {
+                return registeredLocker, nil
+            },
+            container.RegisterOptions{},
+        )
+    }
+
+    return runtime.NewRun(context.Background(), serviceContainer.NewScope())
 }

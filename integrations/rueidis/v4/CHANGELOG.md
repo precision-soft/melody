@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- `lock.go`: `Locker` answers `lockcontract.SharedLeaseLocker`, true: its leases live in Redis, reached by every replica.
 - `plaintext_address.go`: `Provider.Open` without `ClientConfig.TlsConfig` over an address that is not `localhost` or a loopback address writes the warning `rueidis.plaintextAddress` (`PlaintextAddressBootWarningName`) once per address of the provider in the runtime's journal, naming the address and never a credential, and honouring `MELODY_BOOT_WARNINGS_IGNORED`; `Module.RegisterBootWarnings` declares the code, the module now a `BootWarningModule`.
 - `ClientMustFromRuntime(runtimeInstance)`, the raw client read through the runtime's scope under its context, for code that holds a runtime; a nil runtime is refused. `ClientMustFromResolver` stays the door of a provider.
 - **Breaking** — `service_resolver.go`: `ClientMustFromContainer` and `TokenStoreMustFromContainer` are removed, their `…FromResolver` forms taking the container as they take a scope.

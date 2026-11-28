@@ -344,3 +344,9 @@ func TestNewInMemoryLocker_ZeroConfigUsesTheSystemClockAndRefusesATypedNilClock(
         t.Fatalf("expected a purge interval of 1 to sweep the expired holder at the next acquisition")
     }
 }
+
+func TestInMemoryLocker_DoesNotAnswerTheSharedLeaseMark(t *testing.T) {
+    if _, isSharedLease := any(NewInMemoryLocker(InMemoryLockerConfig{})).(lockcontract.SharedLeaseLocker); true == isSharedLease {
+        t.Fatalf("expected the in-process locker not to answer a lease shared by the replicas")
+    }
+}

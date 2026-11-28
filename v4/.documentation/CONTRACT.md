@@ -99,6 +99,7 @@ Every module below has one section, headed by its directory, and one row per exp
 | [`kernel/contract.Kernel`](../kernel/contract/kernel.go) | framework | the framework's kernel |
 | [`lock/contract.Lock`](../lock/contract/lock.go) | framework | a locker returns it; the framework's lockers build every one |
 | [`lock/contract.Locker`](../lock/contract/lock.go) | application | a shared-store locker is written by the application or an integration |
+| [`lock/contract.SharedLeaseLocker`](../lock/contract/lock.go) | application | a locker the application or an integration writes answers it when its locks are leases every replica reaches; optional, read by the cron tick dedup alone |
 | [`logging/contract.Logger`](../logging/contract/logger.go) | application | an application implements it to route the log, and in its tests to read it |
 | [`logging/contract.LoggingConfiguration`](../logging/contract/config.go) | framework | the framework builds the logging configuration |
 | [`mailer/contract.Mailer`](../mailer/contract/mailer.go) | application | an application may replace the mailer it resolves, and its tests double it |

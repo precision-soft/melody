@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- lock: `lockcontract.SharedLeaseLocker`, the optional `LeasesAcrossReplicas(runtimeInstance) (bool, error)` a locker answers when its locks are leases every replica reaches, and `lockcontract.LeasesAcrossReplicas(runtimeInstance, locker)`, false for a locker without it; the lazy locker forwards the answer of the locker it resolves under the runtime handed, a resolution failure as its error, and the in-memory locker does not answer it. It refuses nothing.
 - cli: `clicontract.DurationFlag`, the engine's duration flag under the contract's name, read with `CommandContext.Duration(name)`; registration and dispatch check its default under `ValidateDefaults` like the other four.
 - httpclient: `HttpClientConfig.MaxResponseBodyBytes`, the response body cap of every request that sets none, 10 MiB by default, at least one byte, unlimited refused at `NewHttpClient` naming the field; `RequestOptions.MaxResponseBodyBytes` wins over it for its request, and `RequestStream` alone admits an unlimited cap, which reads the stream to its end, where every request took 10 MiB unless it named its own and a stream could not be unbounded.
 - http: `static.AllowedDotPrefixAll` (`"*"`), the `AllowedDotPrefixList` entry that admits every dot-prefixed element at any depth, for a file server whose served tree carries dot directories it means to publish; a list without it keeps the first-element allowance.

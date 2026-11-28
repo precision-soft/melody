@@ -33,7 +33,7 @@ var lockerReleaseTimeoutRule = bound.Rule[time.Duration]{
 /* MySQL refuses a user-level lock name longer than 64 characters, so a longer name is folded by boundedLockName */
 const mysqlLockNameMaxLength = 64
 
-/* NewLocker returns a lockcontract.Locker backed by MySQL user-level locks; a nil database and a ReleaseTimeout outside its rule panic, the latter naming the field. */
+/* NewLocker returns a lockcontract.Locker backed by MySQL user-level locks; a session lock is no lease, so it does not answer SharedLeaseLocker; a nil database and a ReleaseTimeout outside its rule panic, the latter naming the field. */
 func NewLocker(database *bun.DB, config LockerConfig) *Locker {
     return newLocker(database, mustResolveLockerReleaseTimeout(config))
 }

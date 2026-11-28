@@ -8,6 +8,7 @@ import (
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
+    "github.com/precision-soft/melody/v4/internal"
 )
 
 /* LockTtlRule is the reading every locker gives the ttl it is handed: 30s when left out, at least 1ms, unlimited the session-style lock that holds until its connection drops, which a lease locker refuses through ResolveLeaseTtl and ResolveLeaseRefreshTtl, since its lease would never lapse. */
@@ -68,4 +69,25 @@ type Lock interface {
 type Locker interface {
     /* CreateLock answers the lock of a name. A locker whose locks are leases refuses an unlimited ttl here, its cause ErrUnlimitedTtlRefused. It reaches no store. */
     CreateLock(name string, ttl bound.Duration) (Lock, error)
+}
+
+/* SharedLeaseLocker is what a locker answers when its locks are leases in a store every replica reaches: a held lock pins no connection and lapses by its ttl when its holder dies. It is optional and refuses nothing; a locker wrapping another answers what the wrapped one answers, under the runtime handed. */
+type SharedLeaseLocker interface {
+    Locker
+
+    LeasesAcrossReplicas(runtimeInstance containercontract.Runtime) (bool, error)
+}
+
+/* LeasesAcrossReplicas answers what the locker says of itself, false for one that does not answer SharedLeaseLocker; the error is the one a wrapping locker met reaching the wrapped one. */
+func LeasesAcrossReplicas(runtimeInstance containercontract.Runtime, locker Locker) (bool, error) {
+    if true == internal.IsNilInterface(locker) {
+        return false, nil
+    }
+
+    sharedLeaseLocker, isSharedLease := locker.(SharedLeaseLocker)
+    if false == isSharedLease {
+        return false, nil
+    }
+
+    return sharedLeaseLocker.LeasesAcrossReplicas(runtimeInstance)
 }
