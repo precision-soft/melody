@@ -16,6 +16,7 @@ type ClientConfig struct {
 
     SelectDatabase int
 
+    /* TlsConfig is the TLS session of every connection; nil dials in clear, named once per address off this machine under PlaintextAddressBootWarningName. */
     TlsConfig *tls.Config
 
     /* DialTimeout bounds the dial of every connection: 5s by default, at least 1ms, unlimited refused, so the library's own dial default never governs a dial. */

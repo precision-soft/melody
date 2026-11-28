@@ -418,15 +418,15 @@ func TestNewApplication_HttpKernelRetryAfter_KeyWinsOverTheField(t *testing.T) {
     }
 }
 
-func TestNewApplication_HttpKernelSessionEmptyOnOutage_KeyWinsOverTheField(t *testing.T) {
+func TestNewApplication_HttpKernelSessionEmptyOnOutage_KeyOffWinsOverTheField(t *testing.T) {
     for name, testCase := range map[string]struct {
         environmentLines string
         field            bool
         expected         int
     }{
-        "the key on over the field off":  {environmentLines: config.HttpSessionEmptyOnOutageKey + "=true\n", field: false, expected: nethttp.StatusOK},
-        "the key off over the field on":  {environmentLines: config.HttpSessionEmptyOnOutageKey + "=false\n", field: true, expected: nethttp.StatusServiceUnavailable},
-        "the field on without the key":   {environmentLines: "", field: true, expected: nethttp.StatusOK},
+        "the key off over the field on": {environmentLines: config.HttpSessionEmptyOnOutageKey + "=false\n", field: true, expected: nethttp.StatusServiceUnavailable},
+        "the field on without the key":  {environmentLines: "", field: true, expected: nethttp.StatusOK},
+        "neither":                       {environmentLines: "", field: false, expected: nethttp.StatusServiceUnavailable},
     } {
         applicationInstance := bootServingTestApplicationWithEnvironment(t, config.EnvironmentProduction, testCase.environmentLines, ApplicationConfig{HttpKernel: http.KernelConfig{SessionPolicy: httpcontract.SessionPolicy{EmptyOnOutage: testCase.field}}}, nil)
 
@@ -435,6 +435,25 @@ func TestNewApplication_HttpKernelSessionEmptyOnOutage_KeyWinsOverTheField(t *te
         if status := serveSessionReader(t, applicationInstance); testCase.expected != status {
             t.Fatalf("%s: expected %d, got %d", name, testCase.expected, status)
         }
+    }
+}
+
+/* the key only hardens: true would serve an empty session where the Go field answers 503, so only the Go field loosens the outage answer */
+func TestNewApplication_HttpSessionEmptyOnOutageKey_TrueRefusedNamingTheKey(t *testing.T) {
+    if value := os.Getenv(newApplicationRefusalProbeMarker); "" != value {
+        bootServingTestApplicationWithEnvironment(t, config.EnvironmentProduction, config.HttpSessionEmptyOnOutageKey+"="+value+"\n", ApplicationConfig{HttpKernel: http.KernelConfig{SessionPolicy: httpcontract.SessionPolicy{EmptyOnOutage: true}}}, nil)
+
+        os.Exit(93)
+    }
+
+    child := exec.Command(os.Args[0], "-test.run=^TestNewApplication_HttpSessionEmptyOnOutageKey_TrueRefusedNamingTheKey$")
+    child.Env = append(os.Environ(), newApplicationRefusalProbeMarker+"=true")
+
+    output, runErr := child.CombinedOutput()
+
+    exitError, isExitError := runErr.(*exec.ExitError)
+    if false == isExitError || 1 != exitError.ExitCode() || false == strings.Contains(string(output), config.HttpSessionEmptyOnOutageKey) {
+        t.Fatalf("expected the application refused naming the key, got err %v with output: %s", runErr, string(output))
     }
 }
 

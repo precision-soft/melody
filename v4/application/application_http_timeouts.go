@@ -80,7 +80,7 @@ func resolveContainerTeardownSequential(configuration configcontract.Configurati
     return applicationConfig.ContainerTeardownSequential
 }
 
-/* resolveSessionEmptyOnOutage answers the key when the deployment set it and the application's field otherwise. */
+/* resolveSessionEmptyOnOutage answers off when the deployment set the key and the application's field otherwise; the key only hardens, the configuration refused true naming the key */
 func resolveSessionEmptyOnOutage(configuration configcontract.Configuration, applicationConfig ApplicationConfig) bool {
     keySwitch := configuration.Http().SessionEmptyOnOutage()
     if true == keySwitch.IsSet {

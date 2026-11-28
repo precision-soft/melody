@@ -12,7 +12,7 @@ import (
 )
 
 func TestMiddleware_PreflightOptions(t *testing.T) {
-    middleware := Middleware(NewService(Config{}))
+    middleware := Middleware(NewService(Config{AllowOrigins: []string{AllowOriginAll}}))
 
     next := func(
         runtimeInstance containercontract.Runtime,
@@ -55,7 +55,7 @@ func TestMiddleware_PreflightOptions(t *testing.T) {
 }
 
 func TestMiddleware_OptionsWithoutRequestMethodReachesNext(t *testing.T) {
-    middleware := Middleware(NewService(Config{}))
+    middleware := Middleware(NewService(Config{AllowOrigins: []string{AllowOriginAll}}))
 
     calledNext := false
     next := func(
@@ -124,7 +124,7 @@ func TestMiddleware_AddsVaryOriginForDisallowedOrigin(t *testing.T) {
 }
 
 func TestMiddleware_AddsVaryOriginWhenOriginAbsent(t *testing.T) {
-    middleware := Middleware(NewService(Config{}))
+    middleware := Middleware(NewService(Config{AllowOrigins: []string{AllowOriginAll}}))
 
     next := func(
         runtimeInstance containercontract.Runtime,
@@ -148,8 +148,39 @@ func TestMiddleware_AddsVaryOriginWhenOriginAbsent(t *testing.T) {
     }
 }
 
-func TestMiddleware_NonPreflightAddsHeaders(t *testing.T) {
+func TestMiddleware_TheZeroConfigGrantsNoOrigin(t *testing.T) {
     middleware := Middleware(NewService(Config{}))
+
+    nextCalled := false
+    next := func(
+        runtimeInstance containercontract.Runtime,
+        writer nethttp.ResponseWriter,
+        request httpcontract.Request,
+    ) (httpcontract.Response, error) {
+        nextCalled = true
+
+        return http.EmptyResponse(200), nil
+    }
+
+    for _, method := range []string{nethttp.MethodGet, nethttp.MethodOptions} {
+        nextCalled = false
+        request := httptest.NewRequest(method, "/x", nil)
+        request.Header.Set("Origin", "https://example.com")
+        request.Header.Set("Access-Control-Request-Method", nethttp.MethodPost)
+
+        response, err := middleware(next)(nil, httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(request))
+        if nil != err || nil == response || false == nextCalled {
+            t.Fatalf("%s: expected the request handed on, got %v %v", method, response, err)
+        }
+
+        if "" != response.Headers().Get("Access-Control-Allow-Origin") {
+            t.Fatalf("%s: expected no allow-origin header, got %q", method, response.Headers().Get("Access-Control-Allow-Origin"))
+        }
+    }
+}
+
+func TestMiddleware_NonPreflightAddsHeaders(t *testing.T) {
+    middleware := Middleware(NewService(Config{AllowOrigins: []string{AllowOriginAll}}))
 
     next := func(
         runtimeInstance containercontract.Runtime,
@@ -213,7 +244,7 @@ func TestMiddleware_DisallowedOriginPassesThrough(t *testing.T) {
 }
 
 func TestMiddleware_NoOriginHeaderPassesThrough(t *testing.T) {
-    middleware := Middleware(NewService(Config{}))
+    middleware := Middleware(NewService(Config{AllowOrigins: []string{AllowOriginAll}}))
 
     next := func(
         runtimeInstance containercontract.Runtime,
@@ -237,7 +268,7 @@ func TestMiddleware_NoOriginHeaderPassesThrough(t *testing.T) {
 }
 
 func TestMiddleware_AppliesHeadersEvenWhenHandlerErrored(t *testing.T) {
-    middleware := Middleware(NewService(Config{}))
+    middleware := Middleware(NewService(Config{AllowOrigins: []string{AllowOriginAll}}))
 
     next := func(
         runtimeInstance containercontract.Runtime,
@@ -369,7 +400,7 @@ func TestRestrictiveService_MiddlewarePreflightAdvertisesTheNarrowMethodList(t *
 
 /* a streaming handler commits its headers straight to the writer and returns a response the write path discards, so the cross-origin headers applied to that response never reach the connection. The middleware places them on the writer before the handler runs, where the handler's own commit carries them. */
 func TestMiddleware_AppliesHeadersToTheWriterBeforeTheHandlerRuns(t *testing.T) {
-    middleware := Middleware(NewService(Config{}))
+    middleware := Middleware(NewService(Config{AllowOrigins: []string{AllowOriginAll}}))
     recorder := httptest.NewRecorder()
 
     originOnWriterWhenHandlerRan := ""
@@ -411,7 +442,7 @@ func TestMiddleware_RefusesANilService(t *testing.T) {
 
 /* a handler answering a typed nil reaches the kernel as nil, which answers it with its empty 204; the middleware never dereferences it */
 func TestMiddleware_HandsATypedNilResponseOnAsNil(t *testing.T) {
-    handler := Middleware(NewService(Config{}))(func(
+    handler := Middleware(NewService(Config{AllowOrigins: []string{AllowOriginAll}}))(func(
         runtimeInstance containercontract.Runtime,
         writer nethttp.ResponseWriter,
         request httpcontract.Request,

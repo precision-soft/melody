@@ -13,8 +13,9 @@ type DeliveryStamp struct {
     Generation uint64
 
     /* what the delivery arrived with, so its requeue is never refused for a size the broker already carried */
-    receivedHeaderCount int
-    receivedHeaderBytes int
+    receivedHeaderCount      int
+    receivedHeaderBytes      int
+    receivedHeaderNameLength int
 }
 
 func (instance DeliveryStamp) StampName() string {

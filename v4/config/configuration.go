@@ -798,7 +798,7 @@ func (instance *Configuration) buildHttpConfiguration() error {
         return serverLimitErr
     }
 
-    if serverLimits.sessionEmptyOnOutage, serverLimitErr = checkedParameterSwitch(instance.MustGet(KernelHttpSessionEmptyOnOutage), HttpSessionEmptyOnOutageKey); nil != serverLimitErr {
+    if serverLimits.sessionEmptyOnOutage, serverLimitErr = checkedSessionEmptyOnOutage(instance.MustGet(KernelHttpSessionEmptyOnOutage)); nil != serverLimitErr {
         return serverLimitErr
     }
 

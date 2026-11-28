@@ -4791,6 +4791,49 @@ func TestTransport_ARequeueIsBoundedByTheLargerOfTheLimitsAndWhatItArrivedWith(t
     }
 }
 
+func TestTransport_ARequeueKeepsANameAsLongAsItArrivedWithAndDropsALongerOneTheHandlerAdds(t *testing.T) {
+    registry := NewMessageRegistry()
+    RegisterMessage[testMessage](registry, "amqp.test.headers.namelength")
+
+    instance := &Transport{queue: "orders", registry: registry, serializer: melodyserializer.NewJsonSerializer()}
+
+    body, serializeErr := instance.serializer.Serialize(testMessage{Id: 1})
+    if nil != serializeErr {
+        t.Fatalf("serialize: %v", serializeErr)
+    }
+
+    arrivedName := strings.Repeat("r", melodymessagebus.DefaultHeaderMaxNameLength+16)
+    decoded, decodeErr := instance.decode(amqp091.Delivery{
+        Headers: amqp091.Table{headerMessageType: "amqp.test.headers.namelength", ApplicationHeaderPrefix + arrivedName: "kept"},
+        Body:    body,
+    }, 1)
+    if nil != decodeErr {
+        t.Fatalf("decode: %v", decodeErr)
+    }
+
+    addedWithin := strings.Repeat("w", melodymessagebus.DefaultHeaderMaxNameLength+16)
+    addedBeyond := strings.Repeat("b", melodymessagebus.DefaultHeaderMaxNameLength+17)
+    retried := decoded.WithStamps([]messagebuscontract.Stamp{melodymessagebus.HeadersStamp{Headers: map[string]string{addedWithin: "within", addedBeyond: "beyond"}}})
+
+    publishing, buildErr := instance.buildPublishing(retried, "", true)
+    if nil != buildErr {
+        t.Fatalf("expected the requeue built, got %v", buildErr)
+    }
+
+    if "kept" != publishing.Headers[ApplicationHeaderPrefix+arrivedName] || "within" != publishing.Headers[ApplicationHeaderPrefix+addedWithin] {
+        t.Fatalf("expected the names up to the arrived length kept, got %v", publishing.Headers)
+    }
+
+    if _, present := publishing.Headers[ApplicationHeaderPrefix+addedBeyond]; true == present {
+        t.Fatalf("expected the longer name the handler added dropped, got %v", publishing.Headers)
+    }
+
+    configured := &Transport{queue: "orders", registry: registry, serializer: melodyserializer.NewJsonSerializer(), headerMaxNameLength: 8}
+    if _, dropped := writableHeaders(map[string]string{"eightchr": "a", "ninechars": "b"}, configured.requeueHeaderNameLength(melodymessagebus.NewEnvelope(testMessage{Id: 1}, nil))); 1 != len(dropped) || "ninechars" != dropped[0] {
+        t.Fatalf("expected the transport's name length to bound a requeue, got dropped %v", dropped)
+    }
+}
+
 func TestTransport_AHeaderTheHandlerAddsThatFailsTheRuleIsDroppedWithAWarningNamingIt(t *testing.T) {
     registry := NewMessageRegistry()
     RegisterMessage[testMessage](registry, "amqp.test.headers.handlerdropped")

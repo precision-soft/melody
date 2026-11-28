@@ -19,7 +19,7 @@ const (
     SessionKeySecurityCredentialVersion = "security.credentialVersion"
 )
 
-/* SessionTokenResolver answers the token of the account the session names, with the account's CURRENT roles. A session its storage could not load, or the empty one served for it under MELODY_HTTP_SESSION_EMPTY_ON_OUTAGE, answers the unavailable token; any other error reading the session answers anonymous, its record filed by the read. A session that carries no credential version, or one the account does not hold, or that names an account which is gone or holds no role, is cleared and answers anonymous; a lookup that fails answers its error marked as an outage, read as the unavailable token: 503 with Retry-After on a protected page, the session left alone, since the failure says nothing about the account; the framework files the cause at error. */
+/* SessionTokenResolver answers the token of the account the session names, with the account's CURRENT roles. A session its storage could not load, or the empty one served for it under SessionPolicy.EmptyOnOutage, answers the unavailable token; any other error reading the session answers anonymous, its record filed by the read. A session that carries no credential version, or one the account does not hold, or that names an account which is gone or holds no role, is cleared and answers anonymous; a lookup that fails answers its error marked as an outage, read as the unavailable token: 503 with Retry-After on a protected page, the session left alone, since the failure says nothing about the account; the framework files the cause at error. */
 func SessionTokenResolver(lookupUser SessionUserLookup) melodysecuritycontract.TokenResolver {
     return func(runtimeInstance melodycontainercontract.Runtime, request melodyhttpcontract.Request) (melodysecuritycontract.Token, error) {
         sessionInstance, sessionErr := melodyhttp.RequestSession(request)
@@ -32,7 +32,7 @@ func SessionTokenResolver(lookupUser SessionUserLookup) melodysecuritycontract.T
             return melodysecurity.NewAnonymousToken(), nil
         }
 
-        /* the empty session MELODY_HTTP_SESSION_EMPTY_ON_OUTAGE serves in an outage reads as the outage it stands for, so a signed-in visitor is answered 503 on a protected page, not sent to sign in */
+        /* the empty session SessionPolicy.EmptyOnOutage serves in an outage reads as the outage it stands for, so a signed-in visitor is answered 503 on a protected page, not sent to sign in */
         if cause, isUnavailable := melodysession.SessionUnavailableCause(sessionInstance); true == isUnavailable {
             return melodysecurity.NewUnavailableToken(cause), nil
         }

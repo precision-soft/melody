@@ -238,7 +238,7 @@ func (instance *httpConfiguration) UnavailableRetryAfter() bound.Duration {
     return instance.serverLimits.unavailableRetryAfter
 }
 
-/* SessionEmptyOnOutage is MELODY_HTTP_SESSION_EMPTY_ON_OUTAGE as the deployment set it, unset when the key says nothing. */
+/* SessionEmptyOnOutage is MELODY_HTTP_SESSION_EMPTY_ON_OUTAGE as the deployment set it, off or unset when the key says nothing: the key only hardens, true is refused naming the key. */
 func (instance *httpConfiguration) SessionEmptyOnOutage() configcontract.Switch {
     return instance.serverLimits.sessionEmptyOnOutage
 }

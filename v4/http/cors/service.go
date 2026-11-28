@@ -28,8 +28,9 @@ type Service struct {
     maxAgeString        string
 }
 
-/* Config is what a cors service grants; the zero value grants every origin the default methods and headers, without credentials, with a one-day preflight cache. */
+/* Config is what a cors service grants; the zero value grants no origin, and an origin list grants its entries the default methods and headers, without credentials, with a one-day preflight cache. */
 type Config struct {
+    /* AllowOrigins grants the origins it lists; nil or empty grants none, and every origin is granted by AllowOriginAll written out. */
     AllowOrigins     []string
     AllowMethods     []string
     AllowHeaders     []string
@@ -46,6 +47,9 @@ type Config struct {
     SchemelessOriginsAdmitted bool
 }
 
+/* AllowOriginAll is the AllowOrigins entry that grants every origin; it stands alone and refuses credentials. */
+const AllowOriginAll = "*"
+
 const schemelessOriginRefusedMessage = "cors misconfiguration: an origin without a scheme admits that host under any scheme, http included; write it out, https://example.com or https://*.example.com, or set SchemelessOriginsAdmitted"
 
 var maxAgeRule = bound.Rule[int]{
@@ -54,7 +58,7 @@ var maxAgeRule = bound.Rule[int]{
     Minimum: 0,
 }
 
-/* NewService builds the service the config grants; a max age the rule refuses panics naming the field, and so does an origin without a scheme, which would admit that host under any scheme, http included, unless SchemelessOriginsAdmitted, and always on a credentialed service. A blank origin entry, an origin list beside AllowOrigin, which answers alone, and "*" beside other entries, which it leaves dead, are refused too. */
+/* NewService builds the service the config grants; a max age the rule refuses panics naming the field, and so does an origin without a scheme, which would admit that host under any scheme, http included, unless SchemelessOriginsAdmitted, and always on a credentialed service. A blank origin entry, an origin list beside AllowOrigin, which answers alone, and AllowOriginAll beside other entries, which it leaves dead, are refused too; nil or empty AllowOrigins grants no origin. */
 func NewService(config Config) *Service {
     maxAge, maxAgeErr := bound.Resolve(config.MaxAge, maxAgeRule)
     if nil != maxAgeErr {
@@ -85,7 +89,7 @@ func NewService(config Config) *Service {
 
     if 1 < len(config.AllowOrigins) {
         for index, origin := range config.AllowOrigins {
-            if "*" == strings.TrimSpace(origin) {
+            if AllowOriginAll == strings.TrimSpace(origin) {
                 exception.Panic(
                     exception.NewError(
                         "cors misconfiguration: the wildcard '*' admits every origin, so the other allowOrigins entries are dead; write []string{\"*\"} alone",
@@ -100,7 +104,7 @@ func NewService(config Config) *Service {
     if false == config.SchemelessOriginsAdmitted && false == config.AllowCredentials {
         for index, origin := range config.AllowOrigins {
             entry := strings.TrimSpace(origin)
-            if "*" == entry || true == strings.Contains(entry, "://") {
+            if AllowOriginAll == entry || true == strings.Contains(entry, "://") {
                 continue
             }
 
@@ -124,12 +128,7 @@ func NewService(config Config) *Service {
     allowHeaders := copyStrings(config.AllowHeaders)
     exposeHeaders := copyStrings(config.ExposeHeaders)
 
-    /* a nil list takes the permissive default; an empty list is an expressed preference and denies every origin */
-    if nil == allowOrigins {
-        allowOrigins = []string{"*"}
-    }
-
-    /* methods and headers read nil and empty as origins do; a nil list takes the default list, Authorization included */
+    /* a nil list takes the default list, Authorization included; an empty list is an expressed preference and grants none */
     if nil == allowMethods {
         allowMethods = defaultAllowMethodList()
     }
@@ -151,7 +150,7 @@ func NewService(config Config) *Service {
         }
 
         for _, origin := range allowOrigins {
-            if "*" == strings.TrimSpace(origin) {
+            if AllowOriginAll == strings.TrimSpace(origin) {
                 exception.Panic(
                     exception.NewError(
                         "cors misconfiguration: allowCredentials cannot be true when allowOrigins contains wildcard '*'",
@@ -246,7 +245,7 @@ func (instance *Service) OriginAllowed(request httpcontract.Request, origin stri
             continue
         }
 
-        if "*" == normalizedAllowedOrigin {
+        if AllowOriginAll == normalizedAllowedOrigin {
             return true
         }
 

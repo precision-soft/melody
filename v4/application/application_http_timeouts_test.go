@@ -396,7 +396,7 @@ func TestNewApplication_TheUnavailableRetryAfterFieldReachesTheHttpKernel(t *tes
     }
 }
 
-func TestResolveSessionEmptyOnOutage_TheKeyWinsOverTheField(t *testing.T) {
+func TestResolveSessionEmptyOnOutage_TheKeyOffWinsOverTheField(t *testing.T) {
     for name, testCase := range map[string]struct {
         key      string
         field    bool
@@ -405,7 +405,6 @@ func TestResolveSessionEmptyOnOutage_TheKeyWinsOverTheField(t *testing.T) {
         "neither":         {key: "", field: false, expected: false},
         "the field alone": {key: "", field: true, expected: true},
         "the key off":     {key: "false", field: true, expected: false},
-        "the key on":      {key: "true", field: false, expected: true},
     } {
         values := map[string]string{}
         if "" != testCase.key {

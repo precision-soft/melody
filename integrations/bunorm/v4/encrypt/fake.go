@@ -6,7 +6,12 @@ import (
 
 var fakeCipherSequenceNumber atomic.Uint64
 
-/* NewFakeCipher answers a cipher whose every operation is the identity, for tests and local development. In production it writes plaintext into every encrypted column with no error, where having no cipher fails closed at the first write, so no production wiring path may reach it. A bound column over it stores the plaintext as well, and its binding and the binding's UnboundAdmitted mean nothing, since there is no format to read. */
+const (
+    fakeCipherConstructorName           = "encrypt.NewFakeCipher"
+    fakeCipherOutsideDevelopmentMessage = "the encrypt module is handed the fake cipher outside the development environment: it would write every encrypted column in clear"
+)
+
+/* NewFakeCipher answers a cipher whose every operation is the identity, for tests and local development. In production it writes plaintext into every encrypted column with no error, where having no cipher fails closed at the first write, so the module refuses it at registration outside the development environment, naming the field. A bound column over it stores the plaintext as well, and its binding and the binding's UnboundAdmitted mean nothing, since there is no format to read. */
 func NewFakeCipher() Cipher {
     return &fakeCipher{
         instanceNumber: fakeCipherSequenceNumber.Add(1),
@@ -57,6 +62,12 @@ func (instance *fakeCipher) openStored(stored string, binding sealBinding) (open
 
 func (instance *fakeCipher) boundCandidates(plaintext string, binding sealBinding) ([][]byte, error) {
     return [][]byte{[]byte(plaintext)}, nil
+}
+
+func isFakeCipher(cipher Cipher) bool {
+    _, isFake := cipher.(*fakeCipher)
+
+    return true == isFake
 }
 
 var _ Cipher = (*fakeCipher)(nil)

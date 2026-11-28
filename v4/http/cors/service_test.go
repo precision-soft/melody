@@ -316,8 +316,8 @@ func TestNewService_NilHeaderAndMethodListsTakeTheDefaultLists(t *testing.T) {
 func TestNewService_TheZeroConfigIsTheDefaultService(t *testing.T) {
     service := NewService(Config{})
 
-    if false == service.OriginAllowed(nil, "https://any.example.com") {
-        t.Fatalf("expected the zero config to allow every origin")
+    if true == service.OriginAllowed(nil, "https://any.example.com") {
+        t.Fatalf("expected the zero config to grant no origin")
     }
 
     if true == service.AllowCredentials() {
@@ -348,11 +348,24 @@ func TestNewService_AnEmptyMethodOrHeaderListStaysTheExpressedPreference(t *test
     }
 }
 
-func TestService_NilAllowOriginsKeepsThePermissiveDefault(t *testing.T) {
+func TestService_NilAllowOriginsGrantsNoOrigin(t *testing.T) {
     service := NewService(Config{})
 
+    if true == service.OriginAllowed(nil, "http://anything.test") {
+        t.Fatalf("expected a nil allow list to grant no origin")
+    }
+
+    if 0 != len(service.AllowOrigins()) {
+        t.Fatalf("expected a nil allow list to stay empty, got %v", service.AllowOrigins())
+    }
+
+}
+
+func TestService_AllowOriginAllWrittenOutGrantsEveryOrigin(t *testing.T) {
+    service := NewService(Config{AllowOrigins: []string{AllowOriginAll}})
+
     if false == service.OriginAllowed(nil, "http://anything.test") {
-        t.Fatalf("expected a nil allow list to keep the permissive wildcard default")
+        t.Fatalf("expected the wildcard written out to grant every origin")
     }
 }
 
@@ -476,7 +489,7 @@ func TestRestrictiveService_AdvertisesANarrowerPolicyThanTheDefault(t *testing.T
     }
 }
 
-/* RestrictiveService(nil) is the shape a deployment reaches by handing it a list an environment variable failed to produce. A nil list takes the permissive default inside NewService, which turns the restrictive constructor into "*" plus credentials — the exact combination the browser refuses and the guard panics on. The refusal has to happen at boot, because a service built this way would otherwise carry a wildcard under a name that promises the opposite. */
+/* RestrictiveService(nil) is the shape a deployment reaches by handing it a list an environment variable failed to produce: credentials granted to no origin, refused at boot. */
 
 func TestRestrictiveService_RefusesToBootWithoutAnyOrigin(t *testing.T) {
     defer func() {
@@ -485,8 +498,8 @@ func TestRestrictiveService_RefusesToBootWithoutAnyOrigin(t *testing.T) {
             t.Fatalf("expected RestrictiveService(nil) to refuse the boot")
         }
 
-        if false == strings.Contains(fmt.Sprintf("%v", recovered), "wildcard") {
-            t.Fatalf("expected the refusal to name the wildcard, got: %v", recovered)
+        if false == strings.Contains(fmt.Sprintf("%v", recovered), "no origin is allowed") {
+            t.Fatalf("expected the refusal to name the missing origin, got: %v", recovered)
         }
     }()
 

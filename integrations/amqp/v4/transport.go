@@ -161,6 +161,7 @@ func newTransport(queue string, registry *MessageRegistry, source ConnectionSour
         headerLimits:        headerLimits,
         headerMaxCount:      configuredHeaderLimit(config.Headers.MaxCount, melodymessagebus.DefaultHeaderMaxCount),
         headerMaxBytes:      configuredHeaderLimit(config.Headers.MaxBytes, melodymessagebus.DefaultHeaderMaxBytes),
+        headerMaxNameLength: configuredHeaderLimit(config.Headers.MaxNameLength, melodymessagebus.DefaultHeaderMaxNameLength),
         publishHalf:         publishHalf{joinBound: closeTimeout},
         closeSignal:         make(chan struct{}),
     }
@@ -223,6 +224,7 @@ type Transport struct {
     headerLimits        melodymessagebus.HeaderLimits
     headerMaxCount      int
     headerMaxBytes      int
+    headerMaxNameLength int
 
     mutex          sync.Mutex
     publishChannel *amqp091.Channel
@@ -699,7 +701,7 @@ func (instance *Transport) buildPublishing(
     applicationHeaders := melodymessagebus.Headers(envelopeInstance)
     limits := instance.headerLimits
     if true == received {
-        applicationHeaders, _ = writableHeaders(applicationHeaders)
+        applicationHeaders, _ = writableHeaders(applicationHeaders, instance.requeueHeaderNameLength(envelopeInstance))
 
         requeueLimits, requeueLimitsErr := instance.requeueHeaderLimits(envelopeInstance)
         if nil != requeueLimitsErr {
@@ -755,19 +757,35 @@ func (instance *Transport) requeueHeaderLimits(envelopeInstance messagebuscontra
         maxBytes = max(maxBytes, stamp.receivedHeaderBytes)
     }
 
+    maxNameLength := instance.requeueHeaderNameLength(envelopeInstance)
+
     return melodymessagebus.ResolveHeaderLimits(
-        melodymessagebus.HeaderLimitsConfig{MaxCount: bound.Of(maxCount), MaxBytes: bound.Of(maxBytes)},
+        melodymessagebus.HeaderLimitsConfig{MaxCount: bound.Of(maxCount), MaxBytes: bound.Of(maxBytes), MaxNameLength: bound.Of(maxNameLength)},
         transportHeadersField,
     )
 }
 
-/* writableHeaders keeps the headers the write rule admits and answers the names it dropped, sorted. */
-func writableHeaders(headers map[string]string) (map[string]string, []string) {
+/* requeueHeaderNameLength is the longer of the transport's name length and the longest name the delivery arrived with. */
+func (instance *Transport) requeueHeaderNameLength(envelopeInstance messagebuscontract.Envelope) int {
+    maxNameLength := instance.headerMaxNameLength
+    if 0 == maxNameLength {
+        maxNameLength = melodymessagebus.DefaultHeaderMaxNameLength
+    }
+
+    if stamp, exists := melodymessagebus.LastStampOfType[DeliveryStamp](envelopeInstance); true == exists {
+        maxNameLength = max(maxNameLength, stamp.receivedHeaderNameLength)
+    }
+
+    return maxNameLength
+}
+
+/* writableHeaders keeps the headers the write rule admits under the name length and answers the names it dropped, sorted. */
+func writableHeaders(headers map[string]string, maxNameLength int) (map[string]string, []string) {
     kept := make(map[string]string, len(headers))
     dropped := []string{}
 
     for name, value := range headers {
-        if true == melodymessagebus.IsWritableHeader(name, value) {
+        if maxNameLength >= len(name) && true == melodymessagebus.IsWritableHeader(name, value) {
             kept[name] = value
 
             continue
@@ -782,7 +800,7 @@ func writableHeaders(headers map[string]string) (map[string]string, []string) {
 
 /* warnDroppedRequeueHeaders names each header the handler added that the write rule refuses, never its value; the requeue drops it so it still carries its counts. */
 func (instance *Transport) warnDroppedRequeueHeaders(runtimeInstance containercontract.Runtime, envelopeInstance messagebuscontract.Envelope) {
-    _, dropped := writableHeaders(melodymessagebus.Headers(envelopeInstance))
+    _, dropped := writableHeaders(melodymessagebus.Headers(envelopeInstance), instance.requeueHeaderNameLength(envelopeInstance))
     if 0 == len(dropped) {
         return
     }
@@ -1679,17 +1697,20 @@ func (instance *Transport) decode(delivery amqp091.Delivery, generation uint64) 
 
     applicationHeaders := applicationHeadersFromDelivery(delivery.Headers)
     receivedHeaderBytes := 0
+    receivedHeaderNameLength := 0
     for name, value := range applicationHeaders {
         receivedHeaderBytes += len(name) + len(value)
+        receivedHeaderNameLength = max(receivedHeaderNameLength, len(name))
     }
 
     stamps := []messagebuscontract.Stamp{
         DeliveryStamp{
-            Tag:                 delivery.DeliveryTag,
-            Redelivered:         delivery.Redelivered,
-            Generation:          generation,
-            receivedHeaderCount: len(applicationHeaders),
-            receivedHeaderBytes: receivedHeaderBytes,
+            Tag:                      delivery.DeliveryTag,
+            Redelivered:              delivery.Redelivered,
+            Generation:               generation,
+            receivedHeaderCount:      len(applicationHeaders),
+            receivedHeaderBytes:      receivedHeaderBytes,
+            receivedHeaderNameLength: receivedHeaderNameLength,
         },
         melodymessagebus.ReceivedStamp{TransportName: instance.queue},
     }

@@ -337,13 +337,13 @@ A value is octal, `0640`, `640` or `0o640`. A mode is a creation mode only: the 
 
 ### Session storage outage
 
-Whether a request that reads the session while the session storage cannot answer is served an empty session marked unavailable, saved nowhere and with no cookie written, where the default answers its reader the marked error, `503` with `Retry-After` when a handler returns it (see [SESSION.md](SESSION.md)). Read through [`HttpConfiguration.SessionEmptyOnOutage()`](../../config/contract/http.go) as a [`Switch`](../../config/contract/kernel.go) and decided by the application against its own [`ApplicationConfig.HttpKernel.SessionPolicy.EmptyOnOutage`](../../application/application_new.go): the key wins over the field.
+Whether a request that reads the session while the session storage cannot answer is served an empty session marked unavailable, saved nowhere and with no cookie written, where the default answers its reader the marked error, `503` with `Retry-After` when a handler returns it (see [SESSION.md](SESSION.md)). Read through [`HttpConfiguration.SessionEmptyOnOutage()`](../../config/contract/http.go) as a [`Switch`](../../config/contract/kernel.go) and decided by the application against its own [`ApplicationConfig.HttpKernel.SessionPolicy.EmptyOnOutage`](../../application/application_new.go): the key only hardens the field.
 
 | Environment key                       | Parameter name                        | Default |
 |---------------------------------------|---------------------------------------|---------|
 | `MELODY_HTTP_SESSION_EMPTY_ON_OUTAGE` | `kernel.http.session_empty_on_outage` | `""`    |
 
-The value is a boolean in the spellings the container teardown order accepts, and anything else fails the boot with `invalid environment value`, naming the key. Left out, the key is unset and the field decides; without the field the outage is answered as an error. The firewall's sign-in and sign-out doors refuse the empty session `503` either way.
+The value is a boolean in the spellings the container teardown order accepts, and only a false one is admitted: set, the key forces the outage answered as an error over a field that serves the empty session. A true value, which would serve the empty session over a field that answers the error, and anything that is not a boolean fail the boot with `invalid environment value`, naming the key, a true value with `admitted`; only the application's Go turns the empty session on. Left out, the key is unset and the field decides; without the field the outage is answered as an error. The firewall's sign-in and sign-out doors refuse the empty session `503` either way.
 
 ### Session cookie secure
 

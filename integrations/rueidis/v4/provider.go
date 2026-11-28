@@ -55,10 +55,14 @@ func (instance *Provider) resolvedLogger() loggingcontract.Logger {
     return instance.logger
 }
 
-/* Open opens the client under the caller's runtime and answers its owner: the runtime's context ends the retry wait and bounds the boot ping, and the owner's CloseWithContext is the one close; connection.Client() reaches the raw client for commands. */
+/* Open opens the client under the caller's runtime and answers its owner: the runtime's context ends the retry wait and bounds the boot ping, and the owner's CloseWithContext is the one close; connection.Client() reaches the raw client for commands. An address off this machine dialled without ClientConfig.TlsConfig is named once per address in the runtime's journal, under PlaintextAddressBootWarningName. */
 func (instance *Provider) Open(runtimeInstance containercontract.Runtime, parameters ConnectionParameters) (*Connection, error) {
     if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, "rueidis.Provider.Open"); nil != nilErr {
         return nil, nilErr
+    }
+
+    if nil == instance.client.tlsConfig {
+        warnPlaintextAddresses(runtimeInstance, parseAddressList(parameters.Address))
     }
 
     openContext := runtimeInstance.Context()

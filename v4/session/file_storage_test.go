@@ -2133,6 +2133,11 @@ func TestNewFileStorage_RefusesAModeOutsideItsRuleNamingTheField(t *testing.T) {
         {config: FileStorageConfig{FileMode: 0o4600}, field: "FileStorageConfig.FileMode", value: "04600"},
         {config: FileStorageConfig{DirectoryMode: 0o600}, field: "FileStorageConfig.DirectoryMode", value: "0600"},
         {config: FileStorageConfig{DirectoryMode: 0o1700}, field: "FileStorageConfig.DirectoryMode", value: "01700"},
+        {config: FileStorageConfig{FileMode: 0o604}, field: "FileStorageConfig.FileMode", value: "0604"},
+        {config: FileStorageConfig{FileMode: 0o602}, field: "FileStorageConfig.FileMode", value: "0602"},
+        {config: FileStorageConfig{FileMode: 0o666}, field: "FileStorageConfig.FileMode", value: "0666"},
+        {config: FileStorageConfig{DirectoryMode: 0o701}, field: "FileStorageConfig.DirectoryMode", value: "0701"},
+        {config: FileStorageConfig{DirectoryMode: 0o777}, field: "FileStorageConfig.DirectoryMode", value: "0777"},
     }
 
     for _, testCase := range cases {

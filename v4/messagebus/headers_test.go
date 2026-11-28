@@ -30,7 +30,7 @@ func TestValidateHeaders_Rules(t *testing.T) {
         {name: "leading dash", headers: map[string]string{"-name": secret}, field: "TransportConfig.Headers"},
         {name: "space", headers: map[string]string{"a b": secret}, field: "TransportConfig.Headers"},
         {name: "colon", headers: map[string]string{"a:b": secret}, field: "TransportConfig.Headers"},
-        {name: "65 characters", headers: map[string]string{strings.Repeat("a", 65): secret}, field: "TransportConfig.Headers"},
+        {name: "65 characters", headers: map[string]string{strings.Repeat("a", 65): secret}, field: "TransportConfig.Headers.MaxNameLength"},
         {name: "carriage return", headers: map[string]string{"name": secret + "\r"}, field: "TransportConfig.Headers"},
         {name: "line feed", headers: map[string]string{"name": secret + "\n"}, field: "TransportConfig.Headers"},
         {name: "nul", headers: map[string]string{"name": secret + "\x00"}, field: "TransportConfig.Headers"},
@@ -122,7 +122,9 @@ func TestIsWritableHeader_AnswersTheNameAndValueRule(t *testing.T) {
         {name: strings.Repeat("a", 64), value: "", writable: true},
         {name: "", value: "value"},
         {name: "bad name", value: "value"},
-        {name: strings.Repeat("a", 65), value: "value"},
+        {name: strings.Repeat("a", 65), value: "value", writable: true},
+        {name: strings.Repeat("a", HeaderNameMaximumLength), value: "value", writable: true},
+        {name: strings.Repeat("a", HeaderNameMaximumLength+1), value: "value"},
         {name: "tabbed", value: "a\tb"},
         {name: "invalid", value: "\xff"},
     } {
@@ -141,10 +143,63 @@ func TestResolveHeaderLimits_RefusesUnlimitedAndValuesBelowTheMinimumNamingTheFi
         {config: HeaderLimitsConfig{MaxCount: bound.Of(0)}, field: "StoreConfig.Headers.MaxCount"},
         {config: HeaderLimitsConfig{MaxBytes: bound.UnlimitedCount()}, field: "StoreConfig.Headers.MaxBytes"},
         {config: HeaderLimitsConfig{MaxBytes: bound.Of(63)}, field: "StoreConfig.Headers.MaxBytes"},
+        {config: HeaderLimitsConfig{MaxNameLength: bound.UnlimitedCount()}, field: "StoreConfig.Headers.MaxNameLength"},
+        {config: HeaderLimitsConfig{MaxNameLength: bound.Of(0)}, field: "StoreConfig.Headers.MaxNameLength"},
+        {config: HeaderLimitsConfig{MaxNameLength: bound.Of(HeaderNameMaximumLength + 1)}, field: "StoreConfig.Headers.MaxNameLength"},
     } {
         _, resolveErr := ResolveHeaderLimits(probe.config, "StoreConfig.Headers")
         if nil == resolveErr || probe.field != exception.LogContext(resolveErr, exception.LogContextConfig{})["field"] {
             t.Fatalf("expected a refusal naming %s, got %v", probe.field, resolveErr)
         }
+    }
+}
+
+func TestValidateHeaders_TheNameLengthIsTheConfiguredLimit(t *testing.T) {
+    if 64 != DefaultHeaderMaxNameLength || 255 != HeaderNameMaximumLength {
+        t.Fatalf("expected the default 64 and the maximum 255, got %d and %d", DefaultHeaderMaxNameLength, HeaderNameMaximumLength)
+    }
+
+    for _, probe := range []struct {
+        config   HeaderLimitsConfig
+        length   int
+        admitted bool
+    }{
+        {config: HeaderLimitsConfig{}, length: DefaultHeaderMaxNameLength, admitted: true},
+        {config: HeaderLimitsConfig{}, length: DefaultHeaderMaxNameLength + 1},
+        {config: HeaderLimitsConfig{MaxNameLength: bound.Of(8)}, length: 8, admitted: true},
+        {config: HeaderLimitsConfig{MaxNameLength: bound.Of(8)}, length: 9},
+        {config: HeaderLimitsConfig{MaxNameLength: bound.Of(HeaderNameMaximumLength)}, length: HeaderNameMaximumLength, admitted: true},
+    } {
+        limits, limitsErr := ResolveHeaderLimits(probe.config, "TransportConfig.Headers")
+        if nil != limitsErr {
+            t.Fatalf("resolve: %v", limitsErr)
+        }
+
+        validateErr := ValidateHeaders(map[string]string{strings.Repeat("a", probe.length): "value"}, limits)
+        if true == probe.admitted {
+            if nil != validateErr {
+                t.Fatalf("%+v: expected a %d-character name admitted, got %v", probe.config, probe.length, validateErr)
+            }
+
+            continue
+        }
+
+        if false == errors.Is(validateErr, ErrHeadersRefused) || "TransportConfig.Headers.MaxNameLength" != exception.LogContext(validateErr, exception.LogContextConfig{})["field"] {
+            t.Fatalf("%+v: expected a %d-character name refused naming MaxNameLength, got %v", probe.config, probe.length, validateErr)
+        }
+    }
+
+    if false == errors.Is(ValidateHeaders(map[string]string{strings.Repeat("a", DefaultHeaderMaxNameLength+1): ""}, HeaderLimits{}), ErrHeadersRefused) {
+        t.Fatalf("expected the zero limits to refuse a name above the default length")
+    }
+}
+
+func TestValidateReceivedHeaders_ReadsANameUpToTheMaximumLength(t *testing.T) {
+    if nil != ValidateReceivedHeaders(map[string]string{strings.Repeat("a", HeaderNameMaximumLength): "value"}, "TransportConfig.Headers") {
+        t.Fatalf("expected a name of the maximum length read")
+    }
+
+    if false == errors.Is(ValidateReceivedHeaders(map[string]string{strings.Repeat("a", HeaderNameMaximumLength+1): "value"}, "TransportConfig.Headers"), ErrHeadersRefused) {
+        t.Fatalf("expected a name above the maximum length refused")
     }
 }

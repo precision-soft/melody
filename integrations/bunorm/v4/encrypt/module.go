@@ -5,6 +5,7 @@ import (
 
     applicationcontract "github.com/precision-soft/melody/v4/application/contract"
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
+    melodyconfig "github.com/precision-soft/melody/v4/config"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
@@ -93,8 +94,10 @@ func (instance *Module) RegisterServices(registrar applicationcontract.ServiceRe
     replaceRegistries(ciphers, bindings)
 }
 
+/* RegisterCliCommands runs in every process at boot, so it refuses a fake cipher outside the development environment there, naming the field, before any command or column uses it. */
 func (instance *Module) RegisterCliCommands(kernelInstance kernelcontract.Kernel) []clicontract.Command {
     instance.validateConfig()
+    instance.refuseFakeCipherOutsideDevelopment(kernelInstance)
 
     commands := make([]clicontract.Command, 0)
 
@@ -135,6 +138,46 @@ func (instance *Module) RegisterCliCommands(kernelInstance kernelcontract.Kernel
     }
 
     return commands
+}
+
+/* the fake writes every encrypted column in clear where no cipher fails closed: it is admitted in the development environment alone, and a kernel that cannot say which environment it runs in admits it nowhere */
+func (instance *Module) refuseFakeCipherOutsideDevelopment(kernelInstance kernelcontract.Kernel) {
+    environment := ""
+    if false == isNilKernel(kernelInstance) {
+        environment = kernelInstance.Environment()
+    }
+
+    if melodyconfig.EnvironmentDevelopment == environment {
+        return
+    }
+
+    refuse := func(context map[string]any) {
+        context["cipher"] = fakeCipherConstructorName
+        context["environment"] = environment
+        context["admitted"] = melodyconfig.EnvironmentDevelopment
+
+        exception.Panic(exception.NewError(fakeCipherOutsideDevelopmentMessage, context, nil))
+    }
+
+    if true == isFakeCipher(instance.config.Cipher) {
+        refuse(map[string]any{"field": "ModuleConfig.Cipher"})
+    }
+
+    for position, contextConfig := range instance.config.Contexts {
+        if true == isFakeCipher(contextConfig.Cipher) {
+            refuse(map[string]any{"field": "CommandContextConfig.Cipher", "index": position, "context": contextConfig.Name})
+        }
+    }
+}
+
+func isNilKernel(kernelInstance kernelcontract.Kernel) bool {
+    if nil == kernelInstance {
+        return true
+    }
+
+    value := reflect.ValueOf(kernelInstance)
+
+    return reflect.Pointer == value.Kind() && true == value.IsNil()
 }
 
 func (instance *Module) validateConfig() {

@@ -15,6 +15,7 @@ import (
     melodycli "github.com/precision-soft/melody/v4/cli"
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
+    melodyconfig "github.com/precision-soft/melody/v4/config"
     configcontract "github.com/precision-soft/melody/v4/config/contract"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
@@ -68,7 +69,7 @@ func TestModule_RefusesAConfigWithNoCipherAndNoContexts(t *testing.T) {
     })
 
     assertPanicsWithMessage(t, "encrypt module needs a cipher or at least one context", func() {
-        NewModule(ModuleConfig{}).RegisterCliCommands(nil)
+        NewModule(ModuleConfig{}).RegisterCliCommands(newFakeKernel())
     })
 }
 
@@ -90,7 +91,7 @@ func TestModule_RefusesADatabaseWithoutACipher(t *testing.T) {
                 }
             }()
 
-            NewModule(config).RegisterCliCommands(nil)
+            NewModule(config).RegisterCliCommands(newFakeKernel())
         })
     }
 }
@@ -203,7 +204,7 @@ func TestModule_ACipherWithoutADatabaseInstallsTheCipherAndRegistersNoCommand(t 
         t.Fatalf("expected the module's cipher installed as the default: %v %v", resolved, resolveErr)
     }
 
-    if commands := module.RegisterCliCommands(nil); nil != commands {
+    if commands := module.RegisterCliCommands(newFakeKernel()); nil != commands {
         t.Fatalf("expected no command without a database, got %d", len(commands))
     }
 }
@@ -250,7 +251,7 @@ func TestModule_AContextWithoutADatabaseInstallsItsCipherAndRegistersNoCommand(t
         t.Fatalf("expected the context's cipher under its name: %v %v", resolved, resolveErr)
     }
 
-    if commands := module.RegisterCliCommands(nil); nil != commands {
+    if commands := module.RegisterCliCommands(newFakeKernel()); nil != commands {
         t.Fatalf("expected no command for a context without a database, got %d", len(commands))
     }
 }
@@ -316,7 +317,7 @@ func TestModule_ARefusedRegistrationInstallsNothing(t *testing.T) {
 func TestModule_RegisterCliCommandsExposesEncryptDatabaseCommand(t *testing.T) {
     cipher := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}}))
 
-    commands := NewModule(ModuleConfig{Database: newMysqlDatabase(), Cipher: cipher}).RegisterCliCommands(nil)
+    commands := NewModule(ModuleConfig{Database: newMysqlDatabase(), Cipher: cipher}).RegisterCliCommands(newFakeKernel())
 
     if 1 != len(commands) {
         t.Fatalf("expected exactly one command, got %d", len(commands))
@@ -339,7 +340,7 @@ func TestModule_RegisterCliCommandsComposesTheDefaultAndContexts(t *testing.T) {
         },
     })
 
-    commands := module.RegisterCliCommands(nil)
+    commands := module.RegisterCliCommands(newFakeKernel())
 
     names := make(map[string]bool, len(commands))
     for _, command := range commands {
@@ -361,26 +362,28 @@ func TestModule_RegisterCliCommandsPanicsOnInvalidContext(t *testing.T) {
     assertPanics(t, func() {
         NewModule(ModuleConfig{
             Contexts: []CommandContextConfig{{Name: "", Database: database, Cipher: NewFakeCipher()}},
-        }).RegisterCliCommands(nil)
+        }).RegisterCliCommands(newFakeKernel())
     })
 
     assertPanics(t, func() {
         NewModule(ModuleConfig{
             Contexts: []CommandContextConfig{{Name: "payment"}},
-        }).RegisterCliCommands(nil)
+        }).RegisterCliCommands(newFakeKernel())
     })
 }
 
+/* the development environment, the one the fake cipher is admitted in */
 func newFakeKernel() *fakeKernel {
-    return &fakeKernel{serviceContainer: container.NewContainer(container.ContainerConfig{})}
+    return &fakeKernel{serviceContainer: container.NewContainer(container.ContainerConfig{}), environment: melodyconfig.EnvironmentDevelopment}
 }
 
 type fakeKernel struct {
     serviceContainer containercontract.Container
+    environment      string
 }
 
 func (instance *fakeKernel) Environment() string {
-    return "test"
+    return instance.environment
 }
 
 func (instance *fakeKernel) DebugMode() bool {
@@ -941,7 +944,7 @@ func TestModule_HandsEachCommandTheBindingsOfItsCompartment(t *testing.T) {
     })
 
     labelsByCommand := make(map[string][]string)
-    for _, command := range module.RegisterCliCommands(nil) {
+    for _, command := range module.RegisterCliCommands(newFakeKernel()) {
         labels := make([]string, 0)
         for label := range command.(*EncryptDatabaseCommand).sealBindingsByLabel {
             labels = append(labels, label)
@@ -965,7 +968,7 @@ func TestModule_HandsEachCommandTheBindingsOfItsCompartment(t *testing.T) {
 }
 
 func labelsByCommandUnboundAdmitted(module *Module, commandName string, label string) bool {
-    for _, command := range module.RegisterCliCommands(nil) {
+    for _, command := range module.RegisterCliCommands(newFakeKernel()) {
         if commandName == command.Name() {
             return command.(*EncryptDatabaseCommand).sealBindingsByLabel[label].UnboundAdmitted
         }
@@ -990,4 +993,41 @@ func TestModule_AFactoryAnsweringNoDatabaseIsRefused(t *testing.T) {
     if _, resolveErr := command.resolveMigrator(testRuntime()); nil == resolveErr || false == strings.Contains(resolveErr.Error(), "returned a nil database") {
         t.Fatalf("expected a factory answering no database refused, got %v", resolveErr)
     }
+}
+
+func TestModule_RefusesTheFakeCipherOutsideTheDevelopmentEnvironmentNamingTheField(t *testing.T) {
+    for name, testCase := range map[string]struct {
+        config ModuleConfig
+        kernel kernelcontract.Kernel
+        field  string
+    }{
+        "the default cipher in production": {config: ModuleConfig{Cipher: NewFakeCipher()}, kernel: &fakeKernel{environment: melodyconfig.EnvironmentProduction}, field: "ModuleConfig.Cipher"},
+        "the default cipher in test":       {config: ModuleConfig{Cipher: NewFakeCipher()}, kernel: &fakeKernel{environment: "test"}, field: "ModuleConfig.Cipher"},
+        "the default cipher with no kernel": {config: ModuleConfig{Cipher: NewFakeCipher()}, kernel: nil, field: "ModuleConfig.Cipher"},
+        "a typed nil kernel":                {config: ModuleConfig{Cipher: NewFakeCipher()}, kernel: (*fakeKernel)(nil), field: "ModuleConfig.Cipher"},
+        "a context's cipher in production":  {config: ModuleConfig{Contexts: []CommandContextConfig{{Name: "billing", Cipher: NewFakeCipher()}}}, kernel: &fakeKernel{environment: melodyconfig.EnvironmentProduction}, field: "CommandContextConfig.Cipher"},
+    } {
+        func() {
+            defer func() {
+                recovered := recover()
+                recoveredErr, isError := recovered.(error)
+                if false == isError {
+                    t.Fatalf("%s: expected a refusal, got %v", name, recovered)
+                }
+
+                context := exception.LogContext(recoveredErr, exception.LogContextConfig{})
+                if testCase.field != context["field"] || fakeCipherConstructorName != context["cipher"] || melodyconfig.EnvironmentDevelopment != context["admitted"] {
+                    t.Fatalf("%s: expected the refusal to name %s and the fake cipher, got %v", name, testCase.field, context)
+                }
+            }()
+
+            NewModule(testCase.config).RegisterCliCommands(testCase.kernel)
+        }()
+    }
+}
+
+func TestModule_AdmitsTheFakeCipherInTheDevelopmentEnvironmentAndARealCipherAnywhere(t *testing.T) {
+    NewModule(ModuleConfig{Cipher: NewFakeCipher(), Contexts: []CommandContextConfig{{Name: "billing", Cipher: NewFakeCipher()}}}).RegisterCliCommands(newFakeKernel())
+
+    NewModule(ModuleConfig{Cipher: newCrmCipher(t)}).RegisterCliCommands(&fakeKernel{environment: melodyconfig.EnvironmentProduction})
 }

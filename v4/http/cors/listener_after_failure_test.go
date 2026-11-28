@@ -23,7 +23,7 @@ func failingListener(runtimeInstance containercontract.Runtime, eventValue event
 func TestResponseListener_DecoratesAfterAFailedListenerAndReplacesNothing(t *testing.T) {
     dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
     dispatcher.DeclareEvent(kernelcontract.EventKernelResponse, eventcontract.EventConfig{TagsToRunAfterFailure: []string{kernelcontract.ListenerTagKernelCors}})
-    RegisterListeners(dispatcher, NewService(Config{}))
+    RegisterListeners(dispatcher, NewService(Config{AllowOrigins: []string{AllowOriginAll}}))
     dispatcher.AddListener(kernelcontract.EventKernelResponse, failingListener, eventcontract.ListenerConfig{Priority: 0})
 
     request := httptest.NewRequest(nethttp.MethodGet, "/x", nil)
@@ -48,7 +48,7 @@ func TestResponseListener_DecoratesAfterAFailedListenerAndReplacesNothing(t *tes
 
 func TestRegisterListeners_TagsTheResponseListenerOnly(t *testing.T) {
     dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
-    RegisterListeners(dispatcher, NewService(Config{}))
+    RegisterListeners(dispatcher, NewService(Config{AllowOrigins: []string{AllowOriginAll}}))
 
     for _, registeredEvent := range dispatcher.RegisteredEvents() {
         for _, listener := range registeredEvent.Listeners {
@@ -67,7 +67,7 @@ func TestRegisterListeners_TagsTheResponseListenerOnly(t *testing.T) {
 func TestRequestListener_DoesNotAnswerAPreflightAfterAFailure(t *testing.T) {
     dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
     dispatcher.DeclareEvent(kernelcontract.EventKernelRequest, eventcontract.EventConfig{TagsToRunAfterFailure: []string{kernelcontract.ListenerTagKernelCors}})
-    RegisterRequestListener(dispatcher, NewService(Config{}))
+    RegisterRequestListener(dispatcher, NewService(Config{AllowOrigins: []string{AllowOriginAll}}))
     dispatcher.AddListener(kernelcontract.EventKernelRequest, failingListener, eventcontract.ListenerConfig{Priority: RequestListenerPriority + 10})
 
     requestEvent := http.NewKernelRequestEvent(newTestRuntime(), testhelper.NewHttpTestRequestFromHttpRequest(newPreflightTestRequest("/api/item")))

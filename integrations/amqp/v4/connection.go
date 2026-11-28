@@ -172,7 +172,7 @@ func (instance *Provider) NewServerSentEventBackplane(hub *melodyhttp.ServerSent
     return newServerSentEventBackplane(hub, source, config, instance.parent)
 }
 
-/* Open dials one connection under the runtime's context, bounded by DialTimeout, and answers its owner, which carries the provider's CloseTimeout; connection.Raw() reaches the client's connection. */
+/* Open dials one connection under the runtime's context, bounded by DialTimeout, and answers its owner, which carries the provider's CloseTimeout; connection.Raw() reaches the client's connection. A plain amqp dsn off this machine is named once per host in the runtime's journal, under PlaintextDsnBootWarningName. */
 func (instance *Provider) Open(runtimeInstance containercontract.Runtime, dsn string) (*Connection, error) {
     if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, "amqp.Provider.Open"); nil != nilErr {
         return nil, nilErr
@@ -181,6 +181,8 @@ func (instance *Provider) Open(runtimeInstance containercontract.Runtime, dsn st
     if dsnErr := instance.refuseDsn(dsn); nil != dsnErr {
         return nil, dsnErr
     }
+
+    warnPlaintextDsn(runtimeInstance, dsn)
 
     return instance.dial(runtimeInstance.Context(), dsn)
 }

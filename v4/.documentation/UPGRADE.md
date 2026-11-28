@@ -33,6 +33,46 @@ The fourth major starts from the third: the sections the third major shipped, in
 
 The fourth major takes the forms the third major kept compatible: a section that names a sibling interface, a deprecated door or a released signature on the third major describes here the form the fourth major carries instead, and this major's changelog marks each **Breaking**.
 
+### Config: the session outage key only hardens
+
+**What changed.** `MELODY_HTTP_SESSION_EMPTY_ON_OUTAGE` admits a false value alone: set, it forces a session storage outage answered `503` with `Retry-After` over an [`ApplicationConfig.HttpKernel.SessionPolicy.EmptyOnOutage`](../application/application_new.go) that serves the empty session. A true value, which turned the empty session on over the field, refuses the boot, as `MELODY_HTTP_SESSION_COOKIE_SECURE` admits `always` alone: an environment key never turns a protection off.
+
+**Symptom.** The boot fails with `invalid environment value`, naming `MELODY_HTTP_SESSION_EMPTY_ON_OUTAGE` and `admitted` `[false]`.
+
+**Remedy.** Turn the empty session on in Go, `ApplicationConfig{HttpKernel: http.KernelConfig{SessionPolicy: httpcontract.SessionPolicy{EmptyOnOutage: true}}}`, and leave the key empty, or set it to `false` where a deployment must answer the outage `503` whatever the Go says.
+
+### Http: a cors service without an origin list grants no origin
+
+**What changed.** A [`cors.Config`](../http/cors/service.go) whose `AllowOrigins` is nil grants no origin, as an empty list does, where it was defaulted to the wildcard: `cors.NewService(cors.Config{})` answers no cross-origin request and hands a preflight on unanswered. The wildcard is written out, `[]string{cors.AllowOriginAll}`, the new constant for `"*"`; it still refuses credentials beside it.
+
+**Symptom.** A browser refuses the cross-origin answers of a service built without `AllowOrigins`: no `Access-Control-Allow-Origin` header, and a preflight reaches the route instead of being answered `204`.
+
+**Remedy.** Name the origins, `AllowOrigins: []string{"https://app.example.com"}`, or, for public answers without credentials, `AllowOrigins: []string{cors.AllowOriginAll}`.
+
+### Session: a session file or directory mode grants others nothing
+
+**What changed.** [`NewFileStorage`](../session/file_storage.go) and `NewFileStorageOverFile` refuse a `FileStorageConfig.FileMode` or `DirectoryMode` holding any bit of others (`0007`), naming the field and the octal value: the file holds every session's data. The group's bits stay the operator's, and the other creation modes of the major keep their floor only.
+
+**Symptom.** The construction answers `the session file and directory modes must grant others nothing: the file holds every session's data`, naming `FileStorageConfig.FileMode` or `FileStorageConfig.DirectoryMode` and the `value`.
+
+**Remedy.** Drop the others' bits, `0640` and `0750` for a reader in the group, or leave the fields out for `0600` and `0700`.
+
+### Messagebus: a header name's length is a limit of its own
+
+**What changed.** [`HeaderLimitsConfig.MaxNameLength`](../messagebus/headers.go) bounds the header names a transport or a store writes, `DefaultHeaderMaxNameLength` (64) when left out, 1 to `HeaderNameMaximumLength` (255), unlimited refused, beside `MaxCount` and `MaxBytes`; `HeaderNameMaxLength` is renamed `DefaultHeaderMaxNameLength`. A longer name is refused naming `<field>.MaxNameLength` where it was refused naming `<field>`, and `ValidateReceivedHeaders` and `IsWritableHeader` read a name up to 255 characters, so the amqp transport no longer skips a received name between 65 and 255 characters.
+
+**Symptom.** `undefined: messagebus.HeaderNameMaxLength` at compile time; a refusal of a long name names `<field>.MaxNameLength`.
+
+**Remedy.** Read `messagebus.DefaultHeaderMaxNameLength`; to carry a longer name, set `MaxNameLength` on the transport's or the store's `Headers`.
+
+### Bunorm encrypt: the fake cipher is refused outside development
+
+**What changed.** The [encrypt module](../../integrations/bunorm/v4/encrypt/module.go) refuses `encrypt.NewFakeCipher()`, as `ModuleConfig.Cipher` or a context's `CommandContextConfig.Cipher`, at registration in every process whose `MELODY_ENV` is not `dev`: the identity cipher writes every encrypted column in clear with no error.
+
+**Symptom.** The boot panics with `the encrypt module is handed the fake cipher outside the development environment: it would write every encrypted column in clear`, naming the `field`, the `cipher` `encrypt.NewFakeCipher`, the `environment` and `admitted` `dev`.
+
+**Remedy.** Install a real cipher, `encrypt.NewCipher` over a key provider, outside development; a test that registers the module with the fake runs it under a kernel whose environment is `dev`.
+
 ### Application: a secret mark that matches no parameter refuses the boot
 
 **What changed.** A [`MarkParameterSecret`](../application/application.go) name that still matches no parameter once every phase registered its own refuses the boot at its end, `a secret marking matched no parameter, so the credential it meant stays in clear; …`, naming the names under `parameterNames`, where it was the boot warning `application.secretMark.unmatched`, which is removed. [`MarkParameterSecretOptional`](../application/application.go), on the `Application` and on [`ParameterRegistrar`](../application/contract/parameter_module.go), is the door: it marks the parameter where it exists and is dropped without a word where it does not.
@@ -3462,7 +3502,7 @@ The body is also negotiated: a client that prefers html gets the html error page
 
 ### Http cors: an empty origin list denies, entries are port-significant, and the preflight can be answered ahead of security
 
-**What changed.** An explicitly empty (non-nil) `AllowOrigins` list denies every origin instead of silently becoming the wildcard, and credentials beside it are refused at boot under their own name. A schemeless allow entry is port-significant: `app.example.com` no longer matches every port of that host. `NewService` reads a nil method or header list as the default list — Authorization included — and an explicitly empty method or header list, which v3.13 replaced with its default, denies as the empty origin list does. `cors.RegisterRequestListener` and the `RegisterListeners` façade arrive, answering a preflight at priority 100, ahead of token resolution — a preflight carries neither cookie nor Authorization by spec, so aimed at an access-controlled path through the middleware form it was refused opaquely. `CorsMiddleware(nil)` read as the default service instead of panicking; the fourth major removes that family and refuses a nil service at `cors.Middleware` and the three listener doors, so the default service is spelled `cors.NewService(cors.Config{})`.
+**What changed.** An explicitly empty (non-nil) `AllowOrigins` list denies every origin instead of silently becoming the wildcard, and credentials beside it are refused at boot under their own name. A schemeless allow entry is port-significant: `app.example.com` no longer matches every port of that host. `NewService` reads a nil method or header list as the default list — Authorization included — and an explicitly empty method or header list, which v3.13 replaced with its default, denies as the empty origin list does. `cors.RegisterRequestListener` and the `RegisterListeners` façade arrive, answering a preflight at priority 100, ahead of token resolution — a preflight carries neither cookie nor Authorization by spec, so aimed at an access-controlled path through the middleware form it was refused opaquely. `CorsMiddleware(nil)` read as the default service instead of panicking; the fourth major removes that family and refuses a nil service at `cors.Middleware` and the three listener doors, so the default service is spelled `cors.NewService(cors.Config{})`, which grants no origin in the fourth major (see "Http: a cors service without an origin list grants no origin").
 
 **Symptom.** A configuration whose origins variable arrives empty stops allowing everybody, and one whose methods or headers variable arrives empty stops granting any; an entry that relied on matching any port of its host stops matching the other ports; a SPA calling an access-controlled endpoint cross-origin starts working once the listeners are registered.
 

@@ -1139,8 +1139,8 @@ func TestConfigurationSessionEmptyOnOutageIsASwitch(t *testing.T) {
     }
 
     for value, expected := range map[string]configcontract.Switch{
-        "true":  {Value: true, IsSet: true},
         "false": {Value: false, IsSet: true},
+        "0":     {Value: false, IsSet: true},
     } {
         configuration := newTeardownTimeoutConfiguration(t, map[string]string{HttpSessionEmptyOnOutageKey: value})
         if expected != configuration.Http().SessionEmptyOnOutage() {
@@ -1148,7 +1148,7 @@ func TestConfigurationSessionEmptyOnOutageIsASwitch(t *testing.T) {
         }
     }
 
-    if "true" != newTeardownTimeoutConfiguration(t, map[string]string{HttpSessionEmptyOnOutageKey: "true"}).MustGet(KernelHttpSessionEmptyOnOutage).MustString() {
+    if "false" != newTeardownTimeoutConfiguration(t, map[string]string{HttpSessionEmptyOnOutageKey: "false"}).MustGet(KernelHttpSessionEmptyOnOutage).MustString() {
         t.Fatalf("expected the kernel alias to carry the value")
     }
 
@@ -1160,6 +1160,21 @@ func TestConfigurationSessionEmptyOnOutageIsASwitch(t *testing.T) {
     _, configurationErr := NewConfiguration(environment, "/tmp/melody", ConfigurationConfig{})
     if nil == configurationErr || HttpSessionEmptyOnOutageKey != exception.LogContext(configurationErr, exception.LogContextConfig{})["environmentKey"] {
         t.Fatalf("expected the value refused naming the key, got %v", configurationErr)
+    }
+}
+
+/* the key only hardens the outage answer: true would serve an empty session where the Go field answers 503, so only the Go field loosens it */
+func TestConfigurationSessionEmptyOnOutage_RefusesTrueNamingTheKey(t *testing.T) {
+    for _, value := range []string{"true", "1", "yes", "on"} {
+        environment, environmentErr := NewEnvironment(context.Background(), &testEnvironmentSource{values: map[string]string{HttpSessionEmptyOnOutageKey: value}})
+        if nil != environmentErr {
+            t.Fatalf("new environment error: %v", environmentErr)
+        }
+
+        _, configurationErr := NewConfiguration(environment, "/tmp/melody", ConfigurationConfig{})
+        if nil == configurationErr || HttpSessionEmptyOnOutageKey != exception.LogContext(configurationErr, exception.LogContextConfig{})["environmentKey"] {
+            t.Fatalf("%s: expected the value refused naming the key, got %v", value, configurationErr)
+        }
     }
 }
 

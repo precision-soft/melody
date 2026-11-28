@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- `plaintext_dsn.go`: `Provider.Open` over a plain `amqp://` dsn whose host is not `localhost` or a loopback address writes the warning `amqp.plaintextDsn` (`PlaintextDsnBootWarningName`) once per host and process in the runtime's journal, naming the host and never the dsn, and honouring `MELODY_BOOT_WARNINGS_IGNORED`; `Module.RegisterBootWarnings` declares the code, the module now a `BootWarningModule`.
 - `transport.go`: `TransportConfig.DeadLetterMaxLength` (a `bound.Count`, at least 1) and `TransportConfig.DeadLetterTtl` (a `bound.Duration`, 1ms to the 32-bit millisecond limit, whole milliseconds) cap the `<queue>.dlq` queue, declared as its `x-max-length` and `x-message-ttl`; each is unlimited when left out and then declares no argument, so the default declare is unchanged; a cap beside `DeadLetterDisabled` is refused naming the field, and a `PRECONDITION_FAILED` declare of the `.dlq` names both fields under `fields`.
 - `ConnectionMustFromRuntime(runtimeInstance)`, the connection read through the runtime's scope under its context, for code that holds a runtime; a nil runtime is refused. `ConnectionMustFromResolver` stays the door of a provider.
 - **Breaking** — `service_resolver.go`: `ConnectionMustFromContainer` is removed, `ConnectionMustFromResolver` taking the container as it takes a scope.
@@ -17,6 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- `transport.go`, `stamp.go`: a header name is bounded by `TransportConfig.Headers.MaxNameLength` on write; a delivery's header names are read up to `messagebus.HeaderNameMaximumLength`, so a name a longer-configured producer wrote is no longer skipped, and a requeue admits the longer of the transport's name length and the longest name the delivery arrived with, a longer name the handler added dropped with its warning.
 - `transport.go`: the GoDoc of `TransportConfig.Prefetch` states that its range is the one of the 16-bit prefetch count of `basic.qos` and that unlimited is refused
 - **Breaking** — `server_sent_event_backplane.go`: `NewServerSentEventBackplane` refuses a typed-nil `ServerSentEventBackplaneConfig.Logger` as `amqp server sent event backplane logger is a typed nil`, naming the field, where it read as absent; **Behavioural change**: a backplane built without a logger reports its failures on the emergency logger, where only a terminal stop reached it.
 - `README.md`: the bus samples dispatch with the fourth major's `messagebuscontract.DispatchOptions{}` and build the handle middleware with `messagebus.HandleMiddlewareConfig{}`.

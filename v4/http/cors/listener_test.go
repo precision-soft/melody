@@ -40,7 +40,7 @@ func newTestRuntime() containercontract.Runtime {
 func TestRegisterResponseListener_AppliesHeadersToErrorResponse(t *testing.T) {
     dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
 
-    RegisterResponseListener(dispatcher, NewService(Config{}))
+    RegisterResponseListener(dispatcher, NewService(Config{AllowOrigins: []string{AllowOriginAll}}))
 
     request := httptest.NewRequest(nethttp.MethodGet, "/x", nil)
     request.Header.Set("Origin", "https://example.com")
@@ -66,7 +66,7 @@ func TestRegisterResponseListener_AppliesHeadersToErrorResponse(t *testing.T) {
 func TestRegisterResponseListener_SkipsWhenOriginMissing(t *testing.T) {
     dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
 
-    RegisterResponseListener(dispatcher, NewService(Config{}))
+    RegisterResponseListener(dispatcher, NewService(Config{AllowOrigins: []string{AllowOriginAll}}))
 
     request := httptest.NewRequest(nethttp.MethodGet, "/x", nil)
     melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
@@ -395,7 +395,7 @@ is the only shape a bare comparison already catches. */
 func TestRegisterRequestListener_ATypedNilRequestIsLeftAlone(t *testing.T) {
     dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
 
-    RegisterRequestListener(dispatcher, NewService(Config{}))
+    RegisterRequestListener(dispatcher, NewService(Config{AllowOrigins: []string{AllowOriginAll}}))
 
     var unassignedRequest *testhelper.HttpTestRequest
 
@@ -496,7 +496,7 @@ func TestMiddleware_And_Listener_PassTheRequestOfTheCall(t *testing.T) {
 /* the preflight answer ends the kernel.request dispatch; it may skip the required listeners behind it, since a preflight runs no handler */
 func TestRegisterRequestListener_MaySkipTheRequiredListeners(t *testing.T) {
     dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
-    RegisterRequestListener(dispatcher, NewService(Config{}))
+    RegisterRequestListener(dispatcher, NewService(Config{AllowOrigins: []string{AllowOriginAll}}))
 
     registeredEvents := dispatcher.RegisteredEvents()
     if 1 != len(registeredEvents) || 1 != len(registeredEvents[0].Listeners) || false == registeredEvents[0].Listeners[0].Config.Failure.MaySkipRequiredListeners {

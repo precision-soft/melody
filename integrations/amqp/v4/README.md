@@ -54,7 +54,7 @@ defer func() {
 | `TlsConfig` | the client's | the TLS session of an `amqps` dsn, copied at `NewProvider` and cloned for every dial; a dsn that is not `amqps` beside it is refused naming the field |
 | `ConnectionName` | the client's | what the broker's management view shows, beside the client's own properties; at most 255 bytes with no control character |
 
-A value outside its rule panics at `NewProvider` naming the field. A context already done refuses before the dial; one that ends during the dial or the handshake closes the socket, and the refusal carries the context's cause beside the redacted dial error.
+A value outside its rule panics at `NewProvider` naming the field. `Open` over a plain `amqp://` dsn whose host is not `localhost` or a loopback address writes, once per host and process, the warning `amqp.plaintextDsn` (`PlaintextDsnBootWarningName`) in the runtime's journal, naming the host and never the dsn: the credentials and every message cross the network in clear. An `amqps` dsn is the remedy; the module declares the code, so `MELODY_BOOT_WARNINGS_IGNORED` may name it for a broker reached over a network the deployment trusts. A dialer handed to a reconnecting transport is not judged. A context already done refuses before the dial; one that ends during the dial or the handshake closes the socket, and the refusal carries the context's cause beside the redacted dial error.
 
 ### Register message types
 

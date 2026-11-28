@@ -133,7 +133,13 @@ func (instance *Module) RegisterServices(registrar applicationcontract.ServiceRe
     }
 }
 
+/* the code is declared whatever the address, which only the connection provider reads, so MELODY_BOOT_WARNINGS_IGNORED may name it in every environment the module is registered in */
+func (instance *Module) RegisterBootWarnings(registrar applicationcontract.BootWarningRegistrar) {
+    registrar.DeclareBootWarning(PlaintextAddressBootWarningName, applicationcontract.BootWarningConfig{})
+}
+
 var (
-    _ applicationcontract.Module        = (*Module)(nil)
-    _ applicationcontract.ServiceModule = (*Module)(nil)
+    _ applicationcontract.Module            = (*Module)(nil)
+    _ applicationcontract.ServiceModule     = (*Module)(nil)
+    _ applicationcontract.BootWarningModule = (*Module)(nil)
 )

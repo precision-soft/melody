@@ -254,4 +254,4 @@ The column types redact their plaintext when `fmt` calls their `Format` method, 
 
 ## Testing / dev
 
-`encrypt.NewFakeCipher()` is an identity cipher (no confidentiality) for tests and local development. Never install it in production.
+`encrypt.NewFakeCipher()` is an identity cipher (no confidentiality) for tests and local development. The module refuses it at registration outside `MELODY_ENV=dev`, as `ModuleConfig.Cipher` or a context's `CommandContextConfig.Cipher`, naming the field, the cipher, the environment and the admitted one; a process whose kernel names no environment refuses it too.

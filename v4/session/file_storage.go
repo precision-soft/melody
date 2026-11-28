@@ -7,6 +7,7 @@ import (
     "encoding/hex"
     "encoding/json"
     "errors"
+    "fmt"
     "io"
     "math"
     "os"
@@ -44,10 +45,10 @@ type FileStorageConfig struct {
     /* Clock is where every expiry instant is read; nil is the system clock, and the file persists the wall reading. */
     Clock clockcontract.Clock
 
-    /* FileMode is the permission of the session file over a path, set on every snapshot it writes, and of the journal it creates: DefaultFileStorageFileMode when left out; permission bits only, the owner's read and write required; unused over an open handle. */
+    /* FileMode is the permission of the session file over a path, set on every snapshot it writes, and of the journal it creates: DefaultFileStorageFileMode when left out; permission bits only, the owner's read and write required, any bit of others refused; unused over an open handle. */
     FileMode os.FileMode
 
-    /* DirectoryMode is the permission every missing directory of the path is created with: DefaultFileStorageDirectoryMode when left out; permission bits only, the owner's read, write and search required; an existing directory keeps its own, and it is unused over an open handle. */
+    /* DirectoryMode is the permission every missing directory of the path is created with: DefaultFileStorageDirectoryMode when left out; permission bits only, the owner's read, write and search required, any bit of others refused; an existing directory keeps its own, and it is unused over an open handle. */
     DirectoryMode os.FileMode
 }
 
@@ -56,6 +57,12 @@ const (
     DefaultFileStorageFileMode os.FileMode = 0o600
     /* DefaultFileStorageDirectoryMode is the permission a missing session directory is created with when FileStorageConfig.DirectoryMode is left out. */
     DefaultFileStorageDirectoryMode os.FileMode = 0o700
+)
+
+/* the session file holds every session's data, a credential each: a mode granting others any bit is refused */
+const (
+    sessionFileModeOtherBits        os.FileMode = 0o007
+    sessionFileModeOtherBitsRefusal             = "the session file and directory modes must grant others nothing: the file holds every session's data"
 )
 
 type sessionFileModes struct {
@@ -72,6 +79,25 @@ func resolveSessionFileModes(config FileStorageConfig) (sessionFileModes, error)
     directoryMode, directoryModeErr := internal.ResolveCreationMode(config.DirectoryMode, DefaultFileStorageDirectoryMode, internal.JournalDirectoryModeFloor, internal.DirectoryModeRefusal, "FileStorageConfig.DirectoryMode")
     if nil != directoryModeErr {
         return sessionFileModes{}, directoryModeErr
+    }
+
+    for _, configured := range []struct {
+        mode  os.FileMode
+        field string
+    }{
+        {mode: fileMode, field: "FileStorageConfig.FileMode"},
+        {mode: directoryMode, field: "FileStorageConfig.DirectoryMode"},
+    } {
+        if 0 != configured.mode&sessionFileModeOtherBits {
+            return sessionFileModes{}, exception.NewError(
+                sessionFileModeOtherBitsRefusal,
+                exceptioncontract.Context{
+                    "field": configured.field,
+                    "value": fmt.Sprintf("%#o", uint32(configured.mode)),
+                },
+                nil,
+            )
+        }
     }
 
     return sessionFileModes{file: fileMode, directory: directoryMode}, nil

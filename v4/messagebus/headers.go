@@ -13,9 +13,12 @@ import (
 )
 
 const (
-    HeaderNameMaxLength   = 64
-    DefaultHeaderMaxCount = 32
-    DefaultHeaderMaxBytes = 8 * 1024
+    DefaultHeaderMaxNameLength = 64
+    DefaultHeaderMaxCount      = 32
+    DefaultHeaderMaxBytes      = 8 * 1024
+
+    /* HeaderNameMaximumLength is the longest name MaxNameLength admits, an amqp field-table key being a short string; a received name is read up to it, since a writer may have been configured that far. */
+    HeaderNameMaximumLength = 255
 )
 
 /* ErrHeadersRefused is the cause of every refusal ValidateHeaders answers, so a caller tells a refused message from an unreachable transport. */
@@ -27,16 +30,19 @@ type HeaderLimitsConfig struct {
     MaxCount bound.Count
     /* MaxBytes bounds the names and values together: 8 KiB by default, at least 64, unlimited refused, since the bound is what keeps a message inside a broker frame and a row inside a page. */
     MaxBytes bound.Count
+    /* MaxNameLength is the longest header name: 64 characters by default, 1 to HeaderNameMaximumLength, unlimited refused. */
+    MaxNameLength bound.Count
 }
 
 /* HeaderLimits is a HeaderLimitsConfig resolved under its owner's field; the zero value is the defaults. */
 type HeaderLimits struct {
-    maxCount int
-    maxBytes int
-    field    string
+    maxCount      int
+    maxBytes      int
+    maxNameLength int
+    field         string
 }
 
-/* ResolveHeaderLimits resolves the two limits under the owner's field name, "TransportConfig.Headers" for example, so a refusal names the field the application wrote. */
+/* ResolveHeaderLimits resolves the three limits under the owner's field name, "TransportConfig.Headers" for example, so a refusal names the field the application wrote. */
 func ResolveHeaderLimits(config HeaderLimitsConfig, field string) (HeaderLimits, error) {
     maxCount, maxCountErr := bound.Resolve(
         config.MaxCount,
@@ -54,14 +60,23 @@ func ResolveHeaderLimits(config HeaderLimitsConfig, field string) (HeaderLimits,
         return HeaderLimits{}, maxBytesErr
     }
 
-    return HeaderLimits{maxCount: maxCount.Value, maxBytes: maxBytes.Value, field: field}, nil
+    maxNameLength, maxNameLengthErr := bound.Resolve(
+        config.MaxNameLength,
+        bound.Rule[int]{Name: field + ".MaxNameLength", Default: DefaultHeaderMaxNameLength, Minimum: 1, Maximum: HeaderNameMaximumLength},
+    )
+    if nil != maxNameLengthErr {
+        return HeaderLimits{}, maxNameLengthErr
+    }
+
+    return HeaderLimits{maxCount: maxCount.Value, maxBytes: maxBytes.Value, maxNameLength: maxNameLength.Value, field: field}, nil
 }
 
-/* ValidateHeaders is the rule every transport and store applies before it writes: a name is 1 to 64 characters of letters, digits, ".", "_" and "-" beginning with a letter or a digit, a value is valid utf-8 with no control character, and the count and the bytes stay within the limits; a refusal never carries a value. */
+/* ValidateHeaders is the rule every transport and store applies before it writes: a name is 1 to MaxNameLength characters of letters, digits, ".", "_" and "-" beginning with a letter or a digit, a value is valid utf-8 with no control character, and the count and the bytes stay within the limits; a refusal never carries a value. */
 func ValidateHeaders(headers map[string]string, limits HeaderLimits) error {
     if 0 == limits.maxCount {
         limits.maxCount = DefaultHeaderMaxCount
         limits.maxBytes = DefaultHeaderMaxBytes
+        limits.maxNameLength = DefaultHeaderMaxNameLength
     }
 
     if limits.maxCount < len(headers) {
@@ -72,7 +87,7 @@ func ValidateHeaders(headers map[string]string, limits HeaderLimits) error {
         )
     }
 
-    size, ruleErr := validateHeaderRule(headers, limits.field)
+    size, ruleErr := validateHeaderRule(headers, limits.field, limits.maxNameLength)
     if nil != ruleErr {
         return ruleErr
     }
@@ -88,19 +103,19 @@ func ValidateHeaders(headers map[string]string, limits HeaderLimits) error {
     return nil
 }
 
-/* ValidateReceivedHeaders applies ValidateHeaders' name and value rule without its count and bytes, which the broker or the row already bounded: the re-publish of a received envelope is never refused for a size it arrived with. */
+/* ValidateReceivedHeaders applies ValidateHeaders' name and value rule without its count, bytes and name length, which the broker or the row already bounded, a name read up to HeaderNameMaximumLength: the re-publish of a received envelope is never refused for a size it arrived with. */
 func ValidateReceivedHeaders(headers map[string]string, field string) error {
-    _, ruleErr := validateHeaderRule(headers, field)
+    _, ruleErr := validateHeaderRule(headers, field, HeaderNameMaximumLength)
 
     return ruleErr
 }
 
-/* IsWritableHeader answers whether one header meets ValidateHeaders' name and value rule, so a transport skips on receive what it could not write back. */
+/* IsWritableHeader answers whether one header meets ValidateHeaders' name and value rule, a name up to HeaderNameMaximumLength, so a transport skips on receive what no limits could write back. */
 func IsWritableHeader(name string, value string) bool {
-    return true == validHeaderName(name) && true == validHeaderValue(value)
+    return true == validHeaderName(name, HeaderNameMaximumLength) && true == validHeaderValue(value)
 }
 
-func validateHeaderRule(headers map[string]string, field string) (int, error) {
+func validateHeaderRule(headers map[string]string, field string, maxNameLength int) (int, error) {
     names := make([]string, 0, len(headers))
     for name := range headers {
         names = append(names, name)
@@ -109,9 +124,17 @@ func validateHeaderRule(headers map[string]string, field string) (int, error) {
 
     size := 0
     for _, name := range names {
-        if false == validHeaderName(name) {
+        if maxNameLength < len(name) {
             return 0, exception.NewError(
-                "a message header name must be 1 to 64 characters of letters, digits, \".\", \"_\" and \"-\", beginning with a letter or a digit",
+                "a message header name is longer than its limit",
+                exceptioncontract.Context{"header": internal.BoundDiagnosticText(name), "length": len(name), "limit": maxNameLength, "field": field + ".MaxNameLength"},
+                ErrHeadersRefused,
+            )
+        }
+
+        if false == validHeaderName(name, maxNameLength) {
+            return 0, exception.NewError(
+                "a message header name must be letters, digits, \".\", \"_\" and \"-\", beginning with a letter or a digit",
                 exceptioncontract.Context{"header": internal.BoundDiagnosticText(name), "field": field},
                 ErrHeadersRefused,
             )
@@ -132,8 +155,8 @@ func validateHeaderRule(headers map[string]string, field string) (int, error) {
     return size, nil
 }
 
-func validHeaderName(name string) bool {
-    if 0 == len(name) || HeaderNameMaxLength < len(name) {
+func validHeaderName(name string, maxNameLength int) bool {
+    if 0 == len(name) || maxNameLength < len(name) {
         return false
     }
 

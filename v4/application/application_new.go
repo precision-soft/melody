@@ -39,7 +39,7 @@ type ApplicationConfig struct {
     HttpPublicUrl string
     /* HttpServer is the http server Run listens with; the zero value is the framework's. */
     HttpServer HttpServerConfig
-    /* HttpKernel is what the http kernel is built with, its one source; the zero value is the framework's. UnavailableRetryAfter, SessionPolicy.EmptyOnOutage and SessionCookiePolicy.Secure are the defaults of MELODY_HTTP_UNAVAILABLE_RETRY_AFTER, MELODY_HTTP_SESSION_EMPTY_ON_OUTAGE and MELODY_HTTP_SESSION_COOKIE_SECURE, which win when a deployment sets them; Middlewares is refused, the application's own going through RegisterHttpMiddlewares. */
+    /* HttpKernel is what the http kernel is built with, its one source; the zero value is the framework's. UnavailableRetryAfter, SessionPolicy.EmptyOnOutage and SessionCookiePolicy.Secure are the defaults of MELODY_HTTP_UNAVAILABLE_RETRY_AFTER, MELODY_HTTP_SESSION_EMPTY_ON_OUTAGE and MELODY_HTTP_SESSION_COOKIE_SECURE, which win when a deployment sets them, the session keys only hardening (MELODY_HTTP_SESSION_EMPTY_ON_OUTAGE admits false alone, MELODY_HTTP_SESSION_COOKIE_SECURE always alone); Middlewares is refused, the application's own going through RegisterHttpMiddlewares. */
     HttpKernel http.KernelConfig
     /* TeardownTimeout budgets the whole ordered teardown of a clean stop: at least 1ms, unlimited admitted for a supervisor that grants no deadline. */
     TeardownTimeout bound.Duration

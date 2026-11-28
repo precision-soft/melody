@@ -136,6 +136,26 @@ func checkedParameterSwitch(parameter configcontract.Parameter, environmentKey s
     return configcontract.Switch{Value: switchValue, IsSet: isSet}, nil
 }
 
+/* checkedSessionEmptyOnOutage admits false alone: the key wins over the Go field, so true would let a deployment serve an empty session in an outage the composition root answers 503; only the Go field loosens it */
+func checkedSessionEmptyOnOutage(parameter configcontract.Parameter) (configcontract.Switch, error) {
+    switchValue, switchErr := checkedParameterSwitch(parameter, HttpSessionEmptyOnOutageKey)
+    if nil != switchErr {
+        return configcontract.Switch{}, switchErr
+    }
+
+    if false == switchValue.Value {
+        return switchValue, nil
+    }
+
+    refusalContext := limitRefusalContext(parameter, HttpSessionEmptyOnOutageKey)
+    refusalContext["admitted"] = []bool{false}
+    if false == parameter.IsSecret() {
+        refusalContext["value"] = parameter.Value()
+    }
+
+    return configcontract.Switch{}, exception.NewError("invalid environment value", refusalContext, nil)
+}
+
 /* checkedSessionCookieSecure admits always alone: the key wins over the Go field, so from-scheme or never would let a deployment lower an always the composition root chose; only the Go field lowers the policy */
 func checkedSessionCookieSecure(parameter configcontract.Parameter) (string, error) {
     value := parameter.Value()

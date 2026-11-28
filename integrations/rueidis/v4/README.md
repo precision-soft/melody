@@ -82,13 +82,15 @@ Every attempt is reported in the journal `ProviderConfig.Logger` names: a warnin
 |-----------------|--------------------------|-----------|--------------------------------------------------|
 | `ClientConfig`  | `ClientName`             | empty     |                                                  |
 | `ClientConfig`  | `SelectDatabase`         | `0`       |                                                  |
-| `ClientConfig`  | `TlsConfig`              | `nil`     |                                                  |
+| `ClientConfig`  | `TlsConfig`              | `nil`     | `nil` dials in clear, named off loopback         |
 | `ClientConfig`  | `DialTimeout`            | `5s`      | at least `1ms`, unlimited refused                |
 | `ClientConfig`  | `ConnectionWriteTimeout` | `5s`      | at least `1ms`, unlimited refused                |
 | `ClientConfig`  | `BootPingTimeout`        | `3s`      | at least `1ms`, unlimited refused                |
 | `ClientConfig`  | `BootPingDisabled`       | `false`   |                                                  |
 | `ClientConfig`  | `ClientSideCacheEnabled` | `false`   |                                                  |
 | `ClientConfig`  | `ClientSideCacheBytes`   | `128 MiB` | at least `1`, unlimited refused, needs the cache |
+
+`Open` without `ClientConfig.TlsConfig` over an address that is not `localhost` or a loopback address writes, once per address and process, the warning `rueidis.plaintextAddress` (`PlaintextAddressBootWarningName`) in the runtime's journal, naming the address and never a credential: the password and every value cross the network in clear. A `TlsConfig` is the remedy; the module declares the code, so `MELODY_BOOT_WARNINGS_IGNORED` may name it for a store reached over a network the deployment trusts.
 
 ## Distributed lock
 
