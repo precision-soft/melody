@@ -9,7 +9,7 @@ import (
 func Render(
     writer io.Writer,
     envelope Envelope,
-    option Option,
+    option Options,
 ) error {
     printer, selectPrinterErr := SelectPrinter(option)
     if nil != selectPrinterErr {

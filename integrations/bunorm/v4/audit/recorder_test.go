@@ -269,7 +269,7 @@ func TestNewRecorder_RefusesATypedNilLoggerNamingTheField(t *testing.T) {
             t.Fatalf("expected the typed-nil logger to be refused at the door")
         }
 
-        if "RecorderConfig.Logger" != exception.LogContext(recoveredErr, exception.LogContextConfig{})["field"] {
+        if "RecorderConfig.Logger" != exception.LogContext(recoveredErr, exception.LogContextOptions{})["field"] {
             t.Fatalf("expected the refusal to name RecorderConfig.Logger, got %v", recoveredErr)
         }
     }()
@@ -430,7 +430,7 @@ func TestNewRecorder_AnOwnedStorageCarryingCloseAloneIsRefusedAndABorrowedOneAdm
                 t.Fatalf("expected the owned plain-close storage refused at the door")
             }
 
-            if "RecorderConfig.OwnsStorage" != exception.LogContext(recoveredErr, exception.LogContextConfig{})["field"] {
+            if "RecorderConfig.OwnsStorage" != exception.LogContext(recoveredErr, exception.LogContextOptions{})["field"] {
                 t.Fatalf("expected the refusal to name RecorderConfig.OwnsStorage, got %v", recoveredErr)
             }
         }()

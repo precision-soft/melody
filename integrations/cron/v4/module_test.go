@@ -253,7 +253,7 @@ func expectCronPanicNaming(t *testing.T, field string, callback func()) {
         t.Helper()
 
         recoveredErr, isError := recover().(error)
-        if false == isError || field != exception.LogContext(recoveredErr, exception.LogContextConfig{})["field"] {
+        if false == isError || field != exception.LogContext(recoveredErr, exception.LogContextOptions{})["field"] {
             t.Fatalf("expected a refusal naming %s, got %v", field, recoveredErr)
         }
     }()

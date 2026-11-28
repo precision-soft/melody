@@ -63,8 +63,8 @@ func newRememberItemRecordingCache(t *testing.T) *rememberItemRecordingCache {
 }
 
 /* the two engines a choice must reach: the flight's leader and the caller's own computation */
-func rememberItemTestPaths() map[string]RememberConfig {
-    return map[string]RememberConfig{
+func rememberItemTestPaths() map[string]RememberOptions {
+    return map[string]RememberOptions{
         "under the flight":        {Ttl: bound.Of(time.Minute)},
         "with the protection off": {Ttl: bound.Of(time.Minute), StampedeProtectionDisabled: true},
     }
@@ -189,7 +189,7 @@ func TestRemember_ASkippedStoreAnswersEveryWaiterOfTheFlightItsOwnCopy(t *testin
         go func() {
             defer waitGroup.Done()
 
-            answers[index], errorList[index] = Remember(For(testRuntime(), cacheInstance), "skipped.flight", RememberConfig{Ttl: bound.Of(time.Minute)}, callback)
+            answers[index], errorList[index] = Remember(For(testRuntime(), cacheInstance), "skipped.flight", RememberOptions{Ttl: bound.Of(time.Minute)}, callback)
         }()
     }
 
@@ -256,7 +256,7 @@ func TestRemember_ACallAfterASkippedDetachedFlightComputesAgain(t *testing.T) {
 
     iterations := 100000
     for index := 1; index <= iterations; index++ {
-        value, rememberErr := Remember(For(testRuntime(), cacheInstance), "skipped.detached", RememberConfig{Ttl: bound.Of(time.Minute), Detached: true}, callback)
+        value, rememberErr := Remember(For(testRuntime(), cacheInstance), "skipped.detached", RememberOptions{Ttl: bound.Of(time.Minute), Detached: true}, callback)
         if nil != rememberErr {
             t.Fatalf("remember: %v", rememberErr)
         }
@@ -309,7 +309,7 @@ func TestRemember_ATtlTheCallbackChoseBelowTheMinimumIsRefusedNamingTheItem(t *t
             go func() {
                 defer waitGroup.Done()
 
-                _, errorList[index] = Remember(For(testRuntime(), cacheInstance), "refused.flight", RememberConfig{Ttl: bound.Of(time.Minute)}, callback)
+                _, errorList[index] = Remember(For(testRuntime(), cacheInstance), "refused.flight", RememberOptions{Ttl: bound.Of(time.Minute)}, callback)
             }()
         }
 
@@ -328,7 +328,7 @@ func TestRemember_ATtlTheCallbackChoseBelowTheMinimumIsRefusedNamingTheItem(t *t
 func TestRemember_AnUnlimitedTtlChosenByTheCallbackKeepsTheValue(t *testing.T) {
     cacheInstance := newRememberItemRecordingCache(t)
 
-    _, rememberErr := Remember(For(testRuntime(), cacheInstance), "unlimited", RememberConfig{Ttl: bound.Of(time.Minute)}, func(runtimeInstance containercontract.Runtime, item *RememberItem) (string, error) {
+    _, rememberErr := Remember(For(testRuntime(), cacheInstance), "unlimited", RememberOptions{Ttl: bound.Of(time.Minute)}, func(runtimeInstance containercontract.Runtime, item *RememberItem) (string, error) {
         item.SetTtl(bound.UnlimitedDuration())
 
         return "value", nil
@@ -346,7 +346,7 @@ func TestRemember_AnUnlimitedTtlChosenByTheCallbackKeepsTheValue(t *testing.T) {
 func TestRemember_AnAbsentTtlTakesTheChoiceBack(t *testing.T) {
     cacheInstance := newRememberItemRecordingCache(t)
 
-    _, rememberErr := Remember(For(testRuntime(), cacheInstance), "taken.back", RememberConfig{Ttl: bound.Of(time.Minute)}, func(runtimeInstance containercontract.Runtime, item *RememberItem) (string, error) {
+    _, rememberErr := Remember(For(testRuntime(), cacheInstance), "taken.back", RememberOptions{Ttl: bound.Of(time.Minute)}, func(runtimeInstance containercontract.Runtime, item *RememberItem) (string, error) {
         item.SetTtl(bound.Of(5 * time.Second))
         item.SetTtl(bound.Duration{})
 
@@ -418,7 +418,7 @@ func TestRemember_ASkippedStoreWinsOverAChosenTtl(t *testing.T) {
         t.Run(name, func(t *testing.T) {
             cacheInstance := newRememberItemRecordingCache(t)
 
-            value, rememberErr := Remember(For(testRuntime(), cacheInstance), "skip.wins", RememberConfig{Ttl: bound.Of(time.Minute)}, func(runtimeInstance containercontract.Runtime, item *RememberItem) (string, error) {
+            value, rememberErr := Remember(For(testRuntime(), cacheInstance), "skip.wins", RememberOptions{Ttl: bound.Of(time.Minute)}, func(runtimeInstance containercontract.Runtime, item *RememberItem) (string, error) {
                 tell(item)
 
                 return "value", nil
@@ -475,7 +475,7 @@ func TestRemember_AnItemToldSomethingAfterTheCallbackReturnedChangesNoStore(t *t
         item.SetTtl(bound.Of(5 * time.Second))
     }()
 
-    _, rememberErr := Remember(For(testRuntime(), cacheInstance), "kept", RememberConfig{Ttl: bound.Of(time.Minute)}, func(runtimeInstance containercontract.Runtime, item *RememberItem) (string, error) {
+    _, rememberErr := Remember(For(testRuntime(), cacheInstance), "kept", RememberOptions{Ttl: bound.Of(time.Minute)}, func(runtimeInstance containercontract.Runtime, item *RememberItem) (string, error) {
         item.SetTtl(bound.Of(2 * time.Second))
         keptItem <- item
 
@@ -506,7 +506,7 @@ func TestRemember_AnItemToldSomethingAfterTheCallbackReturnedChangesNoStore(t *t
         }
     }()
 
-    _, raceErr := Remember(For(testRuntime(), cacheInstance), "kept.race", RememberConfig{Ttl: bound.Of(time.Minute)}, func(runtimeInstance containercontract.Runtime, item *RememberItem) (string, error) {
+    _, raceErr := Remember(For(testRuntime(), cacheInstance), "kept.race", RememberOptions{Ttl: bound.Of(time.Minute)}, func(runtimeInstance containercontract.Runtime, item *RememberItem) (string, error) {
         raceItem <- item
 
         return "value", nil
@@ -595,7 +595,7 @@ func TestRemember_AnAbsenceIsRememberedUnderTheTtlItsCallbackChose(t *testing.T)
     }
 
     for index := 0; index < 2; index++ {
-        user, rememberErr := Remember(For(testRuntime(), cacheInstance), "absence.chosen", RememberConfig{Ttl: bound.Of(time.Minute)}, callback)
+        user, rememberErr := Remember(For(testRuntime(), cacheInstance), "absence.chosen", RememberOptions{Ttl: bound.Of(time.Minute)}, callback)
         if nil != rememberErr || nil != user {
             t.Fatalf("expected the absence answered, got %#v, %v", user, rememberErr)
         }

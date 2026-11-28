@@ -18,7 +18,7 @@ Translation is opt-in. Like the message bus, it is not wired by the application 
     - [`Manager`](../../translation/manager.go)
     - [`NewManager`](../../translation/manager.go)
     - [`ManagerConfig`](../../translation/manager.go)
-    - [`TranslateConfig`](../../translation/contract/translator.go)
+    - [`TranslateOptions`](../../translation/contract/translator.go)
     - [`ErrMessageNotFound`](../../translation/manager.go)
 - Hold messages per locale and domain:
     - [`Catalog`](../../translation/contract/catalog.go)
@@ -42,7 +42,7 @@ Translation is opt-in. Like the message bus, it is not wired by the application 
 3. the configured fallback locales, in order;
 4. the default locale.
 
-Both take the message id and a [`TranslateConfig`](../../translation/contract/translator.go)`{Parameters, Domain, Locale}`; its zero value is no parameter, the default domain and the default locale chain, and `HasMessage` reads its domain and locale, never its parameters. An empty domain resolves to [`DefaultDomain`](../../translation/catalog.go) (`messages`).
+Both take the message id and a [`TranslateOptions`](../../translation/contract/translator.go)`{Parameters, Domain, Locale}`; its zero value is no parameter, the default domain and the default locale chain, and `HasMessage` reads its domain and locale, never its parameters. An empty domain resolves to [`DefaultDomain`](../../translation/catalog.go) (`messages`).
 
 `Translate` tells three outcomes apart: the rendered message and nil; for a message no catalog provides, the message id unchanged and an error matching [`ErrMessageNotFound`](../../translation/manager.go) through `errors.Is`, so a template can still print the id; for a pattern that cannot be rendered whole, the empty string and an error naming the message id, the domain, the resolved locale, the rune `offset` and the `reason`. `HasMessage` is the cheap probe that renders nothing.
 
@@ -93,7 +93,7 @@ translator := translation.TranslatorMustFromRuntime(runtimeInstance)
 
 greeting, translateErr := translator.Translate(
     "greeting",
-    translationcontract.TranslateConfig{Parameters: map[string]any{"name": "Ada"}, Locale: "ro"},
+    translationcontract.TranslateOptions{Parameters: map[string]any{"name": "Ada"}, Locale: "ro"},
 )
 if nil != translateErr && false == errors.Is(translateErr, translation.ErrMessageNotFound) {
     return nil, translateErr
@@ -121,8 +121,8 @@ The example application wires a translator (`config/translation.go`) and exposes
 
 ### Contracts (`translation/contract`)
 
-- [`Translator`](../../translation/contract/translator.go) — `Translate(messageId string, config TranslateConfig) (string, error)`, `HasMessage(messageId string, config TranslateConfig) bool`
-- [`TranslateConfig`](../../translation/contract/translator.go)
+- [`Translator`](../../translation/contract/translator.go) — `Translate(messageId string, config TranslateOptions) (string, error)`, `HasMessage(messageId string, config TranslateOptions) bool`
+- [`TranslateOptions`](../../translation/contract/translator.go)
 - [`Catalog`](../../translation/contract/catalog.go)
 - [`Loader`](../../translation/contract/catalog.go) — `Load(ctx context.Context) ([]Catalog, error)`
 

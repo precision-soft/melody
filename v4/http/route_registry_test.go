@@ -264,7 +264,7 @@ func TestDeclareRouteDefinition_IsPublishedAndNeverMatched(t *testing.T) {
         t.Fatalf("expected the definition published, got %v", definition)
     }
 
-    url, generateErr := NewUrlGenerator(router.RouteRegistry(), UrlGeneratorConfig{}).GeneratePath("door.login", httpcontract.PathConfig{})
+    url, generateErr := NewUrlGenerator(router.RouteRegistry(), UrlGeneratorConfig{}).GeneratePath("door.login", httpcontract.PathOptions{})
     if nil != generateErr || "/login/check" != url {
         t.Fatalf("expected the door's url, got %q and %v", url, generateErr)
     }

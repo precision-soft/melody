@@ -29,7 +29,7 @@ func TestRefuseNilRuntime_RefusesNilATypedNilAndANilContextNamingTheArgumentAndT
 
     for name, runtimeInstance := range map[string]Runtime{"nil": nil, "typed nil": typedNil, "nil context": &contextOnlyRuntime{}} {
         refusal := RefuseNilRuntime(runtimeInstance, "probe.Door")
-        refusalContext := exception.LogContext(refusal, exception.LogContextConfig{})
+        refusalContext := exception.LogContext(refusal, exception.LogContextOptions{})
         if "runtimeInstance" != refusalContext["argument"] || "probe.Door" != refusalContext["door"] || true == exception.IsInfrastructureFailure(refusal) {
             t.Fatalf("expected the %s runtime refused unmarked naming the argument, got %v", name, refusal)
         }

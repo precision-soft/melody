@@ -7,22 +7,22 @@ import (
 )
 
 func TestSelectPrinter_TheFormatDecidesThePrinter(t *testing.T) {
-    jsonPrinter := mustSelectPrinter(t, Option{Format: FormatJson})
+    jsonPrinter := mustSelectPrinter(t, Options{Format: FormatJson})
     if _, isJson := jsonPrinter.(*JsonPrinter); false == isJson {
         t.Fatalf("expected the json format to select the json printer, got %T", jsonPrinter)
     }
 
-    prettyPrinter := mustSelectPrinter(t, Option{Format: FormatJsonPretty})
+    prettyPrinter := mustSelectPrinter(t, Options{Format: FormatJsonPretty})
     if _, isJson := prettyPrinter.(*JsonPrinter); false == isJson {
         t.Fatalf("expected the pretty json format to select the json printer, got %T", prettyPrinter)
     }
 
-    tablePrinter := mustSelectPrinter(t, Option{Format: FormatTable})
+    tablePrinter := mustSelectPrinter(t, Options{Format: FormatTable})
     if _, isJson := tablePrinter.(*JsonPrinter); true == isJson {
         t.Fatalf("expected the table format not to select the json printer")
     }
 
-    zeroValuePrinter := mustSelectPrinter(t, Option{})
+    zeroValuePrinter := mustSelectPrinter(t, Options{})
     if nil == zeroValuePrinter {
         t.Fatalf("expected a zero-value option to still select a printer")
     }
@@ -33,9 +33,9 @@ func TestSelectPrinter_TheFormatDecidesThePrinter(t *testing.T) {
 }
 
 func TestSelectPrinter_ANamedTableWidthReachesThePrinter(t *testing.T) {
-    narrow := mustSelectPrinter(t, Option{Format: FormatTable, TableMaxWidth: bound.Of(40)})
-    wide := mustSelectPrinter(t, Option{Format: FormatTable, TableMaxWidth: bound.Of(200)})
-    byDefault := mustSelectPrinter(t, Option{Format: FormatTable})
+    narrow := mustSelectPrinter(t, Options{Format: FormatTable, TableMaxWidth: bound.Of(40)})
+    wide := mustSelectPrinter(t, Options{Format: FormatTable, TableMaxWidth: bound.Of(200)})
+    byDefault := mustSelectPrinter(t, Options{Format: FormatTable})
 
     narrowPrinter, isNarrowTable := narrow.(*TablePrinter)
     widePrinter, isWideTable := wide.(*TablePrinter)
@@ -59,7 +59,7 @@ func TestSelectPrinter_ANamedTableWidthReachesThePrinter(t *testing.T) {
 }
 
 func TestSelectPrinter_AnUnlimitedTableWidthLetsTheTableBeAsWideAsItsContent(t *testing.T) {
-    printer := mustSelectPrinter(t, Option{Format: FormatTable, TableMaxWidth: bound.UnlimitedCount()})
+    printer := mustSelectPrinter(t, Options{Format: FormatTable, TableMaxWidth: bound.UnlimitedCount()})
 
     tablePrinter, isTable := printer.(*TablePrinter)
     if false == isTable || 0 != tablePrinter.tableMaxWidth {
@@ -69,12 +69,12 @@ func TestSelectPrinter_AnUnlimitedTableWidthLetsTheTableBeAsWideAsItsContent(t *
 
 func TestSelectPrinter_RefusesATableWidthBelowOneWhateverTheFormat(t *testing.T) {
     for _, format := range []Format{FormatTable, FormatJson, FormatJsonPretty} {
-        _, selectErr := SelectPrinter(Option{Format: format, TableMaxWidth: bound.Of(0)})
-        assertRefusedOptionField(t, selectErr, "Option.TableMaxWidth")
+        _, selectErr := SelectPrinter(Options{Format: format, TableMaxWidth: bound.Of(0)})
+        assertRefusedOptionField(t, selectErr, "Options.TableMaxWidth")
     }
 }
 
-func mustSelectPrinter(t *testing.T, option Option) Printer {
+func mustSelectPrinter(t *testing.T, option Options) Printer {
     t.Helper()
 
     printer, selectErr := SelectPrinter(option)

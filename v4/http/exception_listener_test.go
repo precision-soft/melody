@@ -1031,7 +1031,7 @@ func TestRenderExceptionResponse_ServesTheRetryAfterHeader(t *testing.T) {
         request := httptest.NewRequest("GET", "/api/test", nil)
         request.Header.Set("Accept", accept)
 
-        response := RenderExceptionResponse(runtimeInstance, testhelper.NewHttpTestRequestFromHttpRequest(request), unavailable, ExceptionRenderConfig{})
+        response := RenderExceptionResponse(runtimeInstance, testhelper.NewHttpTestRequestFromHttpRequest(request), unavailable, ExceptionRenderOptions{})
 
         if 503 != response.StatusCode() || "7" != response.Headers().Get("Retry-After") {
             t.Fatalf("expected 503 with Retry-After 7 for %s, got %d %q", accept, response.StatusCode(), response.Headers().Get("Retry-After"))
@@ -1041,7 +1041,7 @@ func TestRenderExceptionResponse_ServesTheRetryAfterHeader(t *testing.T) {
             t.Fatalf("expected the %s body for %s, got %q", contentType, accept, response.Headers().Get("Content-Type"))
         }
 
-        plain := RenderExceptionResponse(runtimeInstance, testhelper.NewHttpTestRequestFromHttpRequest(request), exception.ServiceUnavailable("down"), ExceptionRenderConfig{})
+        plain := RenderExceptionResponse(runtimeInstance, testhelper.NewHttpTestRequestFromHttpRequest(request), exception.ServiceUnavailable("down"), ExceptionRenderOptions{})
         if _, exists := plain.Headers()["Retry-After"]; true == exists {
             t.Fatalf("expected no Retry-After without a delay for %s", accept)
         }
@@ -1055,7 +1055,7 @@ func TestRenderExceptionResponse_AnswersAMarkedErrorAsUnavailable(t *testing.T) 
     for accept, contentType := range map[string]string{"application/json": ContentTypeJson, "text/html": ContentTypeTextHtml, "text/plain": ContentTypeTextPlain} {
         request := testhelper.NewHttpTestRequestWithAccept(nethttp.MethodGet, "http://example.com/page", accept)
 
-        response := RenderExceptionResponse(runtimeInstance, request, marked, ExceptionRenderConfig{})
+        response := RenderExceptionResponse(runtimeInstance, request, marked, ExceptionRenderOptions{})
         if nethttp.StatusServiceUnavailable != response.StatusCode() || "5" != response.Headers().Get("Retry-After") {
             t.Fatalf("expected 503 with Retry-After 5 for %s, got %d %q", accept, response.StatusCode(), response.Headers().Get("Retry-After"))
         }
@@ -1068,7 +1068,7 @@ func TestRenderExceptionResponse_AnswersAMarkedErrorAsUnavailable(t *testing.T) 
             t.Fatalf("expected the generic unavailable message without the cause for %s", accept)
         }
 
-        unmarked := RenderExceptionResponse(runtimeInstance, request, errors.New("session storage is down"), ExceptionRenderConfig{})
+        unmarked := RenderExceptionResponse(runtimeInstance, request, errors.New("session storage is down"), ExceptionRenderOptions{})
         if nethttp.StatusInternalServerError != unmarked.StatusCode() {
             t.Fatalf("expected 500 for an unmarked error for %s, got %d", accept, unmarked.StatusCode())
         }
@@ -1084,7 +1084,7 @@ func TestRenderExceptionResponse_AStatusOutsideTheMarkIsKept(t *testing.T) {
     request := testhelper.NewHttpTestRequestWithAccept(nethttp.MethodGet, "http://example.com/page", "application/json")
 
     answered := exception.NewHttpError(nethttp.StatusBadRequest, exception.HttpErrorConfig{Message: "bad request", Cause: exception.MarkInfrastructureFailure(errors.New("down"))})
-    response := RenderExceptionResponse(runtimeInstance, request, answered, ExceptionRenderConfig{})
+    response := RenderExceptionResponse(runtimeInstance, request, answered, ExceptionRenderOptions{})
     if nethttp.StatusBadRequest != response.StatusCode() {
         t.Fatalf("expected the application's 400 around the marked cause, got %d", response.StatusCode())
     }
@@ -1094,7 +1094,7 @@ func TestRenderExceptionResponse_AStatusOutsideTheMarkIsKept(t *testing.T) {
     }
 
     beneath := exception.MarkInfrastructureFailure(exception.NewHttpError(nethttp.StatusNotFound, exception.HttpErrorConfig{Message: "no such row", Code: "row.missing"}))
-    response = RenderExceptionResponse(runtimeInstance, request, beneath, ExceptionRenderConfig{})
+    response = RenderExceptionResponse(runtimeInstance, request, beneath, ExceptionRenderOptions{})
     if nethttp.StatusServiceUnavailable != response.StatusCode() || "5" != response.Headers().Get("Retry-After") {
         t.Fatalf("expected a store's 404 beneath the mark to answer 503, got %d %q", response.StatusCode(), response.Headers().Get("Retry-After"))
     }
@@ -1108,7 +1108,7 @@ func TestRenderExceptionResponse_ServesTheConfiguredUnavailableDelay(t *testing.
     request := testhelper.NewHttpTestRequestWithAccept(nethttp.MethodGet, "http://example.com/page", "application/json")
     marked := exception.MarkInfrastructureFailure(errors.New("down"))
 
-    response := RenderExceptionResponse(newErrorRendererTextAndJsonRuntime(), request, marked, ExceptionRenderConfig{UnavailableRetryAfter: bound.Of(7 * time.Second)})
+    response := RenderExceptionResponse(newErrorRendererTextAndJsonRuntime(), request, marked, ExceptionRenderOptions{UnavailableRetryAfter: bound.Of(7 * time.Second)})
     if "7" != response.Headers().Get("Retry-After") {
         t.Fatalf("expected Retry-After 7, got %q", response.Headers().Get("Retry-After"))
     }
@@ -1116,10 +1116,10 @@ func TestRenderExceptionResponse_ServesTheConfiguredUnavailableDelay(t *testing.
     assertPanicsNamingField(
         t,
         func() {
-            RenderExceptionResponse(newErrorRendererTextAndJsonRuntime(), request, marked, ExceptionRenderConfig{UnavailableRetryAfter: bound.Of(1500 * time.Millisecond)})
+            RenderExceptionResponse(newErrorRendererTextAndJsonRuntime(), request, marked, ExceptionRenderOptions{UnavailableRetryAfter: bound.Of(1500 * time.Millisecond)})
         },
         "the limit is not a whole number of seconds, and Retry-After is served in whole seconds",
-        "ExceptionRenderConfig.UnavailableRetryAfter",
+        "ExceptionRenderOptions.UnavailableRetryAfter",
     )
 }
 
@@ -1178,24 +1178,24 @@ func TestRenderExceptionResponse_RefusesABadDelayOnAnyError(t *testing.T) {
     assertPanicsNamingField(
         t,
         func() {
-            RenderExceptionResponse(newErrorRendererTextAndJsonRuntime(), request, errors.New("plain"), ExceptionRenderConfig{UnavailableRetryAfter: bound.UnlimitedDuration()})
+            RenderExceptionResponse(newErrorRendererTextAndJsonRuntime(), request, errors.New("plain"), ExceptionRenderOptions{UnavailableRetryAfter: bound.UnlimitedDuration()})
         },
         "the limit does not admit unlimited",
-        "ExceptionRenderConfig.UnavailableRetryAfter",
+        "ExceptionRenderOptions.UnavailableRetryAfter",
     )
 }
 
 func TestRenderExceptionResponse_DebugModeShowsAPlainMarkedErrorsText(t *testing.T) {
     request := testhelper.NewHttpTestRequestWithAccept(nethttp.MethodGet, "http://example.com/page", "application/json")
 
-    response := RenderExceptionResponse(newErrorRendererTextAndJsonRuntime(), request, exception.MarkInfrastructureFailure(errors.New("redis is down at 10.0.0.5")), ExceptionRenderConfig{DebugMode: true})
+    response := RenderExceptionResponse(newErrorRendererTextAndJsonRuntime(), request, exception.MarkInfrastructureFailure(errors.New("redis is down at 10.0.0.5")), ExceptionRenderOptions{DebugMode: true})
     body := readResponseBody(t, response)
 
     if nethttp.StatusServiceUnavailable != response.StatusCode() || false == strings.Contains(body, "redis is down at 10.0.0.5") || false == strings.Contains(body, "service unavailable") {
         t.Fatalf("expected the generic message with the cause in debug mode, got %d %s", response.StatusCode(), body)
     }
 
-    production := readResponseBody(t, RenderExceptionResponse(newErrorRendererTextAndJsonRuntime(), request, exception.MarkInfrastructureFailure(errors.New("redis is down at 10.0.0.5")), ExceptionRenderConfig{}))
+    production := readResponseBody(t, RenderExceptionResponse(newErrorRendererTextAndJsonRuntime(), request, exception.MarkInfrastructureFailure(errors.New("redis is down at 10.0.0.5")), ExceptionRenderOptions{}))
     if true == strings.Contains(production, "redis is down") {
         t.Fatalf("expected the cause kept out of the production body, got %s", production)
     }

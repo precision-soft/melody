@@ -14,8 +14,8 @@ func TestResolveTtl_RefusesAnAbsentTtl(t *testing.T) {
         t.Fatalf("expected an absent ttl to be refused, got the expiry %s and %v", expiry, err)
     }
 
-    if "ttl" != exception.LogContext(err, exception.LogContextConfig{})["field"] {
-        t.Fatalf("expected the refusal to name the ttl, got %v", exception.LogContext(err, exception.LogContextConfig{}))
+    if "ttl" != exception.LogContext(err, exception.LogContextOptions{})["field"] {
+        t.Fatalf("expected the refusal to name the ttl, got %v", exception.LogContext(err, exception.LogContextOptions{}))
     }
 }
 
@@ -32,8 +32,8 @@ func TestResolveTtl_RefusesBelowTheMinimumAndAdmitsIt(t *testing.T) {
         t.Fatalf("expected a ttl under a second to be refused, got the expiry %s", expiry)
     }
 
-    if "ttl" != exception.LogContext(err, exception.LogContextConfig{})["field"] {
-        t.Fatalf("expected the refusal to name the ttl, got %v", exception.LogContext(err, exception.LogContextConfig{}))
+    if "ttl" != exception.LogContext(err, exception.LogContextOptions{})["field"] {
+        t.Fatalf("expected the refusal to name the ttl, got %v", exception.LogContext(err, exception.LogContextOptions{}))
     }
 
     admitted, admittedErr := ResolveTtl(bound.Of(time.Second))

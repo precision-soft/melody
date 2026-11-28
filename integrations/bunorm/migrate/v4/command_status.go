@@ -9,8 +9,8 @@ import (
     "github.com/uptrace/bun/migrate"
 )
 
-func NewStatusCommand(migrations *migrate.Migrations, options Options) *StatusCommand {
-    return &StatusCommand{base: newBaseCommand(migrations, options)}
+func NewStatusCommand(migrations *migrate.Migrations, config CommandConfig) *StatusCommand {
+    return &StatusCommand{base: newBaseCommand(migrations, config)}
 }
 
 type StatusCommand struct {
@@ -18,7 +18,7 @@ type StatusCommand struct {
 }
 
 func (instance *StatusCommand) Name() string {
-    return instance.base.options.CommandPrefix + ":status"
+    return instance.base.config.CommandPrefix + ":status"
 }
 
 func (instance *StatusCommand) Description() string {

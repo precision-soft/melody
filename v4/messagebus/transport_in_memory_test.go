@@ -26,7 +26,7 @@ func TestInMemoryTransport_RequeueOnFullQueueDoesNotBlock(t *testing.T) {
         t.Fatalf("unexpected send error: %v", sendErr)
     }
 
-    nackErr := transport.Nack(runtimeInstance, NewEnvelope(taskCreated{TaskId: 2}, nil), messagebuscontract.NackConfig{Requeue: true})
+    nackErr := transport.Nack(runtimeInstance, NewEnvelope(taskCreated{TaskId: 2}, nil), messagebuscontract.NackOptions{Requeue: true})
     if nil == nackErr {
         t.Fatalf("expected nack to report a dropped message when the queue is full")
     }
@@ -66,7 +66,7 @@ func TestInMemoryTransport_RequeueAfterCloseIsRefusedDeterministically(t *testin
 
     /* before the guard, one select weighed a ready queue slot against the closed transport and Go picks between ready cases at RANDOM — a post-Close requeue succeeded about half the time, so "closed" was enforced on Send and coin-flipped on Nack; fifty attempts make a surviving coin flip astronomically unlikely */
     for attempt := 0; attempt < 50; attempt++ {
-        if nackErr := transport.Nack(runtimeInstance, NewEnvelope(taskCreated{TaskId: attempt}, nil), messagebuscontract.NackConfig{Requeue: true}); nil == nackErr {
+        if nackErr := transport.Nack(runtimeInstance, NewEnvelope(taskCreated{TaskId: attempt}, nil), messagebuscontract.NackOptions{Requeue: true}); nil == nackErr {
             t.Fatalf("expected every post-close requeue to be refused, attempt %d landed", attempt)
         }
     }
@@ -83,7 +83,7 @@ func TestInMemoryTransport_DroppedDelayedRequeueIsLoggedThroughTheRuntime(t *tes
     }
 
     delayed := NewEnvelope(taskCreated{TaskId: 2}, nil).WithStamps([]messagebuscontract.Stamp{DelayStamp{Delay: 20 * time.Millisecond}})
-    if nackErr := transport.Nack(runtimeInstance, delayed, messagebuscontract.NackConfig{Requeue: true}); nil != nackErr {
+    if nackErr := transport.Nack(runtimeInstance, delayed, messagebuscontract.NackOptions{Requeue: true}); nil != nackErr {
         t.Fatalf("unexpected nack error: %v", nackErr)
     }
 
@@ -253,7 +253,7 @@ func TestInMemoryTransport_ADelayedRequeueDroppedAtCloseIsLogged(t *testing.T) {
     runtimeInstance, logger := newTestRuntimeWithRecordingLogger()
 
     delayed := NewEnvelope(taskCreated{TaskId: 3}, nil).WithStamps([]messagebuscontract.Stamp{DelayStamp{Delay: time.Hour}})
-    if nackErr := transport.Nack(runtimeInstance, delayed, messagebuscontract.NackConfig{Requeue: true}); nil != nackErr {
+    if nackErr := transport.Nack(runtimeInstance, delayed, messagebuscontract.NackOptions{Requeue: true}); nil != nackErr {
         t.Fatalf("unexpected nack error: %v", nackErr)
     }
 
@@ -338,7 +338,7 @@ func TestInMemoryTransport_ADelayedNackOnARuntimeWithoutALoggerWritesNoEmergency
     transport := NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(4)})
 
     delayed := NewEnvelope(taskCreated{TaskId: 4}, nil).WithStamps([]messagebuscontract.Stamp{DelayStamp{Delay: time.Hour}})
-    if nackErr := transport.Nack(newTestRuntime(), delayed, messagebuscontract.NackConfig{Requeue: true}); nil != nackErr {
+    if nackErr := transport.Nack(newTestRuntime(), delayed, messagebuscontract.NackOptions{Requeue: true}); nil != nackErr {
         t.Fatalf("unexpected nack error: %v", nackErr)
     }
 
@@ -362,7 +362,7 @@ func TestInMemoryTransport_ADropOnARuntimeWithoutALoggerIsJournaledOnTheEmergenc
     transport := NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(4)})
 
     delayed := NewEnvelope(taskCreated{TaskId: 5}, nil).WithStamps([]messagebuscontract.Stamp{DelayStamp{Delay: time.Hour}})
-    if nackErr := transport.Nack(newTestRuntime(), delayed, messagebuscontract.NackConfig{Requeue: true}); nil != nackErr {
+    if nackErr := transport.Nack(newTestRuntime(), delayed, messagebuscontract.NackOptions{Requeue: true}); nil != nackErr {
         t.Fatalf("unexpected nack error: %v", nackErr)
     }
 
@@ -400,7 +400,7 @@ func TestInMemoryTransport_ARequeueOnAnUnbufferedQueueReachesTheNextReceive(t *t
             case envelopeInstance := <-received:
                 attempts++
                 if 3 > attempts {
-                    if nackErr := transport.Nack(runtimeInstance, envelopeInstance, messagebuscontract.NackConfig{Requeue: true}); nil != nackErr {
+                    if nackErr := transport.Nack(runtimeInstance, envelopeInstance, messagebuscontract.NackOptions{Requeue: true}); nil != nackErr {
                         t.Fatalf("size %d: unexpected nack error on attempt %d: %v", bufferSize, attempts, nackErr)
                     }
                 }
@@ -417,7 +417,7 @@ func TestInMemoryTransport_ARequeueWaitingOnAnUnbufferedQueueIsDroppedAtCloseAnd
     transport := NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(0)})
     runtimeInstance, logger := newTestRuntimeWithRecordingLogger()
 
-    if nackErr := transport.Nack(runtimeInstance, NewEnvelope(taskCreated{TaskId: 1}, nil), messagebuscontract.NackConfig{Requeue: true}); nil != nackErr {
+    if nackErr := transport.Nack(runtimeInstance, NewEnvelope(taskCreated{TaskId: 1}, nil), messagebuscontract.NackOptions{Requeue: true}); nil != nackErr {
         t.Fatalf("unexpected nack error: %v", nackErr)
     }
 
@@ -484,8 +484,8 @@ func TestInMemoryTransport_RefusesHeadersAboveItsLimit(t *testing.T) {
         t.Fatalf("expected the send refused by ErrHeadersRefused, got %v", sendErr)
     }
 
-    if "InMemoryTransportConfig.Headers.MaxCount" != exception.LogContext(sendErr, exception.LogContextConfig{})["field"] {
-        t.Fatalf("expected the refusal to name the in-memory field, got %v", exception.LogContext(sendErr, exception.LogContextConfig{}))
+    if "InMemoryTransportConfig.Headers.MaxCount" != exception.LogContext(sendErr, exception.LogContextOptions{})["field"] {
+        t.Fatalf("expected the refusal to name the in-memory field, got %v", exception.LogContext(sendErr, exception.LogContextOptions{}))
     }
 
     if 0 != len(transport.queue) {
@@ -506,7 +506,7 @@ func TestInMemoryTransport_RefusesHeadersAboveItsLimit(t *testing.T) {
 func TestNewInMemoryTransport_RefusesUnlimitedHeaderLimitsNamingTheField(t *testing.T) {
     defer func() {
         recoveredErr, isError := recover().(error)
-        if false == isError || "InMemoryTransportConfig.Headers.MaxBytes" != exception.LogContext(recoveredErr, exception.LogContextConfig{})["field"] {
+        if false == isError || "InMemoryTransportConfig.Headers.MaxBytes" != exception.LogContext(recoveredErr, exception.LogContextOptions{})["field"] {
             t.Fatalf("expected a refusal naming InMemoryTransportConfig.Headers.MaxBytes, got %v", recoveredErr)
         }
     }()

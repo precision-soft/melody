@@ -399,7 +399,7 @@ func (instance *HmacTokenSource) reject(
 
     logger := logging.LoggerFromRuntime(runtimeInstance)
     if nil != logger {
-        logger.Info("internal-auth envelope rejected", exception.LogContext(cause, exception.LogContextConfig{}))
+        logger.Info("internal-auth envelope rejected", exception.LogContext(cause, exception.LogContextOptions{}))
     }
 
     return NewAnonymousToken(), nil

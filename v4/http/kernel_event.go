@@ -308,7 +308,7 @@ type KernelExceptionEvent struct {
     unavailableRetryAfter time.Duration
 }
 
-/* UnavailableRetryAfter is the Retry-After a marked infrastructure failure is answered with, the delay the kernel was configured with; a listener that builds its own response sets it with SetRetryAfter, one that answers through RenderExceptionResponse passes it in ExceptionRenderConfig. */
+/* UnavailableRetryAfter is the Retry-After a marked infrastructure failure is answered with, the delay the kernel was configured with; a listener that builds its own response sets it with SetRetryAfter, one that answers through RenderExceptionResponse passes it in ExceptionRenderOptions. */
 func (instance *KernelExceptionEvent) UnavailableRetryAfter() time.Duration {
     return instance.unavailableRetryAfter
 }

@@ -15,7 +15,7 @@ import (
 )
 
 func TestRemember_AnswersTheTypeItsCallbackAnswers(t *testing.T) {
-    for _, config := range []RememberConfig{
+    for _, config := range []RememberOptions{
         {Ttl: bound.Of(time.Minute)},
         {Ttl: bound.Of(time.Minute), StampedeProtectionDisabled: true},
     } {
@@ -55,7 +55,7 @@ func TestRemember_TwoTypesUnderOneKeyNeverShareAFlight(t *testing.T) {
 
     userAnswer := make(chan any, 1)
     go func() {
-        value, err := Remember(For(testRuntime(), manager), "shared", RememberConfig{Ttl: bound.Of(time.Minute)}, func(runtimeInstance containercontract.Runtime, _ *RememberItem) (cacheTestUser, error) {
+        value, err := Remember(For(testRuntime(), manager), "shared", RememberOptions{Ttl: bound.Of(time.Minute)}, func(runtimeInstance containercontract.Runtime, _ *RememberItem) (cacheTestUser, error) {
             calls.Add(1)
             <-gate
             return cacheTestUser{Name: "user"}, nil
@@ -69,7 +69,7 @@ func TestRemember_TwoTypesUnderOneKeyNeverShareAFlight(t *testing.T) {
 
     listAnswer := make(chan any, 1)
     go func() {
-        value, err := Remember(For(testRuntime(), manager), "shared", RememberConfig{Ttl: bound.Of(time.Minute)}, func(runtimeInstance containercontract.Runtime, _ *RememberItem) ([]string, error) {
+        value, err := Remember(For(testRuntime(), manager), "shared", RememberOptions{Ttl: bound.Of(time.Minute)}, func(runtimeInstance containercontract.Runtime, _ *RememberItem) ([]string, error) {
             calls.Add(1)
             <-gate
             return []string{"list"}, nil
@@ -109,7 +109,7 @@ func TestRemember_AnEntryOfAnotherTypeIsAMissThatHeals(t *testing.T) {
     }
 
     calls := 0
-    user, rememberErr := Remember(For(testRuntime(), manager), "k", RememberConfig{Ttl: bound.Of(time.Minute)}, func(runtimeInstance containercontract.Runtime, _ *RememberItem) (cacheTestUser, error) {
+    user, rememberErr := Remember(For(testRuntime(), manager), "k", RememberOptions{Ttl: bound.Of(time.Minute)}, func(runtimeInstance containercontract.Runtime, _ *RememberItem) (cacheTestUser, error) {
         calls = calls + 1
         return cacheTestUser{Name: "healed"}, nil
     })
@@ -135,7 +135,7 @@ func (instance cacheTestNamed) String() string {
 }
 
 func TestRemember_AValueTheCacheCannotReadBackIsRefusedOnce(t *testing.T) {
-    for _, config := range []RememberConfig{
+    for _, config := range []RememberOptions{
         {Ttl: bound.Of(time.Minute)},
         {Ttl: bound.Of(time.Minute), StampedeProtectionDisabled: true},
     } {
@@ -170,7 +170,7 @@ func TestRemember_ANilValueOfAPointerTypeIsRememberedAsAHit(t *testing.T) {
     }
 
     for index := 0; index < 2; index++ {
-        user, rememberErr := Remember(For(testRuntime(), manager), "absent", RememberConfig{Ttl: bound.Of(time.Minute)}, callback)
+        user, rememberErr := Remember(For(testRuntime(), manager), "absent", RememberOptions{Ttl: bound.Of(time.Minute)}, callback)
         if nil != rememberErr || nil != user {
             t.Fatalf("expected the nil remembered, got %#v (%v)", user, rememberErr)
         }
@@ -181,7 +181,7 @@ func TestRemember_ANilValueOfAPointerTypeIsRememberedAsAHit(t *testing.T) {
     }
 
     t.Run("a nil of an interface type", func(t *testing.T) {
-        stringer, rememberErr := Remember(For(testRuntime(), manager), "absent.stringer", RememberConfig{Ttl: bound.Of(time.Minute)}, func(runtimeInstance containercontract.Runtime, _ *RememberItem) (cacheTestStringer, error) {
+        stringer, rememberErr := Remember(For(testRuntime(), manager), "absent.stringer", RememberOptions{Ttl: bound.Of(time.Minute)}, func(runtimeInstance containercontract.Runtime, _ *RememberItem) (cacheTestStringer, error) {
             return nil, nil
         })
         if nil != rememberErr || nil != stringer {

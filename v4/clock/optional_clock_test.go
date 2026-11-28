@@ -99,8 +99,8 @@ func TestOptionalDependencies_NilIsTheDefaultAndATypedNilIsRefused(t *testing.T)
         {"middleware.NewSlidingWindowLimiter", "rate limiter clock is a typed nil", "LimiterConfig.Clock", func(clockInstance clockcontract.Clock) error {
             return capturePanic(func() { middleware.NewSlidingWindowLimiter("login", 1, time.Minute, middleware.LimiterConfig{Clock: clockInstance}) })
         }},
-        {"totp.Config.Resolve", "totp clock is a typed nil", "totp.Config.Clock", func(clockInstance clockcontract.Clock) error {
-            _, resolveErr := totp.Config{Clock: clockInstance}.Resolve()
+        {"totp.Options.Resolve", "totp clock is a typed nil", "totp.Options.Clock", func(clockInstance clockcontract.Clock) error {
+            _, resolveErr := totp.Options{Clock: clockInstance}.Resolve()
 
             return resolveErr
         }},

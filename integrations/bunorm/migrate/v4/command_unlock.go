@@ -7,8 +7,8 @@ import (
     "github.com/uptrace/bun/migrate"
 )
 
-func NewUnlockCommand(migrations *migrate.Migrations, options Options) *UnlockCommand {
-    return &UnlockCommand{base: newBaseCommand(migrations, options)}
+func NewUnlockCommand(migrations *migrate.Migrations, config CommandConfig) *UnlockCommand {
+    return &UnlockCommand{base: newBaseCommand(migrations, config)}
 }
 
 type UnlockCommand struct {
@@ -16,7 +16,7 @@ type UnlockCommand struct {
 }
 
 func (instance *UnlockCommand) Name() string {
-    return instance.base.options.CommandPrefix + ":unlock"
+    return instance.base.config.CommandPrefix + ":unlock"
 }
 
 func (instance *UnlockCommand) Description() string {

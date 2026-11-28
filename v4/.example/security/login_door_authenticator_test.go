@@ -859,7 +859,7 @@ func (instance *secondFactorLogin) post(t *testing.T, username string, password 
 func (instance *secondFactorLogin) currentCode(t *testing.T) string {
     t.Helper()
 
-    code, codeErr := totp.GenerateCodeAt(secondFactorTestSecret, instance.clock.Now(), totp.Config{})
+    code, codeErr := totp.GenerateCodeAt(secondFactorTestSecret, instance.clock.Now(), totp.Options{})
     if nil != codeErr {
         t.Fatalf("generate code: %v", codeErr)
     }

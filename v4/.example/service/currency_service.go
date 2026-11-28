@@ -102,7 +102,7 @@ func (instance *CurrencyService) List(runtimeInstance melodycontainercontract.Ru
     currencies, rememberErr := melodycache.Remember(
         melodycache.For(runtimeInstance, instance.cache),
         CacheKeyCurrencyList,
-        melodycache.RememberConfig{
+        melodycache.RememberOptions{
             Ttl: melodybound.Of(entityCacheTtl),
         },
         func(flightRuntime melodycontainercontract.Runtime, _ *melodycache.RememberItem) ([]*entity.Currency, error) {

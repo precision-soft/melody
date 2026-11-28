@@ -343,7 +343,7 @@ func TestTransport_RequeuePersistsRedeliveryCountThenDeadLetters(t *testing.T) {
     }
 
     retried := first.WithStamps([]messagebuscontract.Stamp{melodymessagebus.RedeliveryStamp{Count: 1}})
-    if nackErr := transport.Nack(runtimeInstance, retried, messagebuscontract.NackConfig{Requeue: true}); nil != nackErr {
+    if nackErr := transport.Nack(runtimeInstance, retried, messagebuscontract.NackOptions{Requeue: true}); nil != nackErr {
         t.Fatalf("nack requeue: %v", nackErr)
     }
 
@@ -352,7 +352,7 @@ func TestTransport_RequeuePersistsRedeliveryCountThenDeadLetters(t *testing.T) {
         t.Fatalf("expected persisted redelivery count 1, got %d", melodymessagebus.RedeliveryCount(second))
     }
 
-    if nackErr := transport.Nack(runtimeInstance, second, messagebuscontract.NackConfig{}); nil != nackErr {
+    if nackErr := transport.Nack(runtimeInstance, second, messagebuscontract.NackOptions{}); nil != nackErr {
         t.Fatalf("nack dead-letter: %v", nackErr)
     }
 
@@ -408,7 +408,7 @@ func TestTransport_DelayStampRoutesThroughDelayQueue(t *testing.T) {
         WithStamps([]messagebuscontract.Stamp{melodymessagebus.DelayStamp{Delay: 1500 * time.Millisecond}})
 
     start := time.Now()
-    if nackErr := transport.Nack(runtimeInstance, retried, messagebuscontract.NackConfig{Requeue: true}); nil != nackErr {
+    if nackErr := transport.Nack(runtimeInstance, retried, messagebuscontract.NackOptions{Requeue: true}); nil != nackErr {
         t.Fatalf("nack requeue: %v", nackErr)
     }
 
@@ -1095,11 +1095,11 @@ func TestAckNack_StaleGenerationIsNoOp(t *testing.T) {
         t.Fatalf("expected a stale-generation ack to be a no-op, got %v", ackErr)
     }
 
-    if nackErr := newInstance().Nack(runtimeInstance, staleEnvelope, messagebuscontract.NackConfig{}); nil != nackErr {
+    if nackErr := newInstance().Nack(runtimeInstance, staleEnvelope, messagebuscontract.NackOptions{}); nil != nackErr {
         t.Fatalf("expected a stale-generation drop nack to be a no-op, got %v", nackErr)
     }
 
-    if nackErr := newInstance().Nack(runtimeInstance, staleEnvelope, messagebuscontract.NackConfig{Requeue: true}); nil != nackErr {
+    if nackErr := newInstance().Nack(runtimeInstance, staleEnvelope, messagebuscontract.NackOptions{Requeue: true}); nil != nackErr {
         t.Fatalf("expected a stale-generation requeue nack to be a no-op, got %v", nackErr)
     }
 }
@@ -1802,10 +1802,10 @@ func TestTransport_BucketedDelaysAvoidHeadOfLineBlocking(t *testing.T) {
         WithStamps([]messagebuscontract.Stamp{melodymessagebus.DelayStamp{Delay: 2 * time.Second}})
 
     start := time.Now()
-    if nackErr := transport.Nack(runtimeInstance, longDelayed, messagebuscontract.NackConfig{Requeue: true}); nil != nackErr {
+    if nackErr := transport.Nack(runtimeInstance, longDelayed, messagebuscontract.NackOptions{Requeue: true}); nil != nackErr {
         t.Fatalf("nack long: %v", nackErr)
     }
-    if nackErr := transport.Nack(runtimeInstance, shortDelayed, messagebuscontract.NackConfig{Requeue: true}); nil != nackErr {
+    if nackErr := transport.Nack(runtimeInstance, shortDelayed, messagebuscontract.NackOptions{Requeue: true}); nil != nackErr {
         t.Fatalf("nack short: %v", nackErr)
     }
 
@@ -1982,7 +1982,7 @@ func TestTransport_RequeueThatCannotCarryItsCountersDeadLettersInsteadOfLooping(
         WithStamps([]messagebuscontract.Stamp{melodymessagebus.RedeliveryStamp{Count: 1}}).
         WithStamps([]messagebuscontract.Stamp{melodymessagebus.DelayStamp{Delay: 100 * time.Millisecond}})
 
-    if nackErr := transport.Nack(runtimeInstance, retried, messagebuscontract.NackConfig{Requeue: true}); nil != nackErr {
+    if nackErr := transport.Nack(runtimeInstance, retried, messagebuscontract.NackOptions{Requeue: true}); nil != nackErr {
         t.Fatalf("nack requeue: %v", nackErr)
     }
 
@@ -4543,7 +4543,7 @@ func TestTransport_HeadersSurviveADelayARedeliveryAndADeadLetter(t *testing.T) {
     expectTheTwoHeaders(t, "first", first)
 
     redelivered := first.WithStamps([]messagebuscontract.Stamp{melodymessagebus.RedeliveryStamp{Count: 1}})
-    if nackErr := transport.Nack(runtimeInstance, redelivered, messagebuscontract.NackConfig{Requeue: true}); nil != nackErr {
+    if nackErr := transport.Nack(runtimeInstance, redelivered, messagebuscontract.NackOptions{Requeue: true}); nil != nackErr {
         t.Fatalf("nack requeue: %v", nackErr)
     }
 
@@ -4552,14 +4552,14 @@ func TestTransport_HeadersSurviveADelayARedeliveryAndADeadLetter(t *testing.T) {
 
     /* below the smallest bucket, so the republish carries a per-message expiration through <queue>.delay */
     delayed := second.WithStamps([]messagebuscontract.Stamp{melodymessagebus.RedeliveryStamp{Count: 2}, melodymessagebus.DelayStamp{Delay: 300 * time.Millisecond}})
-    if nackErr := transport.Nack(runtimeInstance, delayed, messagebuscontract.NackConfig{Requeue: true}); nil != nackErr {
+    if nackErr := transport.Nack(runtimeInstance, delayed, messagebuscontract.NackOptions{Requeue: true}); nil != nackErr {
         t.Fatalf("nack delay: %v", nackErr)
     }
 
     third := receiveWithin(t, queue, 10*time.Second)
     expectTheTwoHeaders(t, "delayed", third)
 
-    if nackErr := transport.Nack(runtimeInstance, third, messagebuscontract.NackConfig{}); nil != nackErr {
+    if nackErr := transport.Nack(runtimeInstance, third, messagebuscontract.NackOptions{}); nil != nackErr {
         t.Fatalf("nack dead-letter: %v", nackErr)
     }
 
@@ -4616,8 +4616,8 @@ func TestTransport_AHeaderRefusalIsNotAnOutage(t *testing.T) {
         t.Fatalf("expected the send refused by ErrHeadersRefused, got %v", sendErr)
     }
 
-    if "TransportConfig.Headers.MaxCount" != exception.LogContext(sendErr, exception.LogContextConfig{})["field"] {
-        t.Fatalf("expected the refusal to name TransportConfig.Headers.MaxCount, got %v", exception.LogContext(sendErr, exception.LogContextConfig{}))
+    if "TransportConfig.Headers.MaxCount" != exception.LogContext(sendErr, exception.LogContextOptions{})["field"] {
+        t.Fatalf("expected the refusal to name TransportConfig.Headers.MaxCount, got %v", exception.LogContext(sendErr, exception.LogContextOptions{}))
     }
 
     if true == exception.IsInfrastructureFailure(sendErr) {

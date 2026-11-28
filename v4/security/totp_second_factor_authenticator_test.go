@@ -91,10 +91,10 @@ func TestTotpSecondFactor_EnrolledWithoutCodeIsPending(t *testing.T) {
 }
 
 func TestTotpSecondFactor_AConfigOutsideItsRangesIsRefusedAtConstruction(t *testing.T) {
-    for field, config := range map[string]totp.Config{
-        "totp.Config.Period": {Period: bound.Of(25 * time.Hour)},
-        "totp.Config.Digits": {Digits: bound.Of(9)},
-        "totp.Config.Skew":   {Skew: bound.Of(11)},
+    for field, config := range map[string]totp.Options{
+        "totp.Options.Period": {Period: bound.Of(25 * time.Hour)},
+        "totp.Options.Digits": {Digits: bound.Of(9)},
+        "totp.Options.Skew":   {Skew: bound.Of(11)},
     } {
         expectPanicNamingField(t, field, func() {
             NewTotpSecondFactorAuthenticator(&fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil)}, &fixedEnrollmentStore{enrolled: false}, TotpSecondFactorAuthenticatorConfig{
@@ -114,7 +114,7 @@ func TestTotpSecondFactor_ATotpClockBesideTheAuthenticatorsIsRefused(t *testing.
         t.Run(name, func(t *testing.T) {
             expectPanicNamingField(t, "TotpSecondFactorAuthenticatorConfig.Totp.Clock", func() {
                 NewTotpSecondFactorAuthenticator(&fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil)}, &fixedEnrollmentStore{enrolled: false}, TotpSecondFactorAuthenticatorConfig{
-                    Totp:        totp.Config{Clock: totpClock},
+                    Totp:        totp.Options{Clock: totpClock},
                 })
             })
         })
@@ -123,7 +123,7 @@ func TestTotpSecondFactor_ATotpClockBesideTheAuthenticatorsIsRefused(t *testing.
 
 func TestTotpSecondFactor_ValidCodeAuthenticates(t *testing.T) {
     secret, _ := totp.GenerateSecret()
-    code, _ := totp.GenerateCodeAt(secret, time.Now(), totp.Config{})
+    code, _ := totp.GenerateCodeAt(secret, time.Now(), totp.Options{})
 
     token, err := totpAuthenticator(secret, true, nil).Authenticate(withItsRuntime(totpRequest(code)))
     if nil != err {
@@ -152,7 +152,7 @@ func TestTotpSecondFactor_WrongCodeIsPending(t *testing.T) {
 
 func TestTotpSecondFactor_ReplayedCodeIsRejected(t *testing.T) {
     secret, _ := totp.GenerateSecret()
-    code, _ := totp.GenerateCodeAt(secret, time.Now(), totp.Config{})
+    code, _ := totp.GenerateCodeAt(secret, time.Now(), totp.Options{})
 
     authenticator := totpAuthenticator(secret, true, NewMemoryNonceGuard(MemoryNonceGuardConfig{}))
 
@@ -174,7 +174,7 @@ func TestTotpSecondFactor_ReplayedCodeIsRejected(t *testing.T) {
 /* Verify normalizes whitespace out of a submitted code, so "123 456" and "123456" are the same code. The replay guard must key on the normalized form: keying on the raw header value would let a captured code be replayed by re-spacing it. */
 func TestTotpSecondFactor_ReplayedCodeIsRejectedWhenRespaced(t *testing.T) {
     secret, _ := totp.GenerateSecret()
-    code, _ := totp.GenerateCodeAt(secret, time.Now(), totp.Config{})
+    code, _ := totp.GenerateCodeAt(secret, time.Now(), totp.Options{})
 
     authenticator := totpAuthenticator(secret, true, NewMemoryNonceGuard(MemoryNonceGuardConfig{}))
 
@@ -194,7 +194,7 @@ func TestTotpSecondFactor_ReplayedCodeIsRejectedWhenRespaced(t *testing.T) {
 /* negative control: with no ReplayGuard configured the source defaults to an in-process guard, so a captured code still cannot be replayed out of the box. */
 func TestTotpSecondFactor_ReplayedCodeIsRejectedByDefaultGuard(t *testing.T) {
     secret, _ := totp.GenerateSecret()
-    code, _ := totp.GenerateCodeAt(secret, time.Now(), totp.Config{})
+    code, _ := totp.GenerateCodeAt(secret, time.Now(), totp.Options{})
 
     authenticator := totpAuthenticator(secret, true, nil)
 
@@ -299,7 +299,7 @@ func TestTotpSecondFactor_RecoveryIgnoredWhenStoreUnsupported(t *testing.T) {
 
 func TestTotpSecondFactor_ReplayWindowCoversEverySpanACodeVerifies(t *testing.T) {
     authenticator := NewTotpSecondFactorAuthenticator(&fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil)}, &fixedEnrollmentStore{enrolled: false}, TotpSecondFactorAuthenticatorConfig{
-        Totp:        totp.Config{Period: bound.Of(60 * time.Second), Skew: bound.Of(10)},
+        Totp:        totp.Options{Period: bound.Of(60 * time.Second), Skew: bound.Of(10)},
     })
 
     if expected := 21 * 60 * time.Second; expected != authenticator.codeValidityWindow {
@@ -333,7 +333,7 @@ func TestTotpSecondFactor_VerifiesOnTheInjectedClock(t *testing.T) {
         FailedAttemptStore: newRecordingFailedAttemptStore(),
     })
 
-    code, codeErr := totp.GenerateCodeAt(secret, frozen.Now(), totp.Config{})
+    code, codeErr := totp.GenerateCodeAt(secret, frozen.Now(), totp.Options{})
     if nil != codeErr {
         t.Fatalf("code: %v", codeErr)
     }
@@ -431,7 +431,7 @@ func TestTotpSecondFactor_MarksItsThreeStoreFailures(t *testing.T) {
     storeErr := errors.New("redis is down")
     primary := &fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil)}
 
-    validCode, codeErr := totp.GenerateCodeAt("JBSWY3DPEHPK3PXP", time.Now(), totp.Config{})
+    validCode, codeErr := totp.GenerateCodeAt("JBSWY3DPEHPK3PXP", time.Now(), totp.Options{})
     if nil != codeErr {
         t.Fatalf("unexpected error: %v", codeErr)
     }
@@ -579,7 +579,7 @@ func throttleTestEnrollments() *countingRecoveryEnrollmentStore {
 func throttleTestCode(t *testing.T, at time.Time) string {
     t.Helper()
 
-    code, codeErr := totp.GenerateCodeAt(throttleTestSecret, at, totp.Config{})
+    code, codeErr := totp.GenerateCodeAt(throttleTestSecret, at, totp.Options{})
     if nil != codeErr {
         t.Fatalf("code: %v", codeErr)
     }

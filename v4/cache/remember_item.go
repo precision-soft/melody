@@ -6,14 +6,14 @@ import (
     "github.com/precision-soft/melody/v4/bound"
 )
 
-/* RememberItem is what the callback of one Remember computation says about the entry it computes: the ttl it is stored under, or that it is not stored. The zero value says nothing, so the value is stored under RememberConfig.Ttl. Remember hands every computation an item of its own and reads it once, when the callback returns without an error; a callback that fails or panics stores nothing whatever it said, and an item kept and told something after the callback returned changes no store. The methods are safe for concurrent use, and a nil item ignores what it is told and answers the zero value, so a callback can be called by hand with nil. An item is not copied once used. */
+/* RememberItem is what the callback of one Remember computation says about the entry it computes: the ttl it is stored under, or that it is not stored. The zero value says nothing, so the value is stored under RememberOptions.Ttl. Remember hands every computation an item of its own and reads it once, when the callback returns without an error; a callback that fails or panics stores nothing whatever it said, and an item kept and told something after the callback returned changes no store. The methods are safe for concurrent use, and a nil item ignores what it is told and answers the zero value, so a callback can be called by hand with nil. An item is not copied once used. */
 type RememberItem struct {
     mutex          sync.Mutex
     ttl            bound.Duration
     isStoreSkipped bool
 }
 
-/* SetTtl chooses the lifetime of the entry this computation stores, in place of RememberConfig.Ttl: a value of at least 1s, or unlimited for an entry kept until it is deleted or evicted. The ttl is judged when the callback returns: one below the minimum is answered by Remember as the error, naming RememberItem.Ttl, with nothing stored and no value answered. An absent ttl takes the choice back, RememberConfig.Ttl applying again. The last call wins. The configuration's ttl is the default, never a ceiling. */
+/* SetTtl chooses the lifetime of the entry this computation stores, in place of RememberOptions.Ttl: a value of at least 1s, or unlimited for an entry kept until it is deleted or evicted. The ttl is judged when the callback returns: one below the minimum is answered by Remember as the error, naming RememberItem.Ttl, with nothing stored and no value answered. An absent ttl takes the choice back, RememberOptions.Ttl applying again. The last call wins. The configuration's ttl is the default, never a ceiling. */
 func (instance *RememberItem) SetTtl(ttl bound.Duration) {
     if nil == instance {
         return

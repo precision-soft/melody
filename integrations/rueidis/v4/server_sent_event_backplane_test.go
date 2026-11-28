@@ -359,7 +359,7 @@ func TestServerSentEventBackplane_PublishRefusesANilRuntimeNamingTheDoor(t *test
     defer backplane.cancel()
 
     publishErr := backplane.Publish(nil, "orders", melodyhttp.ServerSentEvent{Data: "x"})
-    if nil == publishErr || "rueidis.ServerSentEventBackplane.Publish" != exception.LogContext(publishErr, exception.LogContextConfig{})["door"] {
+    if nil == publishErr || "rueidis.ServerSentEventBackplane.Publish" != exception.LogContext(publishErr, exception.LogContextOptions{})["door"] {
         t.Fatalf("expected the nil runtime refused naming the door, got %v", publishErr)
     }
 

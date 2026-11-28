@@ -7,8 +7,8 @@ import (
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
 )
 
-func ParseOptionFromCommand(commandContext *clicontract.CommandContext) Option {
-    option := Option{}
+func ParseOptionFromCommand(commandContext *clicontract.CommandContext) Options {
+    option := Options{}
 
     if nil == commandContext {
         return option
@@ -53,7 +53,7 @@ func countFlag(commandContext *clicontract.CommandContext, flagName string) boun
 }
 
 /* NormalizeOption reads an unknown format as table and an unknown order as ascending, turns colour off for json and a negative verbosity to 0, and refuses a Limit, an Offset or a TableMaxWidth its rule does not admit, naming the field. */
-func NormalizeOption(option Option) (Option, error) {
+func NormalizeOption(option Options) (Options, error) {
     normalized := normalizeOptionChoices(option)
 
     for _, field := range []struct {
@@ -65,14 +65,14 @@ func NormalizeOption(option Option) (Option, error) {
         {limit: normalized.TableMaxWidth, rule: OptionTableMaxWidthRule()},
     } {
         if _, resolveErr := bound.Resolve(field.limit, field.rule); nil != resolveErr {
-            return Option{}, resolveErr
+            return Options{}, resolveErr
         }
     }
 
     return normalized, nil
 }
 
-func normalizeOptionChoices(option Option) Option {
+func normalizeOptionChoices(option Options) Options {
     normalized := option
 
     if false == isFormatSupported(normalized.Format) {

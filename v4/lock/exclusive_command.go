@@ -22,13 +22,13 @@ type ExclusiveCommandConfig struct {
     /* LockName is the lock every instance competes for: "" reads as the application namespace, ":command:" and the command's name, melody:command:<name> under the default namespace, resolved at each run from the runtime's configuration; a name set here is used verbatim. Name one when two differently-named commands must share one lock, or one command needs distinct locks per deployment. */
     LockName string
 
-    /* Ttl is the lease handed to the locker, the crash safety and never the run cadence, as ExclusiveConfig.Ttl reads it: 30s by default, at least 2ms, unlimited selecting a session-style lock. */
+    /* Ttl is the lease handed to the locker, the crash safety and never the run cadence, as ExclusiveOptions.Ttl reads it: 30s by default, at least 2ms, unlimited selecting a session-style lock. */
     Ttl bound.Duration
 
-    /* StopRenewalLimit is how long after the stop the lease is still renewed while the command winds down, as ExclusiveConfig.StopRenewalLimit reads it: 30s by default, raised to the refresh interval when that is longer; when set, at least 1ms and not below the refresh interval; unlimited renews until the command returns. A cron runner granting its commands a longer grace sets it to that grace. */
+    /* StopRenewalLimit is how long after the stop the lease is still renewed while the command winds down, as ExclusiveOptions.StopRenewalLimit reads it: 30s by default, raised to the refresh interval when that is longer; when set, at least 1ms and not below the refresh interval; unlimited renews until the command returns. A cron runner granting its commands a longer grace sets it to that grace. */
     StopRenewalLimit bound.Duration
 
-    /* ProbeInterval is the liveness-probe cadence of a session-style lock, as ExclusiveConfig.ProbeInterval reads it: 15s by default, at least 1ms, unlimited refused, refused beside a lease Ttl. */
+    /* ProbeInterval is the liveness-probe cadence of a session-style lock, as ExclusiveOptions.ProbeInterval reads it: 15s by default, at least 1ms, unlimited refused, refused beside a lease Ttl. */
     ProbeInterval bound.Duration
 }
 
@@ -96,7 +96,7 @@ func NewExclusiveCommand(
         command:  command,
         locker:   locker,
         lockName: config.LockName,
-        exclusiveConfig: ExclusiveConfig{
+        exclusiveConfig: ExclusiveOptions{
             Ttl:              ttl.Limit(),
             StopRenewalLimit: config.StopRenewalLimit,
             ProbeInterval:    config.ProbeInterval,
@@ -110,7 +110,7 @@ type ExclusiveCommand struct {
     locker          lockcontract.Locker
     /* empty is the default name, resolved per run */
     lockName        string
-    exclusiveConfig ExclusiveConfig
+    exclusiveConfig ExclusiveOptions
 }
 
 /* resolvedLockName answers the declared name verbatim, else the default under the runtime's namespace */

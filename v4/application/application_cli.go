@@ -199,7 +199,7 @@ func (instance *Application) runCli() error {
     defer func() {
         scopeCloseErr := scope.CloseWithContext(context.Background())
         if nil != scopeCloseErr {
-            logging.EmergencyLogger().Error("failed to close service container scope", exception.LogContext(scopeCloseErr, exception.LogContextConfig{}))
+            logging.EmergencyLogger().Error("failed to close service container scope", exception.LogContext(scopeCloseErr, exception.LogContextOptions{}))
         }
     }()
 
@@ -279,7 +279,7 @@ func suggestCliCommand(
 
     startedAt := clockInstance.Now()
 
-    option := output.Option{
+    option := output.Options{
         NoColor: true,
         Quiet:   true,
     }

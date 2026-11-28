@@ -121,7 +121,7 @@ func runOpenApiGenerateCommand(
         runtimeInstance,
         append([]string{command.Name()}, arguments...),
         output,
-        melodycli.DispatchConfig{},
+        melodycli.DispatchOptions{},
     )
 
     return output.String(), runErr

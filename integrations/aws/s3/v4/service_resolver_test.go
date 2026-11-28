@@ -100,7 +100,7 @@ func TestRegisterStorageServiceRefusesALimitOutsideItsRuleAtRegistration(t *test
     func() {
         defer func() {
             recovered := recover()
-            if false == strings.Contains(fmt.Sprintf("%v", exception.LogContext(recoveredError(recovered), exception.LogContextConfig{})), "StorageConfig.PutSpoolLimit") {
+            if false == strings.Contains(fmt.Sprintf("%v", exception.LogContext(recoveredError(recovered), exception.LogContextOptions{})), "StorageConfig.PutSpoolLimit") {
                 t.Fatalf("expected a refusal naming StorageConfig.PutSpoolLimit, got %v", recovered)
             }
         }()

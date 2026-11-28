@@ -21,7 +21,7 @@ import (
 
 func newBufferedOutput(noColor bool) (*commandOutput, *bytes.Buffer) {
     buffer := &bytes.Buffer{}
-    option := output.Option{}
+    option := output.Options{}
     option.NoColor = noColor
 
     return newCommandOutput(buffer, nil, option), buffer
@@ -281,7 +281,7 @@ func TestCommandOutput_WantsDetailFollowsTheFormatNotTheVerbosity(t *testing.T) 
         {output.FormatTable, false, false},
         {output.FormatTable, true, true},
     } {
-        option := output.Option{}
+        option := output.Options{}
         option.Format = testCase.format
         option.Verbose = testCase.verbose
 
@@ -293,7 +293,7 @@ func TestCommandOutput_WantsDetailFollowsTheFormatNotTheVerbosity(t *testing.T) 
 
 /* the document is keyed on the key while the text block shows the display title, so the set of keys stays enumerable and renaming a title for readability breaks no consumer of the document */
 func TestCommandOutput_PrintMigrationsBlockKeysTheDocumentApartFromTheTitle(t *testing.T) {
-    jsonOption := output.Option{}
+    jsonOption := output.Options{}
     jsonOption.Format = output.FormatJson
 
     jsonBuffer := &bytes.Buffer{}
@@ -323,7 +323,7 @@ func TestCommandOutput_PrintMigrationsBlockKeysTheDocumentApartFromTheTitle(t *t
 
 /* "no current database" was the string <null>, indistinguishable from a database named literally <null> and readable only by a consumer who knew melody's own placeholder; the text block keeps rendering it, because a person reads an empty cell as a missing value either way */
 func TestCommandOutput_TheAbsentDatabaseIsJsonNull(t *testing.T) {
-    jsonOption := output.Option{}
+    jsonOption := output.Options{}
     jsonOption.Format = output.FormatJson
 
     buffer := &bytes.Buffer{}
@@ -379,7 +379,7 @@ func TestCommandOutput_TheAbsentDatabaseIsJsonNull(t *testing.T) {
 /* the machine document is the contract a pipeline reads, so the failure's own context and its whole cause chain reach the envelope's details and cause beside the message: the probe's error carries a context and a cause that wraps a further cause */
 func TestCommandOutput_FinishCarriesTheFailureDetailsAndCause(t *testing.T) {
     buffer := &bytes.Buffer{}
-    outputInstance := newCommandOutput(buffer, nil, output.Option{Format: output.FormatJson})
+    outputInstance := newCommandOutput(buffer, nil, output.Options{Format: output.FormatJson})
 
     runErr := exception.NewError(
         "database connection failed",
@@ -438,7 +438,7 @@ func TestCommandOutput_FinishCarriesTheFailureDetailsAndCause(t *testing.T) {
 /* an error carrying no context still answers an object, and one carrying no cause answers a null there: a field whose json type changes with the outcome cannot be consumed, while a cause that genuinely does not exist is honestly absent */
 func TestCommandOutput_FinishKeepsTheDetailsAnObjectWithoutAContext(t *testing.T) {
     buffer := &bytes.Buffer{}
-    outputInstance := newCommandOutput(buffer, nil, output.Option{Format: output.FormatJson})
+    outputInstance := newCommandOutput(buffer, nil, output.Options{Format: output.FormatJson})
 
     if finishErr := outputInstance.finish("db:migrate", time.Now(), errors.New("bare failure")); nil == finishErr {
         t.Fatal("expected the command's own failure to stay the verdict")
@@ -472,7 +472,7 @@ func TestCommandOutput_FinishKeepsTheDetailsAnObjectWithoutAContext(t *testing.T
 /* a typed-nil *exception.Error under a fmt wrap satisfies errors.As and passes a plain nil comparison, and Context() on the nil receiver takes a read lock on a nil pointer. The chain below is the shape bun's migrator produces: it wraps the application's migration-function error with %w after a plain nil test that a typed nil passes, and fmt records the operand before formatting it, so the wrap exists and carries the typed nil while its own text reads "<nil>". The panic would unwind the command's finish defer and the cli runner would re-panic it, so the json document — and with it the real failure — would never be written. */
 func TestCommandOutput_FinishSurvivesATypedNilContextProviderInTheChain(t *testing.T) {
     buffer := &bytes.Buffer{}
-    outputInstance := newCommandOutput(buffer, nil, output.Option{Format: output.FormatJson})
+    outputInstance := newCommandOutput(buffer, nil, output.Options{Format: output.FormatJson})
 
     runErr := fmt.Errorf("20240101000000_create_users: up: %w", (*exception.Error)(nil))
 
@@ -571,7 +571,7 @@ func TestCommandOutput_PrintMigrationsBlockEscapesTheNames(t *testing.T) {
    every message the run had accumulated before it fell over. */
 func TestCommandOutput_FinishRunRendersAFailureDocumentForAPanickingRun(t *testing.T) {
     buffer := &bytes.Buffer{}
-    outputInstance := newCommandOutput(buffer, nil, mustNormalizeOption(t, output.Option{Format: output.FormatJson}))
+    outputInstance := newCommandOutput(buffer, nil, mustNormalizeOption(t, output.Options{Format: output.FormatJson}))
 
     outputInstance.printSuccess("applied 2 migrations")
 
@@ -613,7 +613,7 @@ func TestCommandOutput_FinishRunRendersAFailureDocumentForAPanickingRun(t *testi
    survive: kept only in a context slot it collapses to its bare message at the render boundary. */
 func TestCommandOutput_FinishRunCarriesAnErrorShapedPanicAsTheCause(t *testing.T) {
     buffer := &bytes.Buffer{}
-    outputInstance := newCommandOutput(buffer, nil, mustNormalizeOption(t, output.Option{Format: output.FormatJson}))
+    outputInstance := newCommandOutput(buffer, nil, mustNormalizeOption(t, output.Options{Format: output.FormatJson}))
 
     panicValue := exception.NewError(
         "the migration lock table is missing",
@@ -647,7 +647,7 @@ func TestCommandOutput_FinishRunCarriesAnErrorShapedPanicAsTheCause(t *testing.T
    the reason the command failed is the one the operator needs. */
 func TestCommandOutput_FinishRunKeepsTheRunsOwnFailureWhenAPanicFollowsIt(t *testing.T) {
     buffer := &bytes.Buffer{}
-    outputInstance := newCommandOutput(buffer, nil, mustNormalizeOption(t, output.Option{Format: output.FormatJson}))
+    outputInstance := newCommandOutput(buffer, nil, mustNormalizeOption(t, output.Options{Format: output.FormatJson}))
 
     runFailure := exception.NewError("the migration lock is held", nil, nil)
 
@@ -667,7 +667,7 @@ func TestCommandOutput_FinishRunKeepsTheRunsOwnFailureWhenAPanicFollowsIt(t *tes
 /* The ordinary paths must be untouched: no panic renders exactly what finish rendered before. */
 func TestCommandOutput_FinishRunLeavesTheOrdinaryPathsUnchanged(t *testing.T) {
     successBuffer := &bytes.Buffer{}
-    successOutput := newCommandOutput(successBuffer, nil, mustNormalizeOption(t, output.Option{Format: output.FormatJson}))
+    successOutput := newCommandOutput(successBuffer, nil, mustNormalizeOption(t, output.Options{Format: output.FormatJson}))
     successOutput.printSuccess("applied 2 migrations")
 
     if runErr := successOutput.finishRun("db:migrate", time.Now(), nil, nil); nil != runErr {
@@ -678,7 +678,7 @@ func TestCommandOutput_FinishRunLeavesTheOrdinaryPathsUnchanged(t *testing.T) {
     }
 
     failureBuffer := &bytes.Buffer{}
-    failureOutput := newCommandOutput(failureBuffer, nil, mustNormalizeOption(t, output.Option{Format: output.FormatJson}))
+    failureOutput := newCommandOutput(failureBuffer, nil, mustNormalizeOption(t, output.Options{Format: output.FormatJson}))
 
     runFailure := exception.NewError("the migration lock is held", nil, nil)
     if runErr := failureOutput.finishRun("db:migrate", time.Now(), runFailure, nil); nil == runErr {
@@ -832,7 +832,7 @@ func TestIsNilInterface_AnswersTheNilInterfaceAndTheTypedNil(t *testing.T) {
     }
 }
 
-func mustNormalizeOption(t *testing.T, option output.Option) output.Option {
+func mustNormalizeOption(t *testing.T, option output.Options) output.Options {
     t.Helper()
 
     normalized, normalizeErr := output.NormalizeOption(option)

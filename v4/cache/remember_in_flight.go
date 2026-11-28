@@ -141,7 +141,7 @@ func (instance *rememberInFlightCall) Wait(callerRuntime containercontract.Runti
     }
 }
 
-/* the timeout is the WAITER's: RememberConfig.WaitTimeout bounds how long this caller waits for the flight, not the computation, which keeps running for the callers after */
+/* the timeout is the WAITER's: RememberOptions.WaitTimeout bounds how long this caller waits for the flight, not the computation, which keeps running for the callers after */
 func newRememberWaitTimedOutError(key string, waitTimeout time.Duration) error {
     return exception.NewError(
         "cache remember wait timed out",

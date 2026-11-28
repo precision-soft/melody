@@ -1189,8 +1189,8 @@ func TestLeaderGate_APanickingOnElectedEndsTheTermAndReleasesTheLock(t *testing.
         t.Fatalf("expected the lost cause to name the hook panic, got %v", lostCause)
     }
 
-    if "OnElected" != exception.LogContext(lostCause, exception.LogContextConfig{})["hook"] {
-        t.Fatalf("expected the lost cause to name the hook, got %v", exception.LogContext(lostCause, exception.LogContextConfig{}))
+    if "OnElected" != exception.LogContext(lostCause, exception.LogContextOptions{})["hook"] {
+        t.Fatalf("expected the lost cause to name the hook, got %v", exception.LogContext(lostCause, exception.LogContextOptions{}))
     }
 
     if true == gate.IsLeader() {
@@ -1643,8 +1643,8 @@ func TestNewLeaderGate_RefusesAnUnlimitedTtlOverALeaseLockerNamingTheField(t *te
             t.Fatalf("expected ErrUnlimitedTtlRefused as the cause, got %v", recoveredErr)
         }
 
-        if "LeaderGateConfig.Ttl" != exception.LogContext(recoveredErr, exception.LogContextConfig{})["field"] {
-            t.Fatalf("expected the refusal to name the field, got %v", exception.LogContext(recoveredErr, exception.LogContextConfig{}))
+        if "LeaderGateConfig.Ttl" != exception.LogContext(recoveredErr, exception.LogContextOptions{})["field"] {
+            t.Fatalf("expected the refusal to name the field, got %v", exception.LogContext(recoveredErr, exception.LogContextOptions{}))
         }
     }()
 
@@ -1762,8 +1762,8 @@ func TestNewExclusiveCommand_RefusesAnUnlimitedTtlOverALeaseLockerNamingTheField
             t.Fatalf("expected the refusal, got %v", recoveredErr)
         }
 
-        if "ExclusiveCommandConfig.Ttl" != exception.LogContext(recoveredErr, exception.LogContextConfig{})["field"] {
-            t.Fatalf("expected the refusal to name the field, got %v", exception.LogContext(recoveredErr, exception.LogContextConfig{}))
+        if "ExclusiveCommandConfig.Ttl" != exception.LogContext(recoveredErr, exception.LogContextOptions{})["field"] {
+            t.Fatalf("expected the refusal to name the field, got %v", exception.LogContext(recoveredErr, exception.LogContextOptions{}))
         }
     }()
 

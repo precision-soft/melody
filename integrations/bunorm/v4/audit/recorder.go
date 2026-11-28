@@ -162,7 +162,7 @@ func (instance *Recorder) deadLetter(table string, entry Entry, saveErr error) {
     }
 
     /* the record carries the whole cause chain and context, and the change-set as the trail would store it, already redacted: on the unbound path it is the fallback store of the entry, and on a transaction's path it may journal a change-set that was not committed, so a reader replays it against the trail, never against the data */
-    logger.Error("audit entry could not be stored; dead-lettering", exception.LogContext(saveErr, exception.LogContextConfig{
+    logger.Error("audit entry could not be stored; dead-lettering", exception.LogContext(saveErr, exception.LogContextOptions{
         Extra: map[string]any{
             "table":         table,
             "entity":        entry.Entity,

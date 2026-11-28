@@ -109,7 +109,7 @@ func TestSet_RefusesAnAbsentTtlAndOneBelowItsMinimum(t *testing.T) {
 
     for _, refusedTtl := range []bound.Duration{{}, bound.Of(time.Duration(0)), bound.Of(-time.Hour), bound.Of(time.Second - time.Nanosecond)} {
         setErr := backend.Set(testRuntime(), "lapsed", []byte("payload"), refusedTtl, cachecontract.SetOptions{})
-        if nil == setErr || "ttl" != exception.LogContext(setErr, exception.LogContextConfig{})["field"] {
+        if nil == setErr || "ttl" != exception.LogContext(setErr, exception.LogContextOptions{})["field"] {
             t.Fatalf("expected the ttl %s refused naming it, got %v", refusedTtl, setErr)
         }
     }
@@ -124,7 +124,7 @@ func TestSetMultiple_RefusesAnAbsentTtlAndOneBelowItsMinimum(t *testing.T) {
 
     for _, refusedTtl := range []bound.Duration{{}, bound.Of(time.Duration(0)), bound.Of(-time.Hour), bound.Of(time.Second - time.Nanosecond)} {
         setErr := backend.SetMultiple(testRuntime(), map[string][]byte{"lapsed": []byte("payload")}, refusedTtl, cachecontract.SetOptions{})
-        if nil == setErr || "ttl" != exception.LogContext(setErr, exception.LogContextConfig{})["field"] {
+        if nil == setErr || "ttl" != exception.LogContext(setErr, exception.LogContextOptions{})["field"] {
             t.Fatalf("the batch door must refuse the ttl %s its single sibling refuses, got %v", refusedTtl, setErr)
         }
     }
@@ -570,7 +570,7 @@ func TestDeleteKeysInBatches_AnEmptyKeyListIsNotAFailure(t *testing.T) {
 }
 
 func TestNewBackend_RefusesANilConnection(t *testing.T) {
-    if _, err := NewBackend(nil, BackendConfig{}); nil == err || "connection" != exception.LogContext(err, exception.LogContextConfig{})["argument"] {
+    if _, err := NewBackend(nil, BackendConfig{}); nil == err || "connection" != exception.LogContext(err, exception.LogContextOptions{})["argument"] {
         t.Fatalf("expected a nil connection refused naming the argument, got %v", err)
     }
 }
@@ -622,7 +622,7 @@ func TestNewBackend_RefusesALimitOutsideItsRuleNamingTheField(t *testing.T) {
                 t.Fatalf("expected a refusal naming %s, got none", testCase.field)
             }
 
-            if testCase.field != exception.LogContext(backendErr, exception.LogContextConfig{})["field"] {
+            if testCase.field != exception.LogContext(backendErr, exception.LogContextOptions{})["field"] {
                 t.Fatalf("expected the refusal to name %s, got %v", testCase.field, backendErr)
             }
         })
@@ -824,7 +824,7 @@ func TestSetMultiple_RefusesANegativeTtlEvenForAnEmptyBatch(t *testing.T) {
         t.Fatal("expected the negative ttl to be refused for the empty batch too")
     }
 
-    if "ttl" != exception.LogContext(setErr, exception.LogContextConfig{})["field"] {
+    if "ttl" != exception.LogContext(setErr, exception.LogContextOptions{})["field"] {
         t.Fatalf("expected the negative ttl refusal, got %v", setErr)
     }
 }
@@ -925,7 +925,7 @@ func TestSetMultiple_NamesTheSortedFirstMalformedKey(t *testing.T) {
             t.Fatal("expected the malformed keys to be refused")
         }
 
-        namedKey := exception.LogContext(setErr, exception.LogContextConfig{})["key"]
+        namedKey := exception.LogContext(setErr, exception.LogContextOptions{})["key"]
         if "aa bad" != namedKey {
             t.Fatalf("expected the sorted-first malformed key named, got %v", namedKey)
         }
@@ -949,7 +949,7 @@ func TestDeleteKeysInBatches_AMultiBatchFailureReportsTheOperationsExtent(t *tes
         t.Fatal("expected the cancelled batch walk to fail")
     }
 
-    extent := exception.LogContext(deleteErr, exception.LogContextConfig{})
+    extent := exception.LogContext(deleteErr, exception.LogContextOptions{})
     if nil == extent["deletedBeforeFailure"] || nil == extent["requestedTotal"] {
         t.Fatalf("expected the operation-level extent on the error, got %v", extent)
     }
@@ -959,7 +959,7 @@ func TestDeleteKeysInBatches_AMultiBatchFailureReportsTheOperationsExtent(t *tes
         t.Fatal("expected the cancelled single batch to fail")
     }
 
-    if nil != exception.LogContext(singleBatchErr, exception.LogContextConfig{})["deletedBeforeFailure"] {
+    if nil != exception.LogContext(singleBatchErr, exception.LogContextOptions{})["deletedBeforeFailure"] {
         t.Fatal("expected the single-batch operation to keep the batch report as its own")
     }
 }

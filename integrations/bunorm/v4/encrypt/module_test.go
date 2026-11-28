@@ -431,7 +431,7 @@ func runEncryptCommand(t *testing.T, command clicontract.Command, arguments []st
         runtimeInstance,
         arguments,
         io.Discard,
-        melodycli.DispatchConfig{},
+        melodycli.DispatchOptions{},
     ); nil != executeErr {
         t.Fatalf("cli command execution failed: %v", executeErr)
     }
@@ -1015,7 +1015,7 @@ func TestModule_RefusesTheFakeCipherOutsideTheDevelopmentEnvironmentNamingTheFie
                     t.Fatalf("%s: expected a refusal, got %v", name, recovered)
                 }
 
-                context := exception.LogContext(recoveredErr, exception.LogContextConfig{})
+                context := exception.LogContext(recoveredErr, exception.LogContextOptions{})
                 if testCase.field != context["field"] || fakeCipherConstructorName != context["cipher"] || melodyconfig.EnvironmentDevelopment != context["admitted"] {
                     t.Fatalf("%s: expected the refusal to name %s and the fake cipher, got %v", name, testCase.field, context)
                 }

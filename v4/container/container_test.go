@@ -1576,8 +1576,8 @@ func TestNewContainer_RefusesACreationWaitersBoundBelowOneNamingTheField(t *test
             t.Fatalf("expected the bound below its minimum to be refused, got %v", recoveredErr)
         }
 
-        if "ContainerConfig.CreationWaiters" != exception.LogContext(recoveredErr, exception.LogContextConfig{})["field"] {
-            t.Fatalf("expected the refusal to name ContainerConfig.CreationWaiters, got %v", exception.LogContext(recoveredErr, exception.LogContextConfig{}))
+        if "ContainerConfig.CreationWaiters" != exception.LogContext(recoveredErr, exception.LogContextOptions{})["field"] {
+            t.Fatalf("expected the refusal to name ContainerConfig.CreationWaiters, got %v", exception.LogContext(recoveredErr, exception.LogContextOptions{}))
         }
     }()
 
@@ -1608,8 +1608,8 @@ func TestNewContainer_RefusesAScopeTeardownTimeoutBelowItsMinimumNamingTheField(
             t.Fatalf("expected the timeout below its minimum to be refused, got %v", recoveredErr)
         }
 
-        if "ContainerConfig.ScopeTeardownTimeout" != exception.LogContext(recoveredErr, exception.LogContextConfig{})["field"] {
-            t.Fatalf("expected the refusal to name ContainerConfig.ScopeTeardownTimeout, got %v", exception.LogContext(recoveredErr, exception.LogContextConfig{}))
+        if "ContainerConfig.ScopeTeardownTimeout" != exception.LogContext(recoveredErr, exception.LogContextOptions{})["field"] {
+            t.Fatalf("expected the refusal to name ContainerConfig.ScopeTeardownTimeout, got %v", exception.LogContext(recoveredErr, exception.LogContextOptions{}))
         }
     }()
 
@@ -1661,7 +1661,7 @@ func recoveredRefusalField(t *testing.T, recovered any, wantedMessage string) an
         t.Fatalf("expected the refusal %q, got %v", wantedMessage, recovered)
     }
 
-    return exception.LogContext(recoveredErr, exception.LogContextConfig{})["field"]
+    return exception.LogContext(recoveredErr, exception.LogContextOptions{})["field"]
 }
 
 func TestNewContainer_ResolvesTheTeardownWalkAndTheCloseFailureStackBytes(t *testing.T) {

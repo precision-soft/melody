@@ -111,13 +111,13 @@ func TestResolveHttpServerLimits_HttpServerLimit_RefusedNamingTheNestedField(t *
         "ApplicationConfig.HttpServer.MaxHeaderBytes":    {HttpServer: HttpServerConfig{MaxHeaderBytes: bound.Of(4095)}},
     } {
         _, limitsErr := resolveHttpServerLimits(configuration, applicationConfig)
-        if nil == limitsErr || field != exception.LogContext(limitsErr, exception.LogContextConfig{})["field"] {
+        if nil == limitsErr || field != exception.LogContext(limitsErr, exception.LogContextOptions{})["field"] {
             t.Fatalf("expected the refusal to name %s, got %v", field, limitsErr)
         }
     }
 
     _, shutdownErr := resolveHttpShutdownTimeout(configuration, ApplicationConfig{HttpServer: HttpServerConfig{ShutdownTimeout: bound.UnlimitedDuration()}})
-    if nil == shutdownErr || "ApplicationConfig.HttpServer.ShutdownTimeout" != exception.LogContext(shutdownErr, exception.LogContextConfig{})["field"] {
+    if nil == shutdownErr || "ApplicationConfig.HttpServer.ShutdownTimeout" != exception.LogContext(shutdownErr, exception.LogContextOptions{})["field"] {
         t.Fatalf("expected the refusal to name the shutdown timeout, got %v", shutdownErr)
     }
 }
@@ -335,7 +335,7 @@ func TestRefuseScopeTeardownOutlastingHttpShutdown_AdmitsOnlyATermStrictlyUnderT
             t.Fatalf("%s: expected the refusal, got %v", name, refusedErr)
         }
 
-        refusalContext := exception.LogContext(refusedErr, exception.LogContextConfig{})
+        refusalContext := exception.LogContext(refusedErr, exception.LogContextOptions{})
         if config.ScopeTeardownTimeoutKey != refusalContext["scopeTeardownKey"] || config.HttpShutdownTimeoutKey != refusalContext["httpShutdownKey"] {
             t.Fatalf("%s: expected the refusal to name both keys, got %v", name, refusalContext)
         }
@@ -365,7 +365,7 @@ func TestResolveUnavailableRetryAfter_TheKeyWinsOverTheFieldOverTheDefault(t *te
         "unlimited": bound.UnlimitedDuration(),
     } {
         _, refusedErr := resolveUnavailableRetryAfter(newLimitConfiguration(t, map[string]string{}), ApplicationConfig{HttpKernel: http.KernelConfig{UnavailableRetryAfter: limit}})
-        if nil == refusedErr || "ApplicationConfig.HttpKernel.UnavailableRetryAfter" != exception.LogContext(refusedErr, exception.LogContextConfig{})["field"] {
+        if nil == refusedErr || "ApplicationConfig.HttpKernel.UnavailableRetryAfter" != exception.LogContext(refusedErr, exception.LogContextOptions{})["field"] {
             t.Fatalf("%s: expected a refusal naming the field, got %v", name, refusedErr)
         }
     }
@@ -439,7 +439,7 @@ func TestNewApplication_TheHttpPublicUrlFieldReachesTheUrlGenerator(t *testing.T
     }
 
     urlGenerator := container.MustFromResolver[httpcontract.UrlGenerator](context.Background(), serviceContainer, http.ServiceUrlGenerator)
-    urlValue, urlErr := urlGenerator.GenerateUrl("product.list", httpcontract.PathConfig{})
+    urlValue, urlErr := urlGenerator.GenerateUrl("product.list", httpcontract.PathOptions{})
     if nil != urlErr || "https://app.example.com/shop/products" != urlValue {
         t.Fatalf("expected the field's base before the route, got %q, %v", urlValue, urlErr)
     }
@@ -465,7 +465,7 @@ func TestApplicationConfig_HttpShutdownTimeoutIsTheKeysDefault(t *testing.T) {
 
     for name, field := range map[string]bound.Duration{"below 1ms": bound.Of(time.Microsecond), "unlimited": bound.UnlimitedDuration()} {
         _, resolveErr := resolveHttpShutdownTimeout(newLimitConfiguration(t, map[string]string{}), ApplicationConfig{HttpServer: HttpServerConfig{ShutdownTimeout: field}})
-        if nil == resolveErr || "ApplicationConfig.HttpServer.ShutdownTimeout" != exception.LogContext(resolveErr, exception.LogContextConfig{})["field"] {
+        if nil == resolveErr || "ApplicationConfig.HttpServer.ShutdownTimeout" != exception.LogContext(resolveErr, exception.LogContextOptions{})["field"] {
             t.Fatalf("%s: expected the field refused naming it, got %v", name, resolveErr)
         }
     }

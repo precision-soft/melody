@@ -628,7 +628,7 @@ func storageObjectAbsent(err error) bool {
 func (instance *LocalStorage) PresignedUrl(
     runtimeInstance containercontract.Runtime,
     key string,
-    config storagecontract.PresignConfig,
+    options storagecontract.PresignOptions,
 ) (string, error) {
     if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance, "storage.LocalStorage.PresignedUrl"); nil != refuseErr {
         return "", refuseErr

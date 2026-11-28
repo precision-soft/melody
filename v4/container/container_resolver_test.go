@@ -576,7 +576,7 @@ func TestCreationGuard_TypedNilPanicValue_FailsWithoutSecondPanic(t *testing.T) 
         t.Fatalf("expected the panicking provider to fail the resolution")
     }
 
-    logContext := exception.LogContext(getErr, exception.LogContextConfig{})
+    logContext := exception.LogContext(getErr, exception.LogContextOptions{})
     if nil == logContext {
         t.Fatalf("expected the panic error to be loggable")
     }
@@ -1157,7 +1157,7 @@ func TestCreationGuard_APanicValueWhoseContextPanicsIsContained(t *testing.T) {
         t.Fatalf("expected the panicking provider to fail the resolution")
     }
 
-    if nil == exception.LogContext(getErr, exception.LogContextConfig{}) {
+    if nil == exception.LogContext(getErr, exception.LogContextOptions{}) {
         t.Fatalf("expected the panic error to stay loggable")
     }
 }
@@ -1841,7 +1841,7 @@ func TestCreationGuard_TheWaiterBoundRefusesOneMoreWithoutAnEdge(t *testing.T) {
         t.Fatalf("expected the third waiter to be refused with ErrCreationWaitersExceeded, got %v", refused.err)
     }
 
-    refusalContext := exception.LogContext(refused.err, exception.LogContextConfig{})
+    refusalContext := exception.LogContext(refused.err, exception.LogContextOptions{})
     if "app.bounded" != refusalContext["creatingKey"] || 2 != refusalContext["creationWaiters"] {
         t.Fatalf("expected the refusal to name the creation and the bound, got %v", refusalContext)
     }
@@ -2014,7 +2014,7 @@ func TestCreationGuard_AWaiterPastItsDeadlineAnswersDeadlineExceededAndACancelCa
         t.Fatalf("expected the waiter past its deadline to answer context.DeadlineExceeded, got %v", deadlineErr)
     }
 
-    deadlineContextValue := exception.LogContext(deadlineErr, exception.LogContextConfig{})
+    deadlineContextValue := exception.LogContext(deadlineErr, exception.LogContextOptions{})
     if "app.deadline.wait" != deadlineContextValue["creatingKey"] {
         t.Fatalf("expected the cancel to name the creation, got %v", deadlineContextValue)
     }

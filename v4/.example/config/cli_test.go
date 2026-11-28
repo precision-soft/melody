@@ -55,7 +55,7 @@ func TestRegisterCliCommands_HandsTheTotpCodeCommandTheStandardInput(t *testing.
         t.Fatal("expected the totp:code command registered")
     }
 
-    expected, expectedErr := totp.GenerateCodeAt(secret, instant, totp.Config{})
+    expected, expectedErr := totp.GenerateCodeAt(secret, instant, totp.Options{})
     if nil != expectedErr {
         t.Fatalf("generate the expected code: %v", expectedErr)
     }

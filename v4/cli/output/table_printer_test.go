@@ -55,7 +55,7 @@ func TestTablePrinter_PadsMultibyteCellsByRune(t *testing.T) {
     }
 
     buffer := &bytes.Buffer{}
-    if err := printer.Print(buffer, envelope, Option{Quiet: true}); nil != err {
+    if err := printer.Print(buffer, envelope, Options{Quiet: true}); nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
 
@@ -95,7 +95,7 @@ func TestTablePrinter_RendersTheEnvelopeErrorUnderQuiet(t *testing.T) {
 
     buffer := &bytes.Buffer{}
 
-    option := Option{}
+    option := Options{}
     option.Quiet = true
 
     printErr := NewTablePrinter(TablePrinterConfig{}).Print(buffer, envelope, option)
@@ -117,7 +117,7 @@ func TestTablePrinter_RendersTheWarningsUnderQuiet(t *testing.T) {
 
     buffer := &bytes.Buffer{}
 
-    option := Option{}
+    option := Options{}
     option.Quiet = true
 
     printErr := NewTablePrinter(TablePrinterConfig{}).Print(buffer, envelope, option)
@@ -181,7 +181,7 @@ func TestTablePrinter_RendersTheWarningDetailsSortedUnderVerbose(t *testing.T) {
 
     buffer := &bytes.Buffer{}
 
-    option := Option{}
+    option := Options{}
     option.Verbose = true
 
     printErr := NewTablePrinter(TablePrinterConfig{}).Print(buffer, envelope, option)
@@ -218,7 +218,7 @@ func TestTablePrinter_SkipsAnUnnamedErrorDetail(t *testing.T) {
 
     buffer := &bytes.Buffer{}
 
-    printErr := NewTablePrinter(TablePrinterConfig{}).Print(buffer, envelope, Option{})
+    printErr := NewTablePrinter(TablePrinterConfig{}).Print(buffer, envelope, Options{})
     if nil != printErr {
         t.Fatalf("expected no error, got %v", printErr)
     }
@@ -274,7 +274,7 @@ func TestTablePrinter_ShrinksTheWidestColumnAndWrapsTheSurplus(t *testing.T) {
 
     buffer := &bytes.Buffer{}
 
-    option := Option{}
+    option := Options{}
     option.Quiet = true
 
     printErr := printer.Print(buffer, envelope, option)
@@ -328,7 +328,7 @@ func TestTablePrinter_StopsShrinkingWhenEveryColumnIsAtItsMinimum(t *testing.T) 
 
     buffer := &bytes.Buffer{}
 
-    option := Option{}
+    option := Options{}
     option.Quiet = true
 
     done := make(chan error, 1)
@@ -459,7 +459,7 @@ func TestTablePrinter_ReportsAShortWriteAsAFailure(t *testing.T) {
 
     writer := &shortTableWriter{}
 
-    printErr := NewTablePrinter(TablePrinterConfig{}).Print(writer, envelope, Option{})
+    printErr := NewTablePrinter(TablePrinterConfig{}).Print(writer, envelope, Options{})
     if nil == printErr {
         t.Fatalf("expected the short write to be reported after %d truncated writes", writer.dropped)
     }
@@ -475,7 +475,7 @@ func TestTablePrinter_ReturnsTheFirstWriteFailure(t *testing.T) {
     builder.AddBlock("BLOCK", []string{"name"}).AddRow([]string{"value"})
     envelope.Table = builder.Build()
 
-    printErr := NewTablePrinter(TablePrinterConfig{}).Print(&failingTableWriter{failAfter: 1}, envelope, Option{})
+    printErr := NewTablePrinter(TablePrinterConfig{}).Print(&failingTableWriter{failAfter: 1}, envelope, Options{})
     if nil == printErr {
         t.Fatalf("expected the write failure to be returned")
     }
@@ -498,7 +498,7 @@ func TestTablePrinter_EscapesControlCharactersInTheTextChannels(t *testing.T) {
 
     buffer := &bytes.Buffer{}
 
-    printErr := NewTablePrinter(TablePrinterConfig{}).Print(buffer, envelope, Option{})
+    printErr := NewTablePrinter(TablePrinterConfig{}).Print(buffer, envelope, Options{})
     if nil != printErr {
         t.Fatalf("expected no error, got %v", printErr)
     }
@@ -534,7 +534,7 @@ func TestTablePrinter_EscapedCellsStayAligned(t *testing.T) {
 
     buffer := &bytes.Buffer{}
 
-    option := Option{}
+    option := Options{}
     option.Quiet = true
 
     printErr := NewTablePrinter(TablePrinterConfig{}).Print(buffer, envelope, option)
@@ -587,7 +587,7 @@ func TestTablePrinter_CjkCellsStayAlignedInDisplayCells(t *testing.T) {
 
     buffer := &bytes.Buffer{}
 
-    option := Option{}
+    option := Options{}
     option.Quiet = true
 
     printErr := NewTablePrinter(TablePrinterConfig{}).Print(buffer, envelope, option)
@@ -647,7 +647,7 @@ func TestTablePrinter_MeasuresAMultiLineCellByItsWidestLine(t *testing.T) {
     }
 
     buffer := &bytes.Buffer{}
-    if err := printer.Print(buffer, envelope, Option{Quiet: true}); nil != err {
+    if err := printer.Print(buffer, envelope, Options{Quiet: true}); nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
 
@@ -685,7 +685,7 @@ func TestTablePrinter_DoesNotShrinkASiblingColumnForAMultiLineCellsPhantomWidth(
     }
 
     buffer := &bytes.Buffer{}
-    if err := printer.Print(buffer, envelope, Option{Quiet: true}); nil != err {
+    if err := printer.Print(buffer, envelope, Options{Quiet: true}); nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
 
@@ -748,7 +748,7 @@ func TestTablePrinter_MeasuresAMultiLineColumnHeaderByItsWidestLine(t *testing.T
     }
 
     buffer := &bytes.Buffer{}
-    if err := printer.Print(buffer, envelope, Option{Quiet: true}); nil != err {
+    if err := printer.Print(buffer, envelope, Options{Quiet: true}); nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
 

@@ -35,12 +35,12 @@ func RoutesHandler() melodyhttpcontract.Handler {
 
         for _, entry := range manifest.Routes {
             /* a route the sample values cannot fill, a requirement "1" does not meet, lists no example and is journaled, so one route never fails the listing of the others */
-            examplePath, generateErr := urlGenerator.GeneratePath(entry.Name, melodyhttpcontract.PathConfig{Parameters: exampleParametersOf(entry.Pattern)})
+            examplePath, generateErr := urlGenerator.GeneratePath(entry.Name, melodyhttpcontract.PathOptions{Parameters: exampleParametersOf(entry.Pattern)})
             if nil != generateErr {
                 examplePath = ""
                 examplejournal.LoggerOr(runtimeInstance, melodylogging.EmergencyLogger()).Warning(
                     "route listed without an example path",
-                    melodyexception.LogContext(generateErr, melodyexception.LogContextConfig{Extra: melodyloggingcontract.Context{"route": entry.Name}}),
+                    melodyexception.LogContext(generateErr, melodyexception.LogContextOptions{Extra: melodyloggingcontract.Context{"route": entry.Name}}),
                 )
             }
 

@@ -439,7 +439,7 @@ func TestRegisterSecurity_TheInternalFirewallAnswersAGuardOutageWith503AndRetryA
 
             response := requestEvent.Response()
             if nil != requestEvent.Refusal() {
-                response = melodyhttp.RenderExceptionResponse(runtimeInstance, request, requestEvent.Refusal(), melodyhttp.ExceptionRenderConfig{})
+                response = melodyhttp.RenderExceptionResponse(runtimeInstance, request, requestEvent.Refusal(), melodyhttp.ExceptionRenderOptions{})
             }
 
             if nil == response || testCase.status != response.StatusCode() || testCase.retryAfter != response.Headers().Get("Retry-After") {
@@ -569,7 +569,7 @@ func TestRegisterSecurity_TheMainFirewallAnswersAnAccountLookupOutageWith503AndR
 
             response := requestEvent.Response()
             if nil != requestEvent.Refusal() {
-                response = melodyhttp.RenderExceptionResponse(runtimeInstance, request, requestEvent.Refusal(), melodyhttp.ExceptionRenderConfig{})
+                response = melodyhttp.RenderExceptionResponse(runtimeInstance, request, requestEvent.Refusal(), melodyhttp.ExceptionRenderOptions{})
             }
 
             if nil == response || nethttp.StatusServiceUnavailable != response.StatusCode() || "" == response.Headers().Get("Retry-After") {

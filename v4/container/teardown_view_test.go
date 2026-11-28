@@ -161,8 +161,8 @@ func TestContainer_VerifyDeclaredTeardownDependencies_RefusesAClosedContainer(t 
     }
 
     /* the refusal names the door it refused, not a service in creation */
-    if "VerifyDeclaredTeardownDependencies" != exception.LogContext(verifyErr, exception.LogContextConfig{})["door"] {
-        t.Fatalf("expected the refusal to name the door, got %v", exception.LogContext(verifyErr, exception.LogContextConfig{}))
+    if "VerifyDeclaredTeardownDependencies" != exception.LogContext(verifyErr, exception.LogContextOptions{})["door"] {
+        t.Fatalf("expected the refusal to name the door, got %v", exception.LogContext(verifyErr, exception.LogContextOptions{}))
     }
 }
 

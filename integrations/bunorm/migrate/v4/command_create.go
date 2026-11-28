@@ -16,8 +16,8 @@ import (
 /* migrationNamePattern is the grammar a migration name is held to before it reaches bun's generator, the set bun's own nameRE accepts, kept here so the confinement of the file path is this command's, not the pinned dependency's. */
 var migrationNamePattern = regexp.MustCompile(`^[0-9a-z_\-]+$`)
 
-func NewCreateGoCommand(migrations *migrate.Migrations, options Options) *CreateCommand {
-    return &CreateCommand{base: newBaseCommand(migrations, options)}
+func NewCreateGoCommand(migrations *migrate.Migrations, config CommandConfig) *CreateCommand {
+    return &CreateCommand{base: newBaseCommand(migrations, config)}
 }
 
 type CreateCommand struct {
@@ -25,7 +25,7 @@ type CreateCommand struct {
 }
 
 func (instance *CreateCommand) Name() string {
-    return instance.base.options.CommandPrefix + ":create"
+    return instance.base.config.CommandPrefix + ":create"
 }
 
 func (instance *CreateCommand) Description() string {

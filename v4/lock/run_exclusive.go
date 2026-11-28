@@ -58,8 +58,8 @@ const minimumLeaseTtl = 2 * minimumRefreshInterval
 /* sessionProbeTtlFactor gives the probe a lease margin: a lease locker rewrites the lease to now+ttl, so a probe renewing for the probe interval itself would race its own expiry. Twice the interval keeps the one-interval margin the positive-ttl path gets from refreshing at ttl/2. */
 const sessionProbeTtlFactor = 2
 
-/* ExclusiveConfig is what an exclusive run declares beyond its locker and its lock name; its zero value is the default. */
-type ExclusiveConfig struct {
+/* ExclusiveOptions is what an exclusive run declares beyond its locker and its lock name; its zero value is the default. */
+type ExclusiveOptions struct {
     /* Ttl is the lease handed to the locker, the crash safety and never the run cadence, since the lease is refreshed at half of it while the callback runs and released after it: 30s by default, at least 2ms, unlimited selecting a session-style lock, which holds until its connection drops and is probed every 15s instead of renewed. */
     Ttl bound.Duration
 
@@ -70,24 +70,24 @@ type ExclusiveConfig struct {
     ProbeInterval bound.Duration
 }
 
-const exclusiveProbeIntervalField = "ExclusiveConfig.ProbeInterval"
+const exclusiveProbeIntervalField = "ExclusiveOptions.ProbeInterval"
 
 var exclusiveTtlRule = bound.Rule[time.Duration]{
-    Name:              "ExclusiveConfig.Ttl",
+    Name:              "ExclusiveOptions.Ttl",
     Default:           lockcontract.LockTtlRule().Default,
     Minimum:           minimumLeaseTtl,
     UnlimitedAdmitted: true,
 }
 
-const exclusiveStopRenewalLimitField = "ExclusiveConfig.StopRenewalLimit"
+const exclusiveStopRenewalLimitField = "ExclusiveOptions.StopRenewalLimit"
 
 
-/* RunExclusive acquires the named lock, runs callback while holding it, and always releases afterwards, so the ttl acts only as crash-safety, never as the run cadence. The configuration is resolved before the lock is created, and a refusal is answered as the error, naming the field. It returns (false, nil) without running callback when another holder owns the lock, so of N instances launched together one runs the command. While callback runs, the lock is refreshed at half the ttl on a background goroutine; the child runtime handed to callback is cancelled at the lease's demotion instant, a quarter of the ttl before the lease last written lapses, when no renewal has landed by then, so the callback is told to stop before another instance can acquire the lock; a failed refresh is retried once before that instant. An unlimited ttl selects the session-lock behavior: no lease to extend, only a liveness probe every ExclusiveConfig.ProbeInterval. A stop cancels callback's runtime, not the renewal: the lease is still renewed while callback winds down, up to ExclusiveConfig.StopRenewalLimit, past which the run answers the error naming the limit; a session lock's probe runs until callback returns. */
+/* RunExclusive acquires the named lock, runs callback while holding it, and always releases afterwards, so the ttl acts only as crash-safety, never as the run cadence. The configuration is resolved before the lock is created, and a refusal is answered as the error, naming the field. It returns (false, nil) without running callback when another holder owns the lock, so of N instances launched together one runs the command. While callback runs, the lock is refreshed at half the ttl on a background goroutine; the child runtime handed to callback is cancelled at the lease's demotion instant, a quarter of the ttl before the lease last written lapses, when no renewal has landed by then, so the callback is told to stop before another instance can acquire the lock; a failed refresh is retried once before that instant. An unlimited ttl selects the session-lock behavior: no lease to extend, only a liveness probe every ExclusiveOptions.ProbeInterval. A stop cancels callback's runtime, not the renewal: the lease is still renewed while callback winds down, up to ExclusiveOptions.StopRenewalLimit, past which the run answers the error naming the limit; a session lock's probe runs until callback returns. */
 func RunExclusive(
     runtimeInstance containercontract.Runtime,
     locker lockcontract.Locker,
     name string,
-    config ExclusiveConfig,
+    options ExclusiveOptions,
     callback func(containercontract.Runtime) error,
 ) (bool, error) {
     if true == internal.IsNilInterface(runtimeInstance) {
@@ -108,18 +108,18 @@ func RunExclusive(
 
     refuseARuntimeThatCannotBeRewrapped(runtimeInstance, "run exclusive")
 
-    ttl, ttlErr := bound.Resolve(config.Ttl, exclusiveTtlRule)
+    ttl, ttlErr := bound.Resolve(options.Ttl, exclusiveTtlRule)
     if nil != ttlErr {
         return false, ttlErr
     }
 
-    probeInterval, probeIntervalErr := resolveSessionProbeInterval(exclusiveProbeIntervalField, config.ProbeInterval, ttl)
+    probeInterval, probeIntervalErr := resolveSessionProbeInterval(exclusiveProbeIntervalField, options.ProbeInterval, ttl)
     if nil != probeIntervalErr {
         return false, probeIntervalErr
     }
 
     refreshInterval, _ := resolveRefreshSchedule(ttl, probeInterval)
-    stopRenewalLimit, stopRenewalLimitErr := resolveStopRenewalLimit(exclusiveStopRenewalLimitField, config.StopRenewalLimit, refreshInterval)
+    stopRenewalLimit, stopRenewalLimitErr := resolveStopRenewalLimit(exclusiveStopRenewalLimitField, options.StopRenewalLimit, refreshInterval)
     if nil != stopRenewalLimitErr {
         return false, stopRenewalLimitErr
     }
@@ -604,7 +604,7 @@ func releaseDetached(runtimeInstance containercontract.Runtime, lock lockcontrac
 
     logger.Warning(
         "lock release failed; the lock stays held until the ttl lapses",
-        exception.LogContext(releaseErr, exception.LogContextConfig{Extra: exceptioncontract.Context{"name": name}}),
+        exception.LogContext(releaseErr, exception.LogContextOptions{Extra: exceptioncontract.Context{"name": name}}),
     )
 }
 

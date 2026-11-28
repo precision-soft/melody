@@ -109,7 +109,7 @@ func runMigrationCommandTo(
         runtimeInstance,
         append([]string{command.Name()}, arguments...),
         writer,
-        melodycli.DispatchConfig{},
+        melodycli.DispatchOptions{},
     ); nil != parseErr {
         t.Fatalf("failed to parse command arguments: %s", parseErr.Error())
     }
@@ -201,7 +201,7 @@ func isMigrationStatusSelect(query string) bool {
 /* the connection every definition of these tests declares: the registry refuses an empty host and an empty database, and none of the fake providers dials it */
 var testConnectionParameters = bunorm.ConnectionParameters{Host: "127.0.0.1", Database: "melody"}
 
-var resolvedDefaultOptions = Options{
+var resolvedDefaultOptions = CommandConfig{
     ManagerRegistryServiceId: DefaultManagerRegistryServiceId,
     ManagerFlagName:          DefaultManagerFlagName,
     CommandPrefix:            DefaultCommandPrefix,
@@ -441,7 +441,7 @@ func dispatchProbeCommand(
     runtimeInstance containercontract.Runtime,
     arguments []string,
 ) error {
-    return melodycli.DispatchCommand(context.Background(), command, runtimeInstance, arguments, io.Discard, melodycli.DispatchConfig{})
+    return melodycli.DispatchCommand(context.Background(), command, runtimeInstance, arguments, io.Discard, melodycli.DispatchOptions{})
 }
 
 /* capturingCommand delegates to the command under test and keeps its error, so a test can tell a refused command line — which the dispatch answers — from the command's own failure, which is what it is asserting. */

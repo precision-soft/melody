@@ -223,7 +223,7 @@ func TestInMemoryLocker_CreateLockRefusesAnUnlimitedTtlNamingIt(t *testing.T) {
     locker := NewInMemoryLocker(InMemoryLockerConfig{})
 
     lock, createErr := locker.CreateLock("picking:unlimited", lockcontract.CreateLockOptions{Ttl: bound.UnlimitedDuration()})
-    if nil != lock || false == errors.Is(createErr, lockcontract.ErrUnlimitedTtlRefused) || "CreateLockOptions.Ttl" != exception.LogContext(createErr, exception.LogContextConfig{})["field"] {
+    if nil != lock || false == errors.Is(createErr, lockcontract.ErrUnlimitedTtlRefused) || "CreateLockOptions.Ttl" != exception.LogContext(createErr, exception.LogContextOptions{})["field"] {
         t.Fatalf("expected an unlimited ttl to be refused naming it, got %v %v", lock, createErr)
     }
 
@@ -234,7 +234,7 @@ func TestInMemoryLocker_CreateLockRefusesAnUnlimitedTtlNamingIt(t *testing.T) {
 
 func TestInMemoryLocker_CreateLockRefusesATtlBelowTheMinimum(t *testing.T) {
     lock, createErr := NewInMemoryLocker(InMemoryLockerConfig{}).CreateLock("picking:tiny", lockcontract.CreateLockOptions{Ttl: bound.Of(time.Microsecond)})
-    if nil != lock || nil == createErr || "CreateLockOptions.Ttl" != exception.LogContext(createErr, exception.LogContextConfig{})["field"] {
+    if nil != lock || nil == createErr || "CreateLockOptions.Ttl" != exception.LogContext(createErr, exception.LogContextOptions{})["field"] {
         t.Fatalf("expected a ttl under 1ms to be refused naming it, got %v %v", lock, createErr)
     }
 }
@@ -250,7 +250,7 @@ func TestInMemoryLocker_AnUnlimitedRefreshIsRefusedAndTheLeaseKept(t *testing.T)
     }
 
     refreshErr := held.Refresh(runtimeInstance, lockcontract.RefreshOptions{Ttl: bound.UnlimitedDuration()})
-    if nil == refreshErr || "RefreshOptions.Ttl" != exception.LogContext(refreshErr, exception.LogContextConfig{})["field"] {
+    if nil == refreshErr || "RefreshOptions.Ttl" != exception.LogContext(refreshErr, exception.LogContextOptions{})["field"] {
         t.Fatalf("expected an unlimited refresh to be refused naming the refresh ttl, got %v", refreshErr)
     }
 
@@ -346,7 +346,7 @@ func recoveredFieldOf(t *testing.T, callback func()) string {
         t.Fatalf("expected a panic carrying an error, got %v", recovered)
     }
 
-    field, _ := exception.LogContext(recoveredErr, exception.LogContextConfig{})["field"].(string)
+    field, _ := exception.LogContext(recoveredErr, exception.LogContextOptions{})["field"].(string)
 
     return field
 }

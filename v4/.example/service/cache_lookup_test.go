@@ -293,7 +293,7 @@ func TestRememberEntityOrAbsenceReadsTheStoreAsRememberAloneDoes(t *testing.T) {
     }
 
     bareCache := newTtlRecordingCache()
-    if _, rememberErr := melodycache.Remember(melodycache.For(exampleTestRuntime(), bareCache), "read-key", melodycache.RememberConfig{Ttl: melodybound.Of(absenceCacheTtl)}, func(runtimeInstance melodycontainercontract.Runtime, _ *melodycache.RememberItem) (*string, error) {
+    if _, rememberErr := melodycache.Remember(melodycache.For(exampleTestRuntime(), bareCache), "read-key", melodycache.RememberOptions{Ttl: melodybound.Of(absenceCacheTtl)}, func(runtimeInstance melodycontainercontract.Runtime, _ *melodycache.RememberItem) (*string, error) {
         return lookupTestEntity(), nil
     }); nil != rememberErr {
         t.Fatalf("remember: %v", rememberErr)

@@ -870,7 +870,7 @@ func (instance *recordingCloseTransport) Ack(runtimeInstance containercontract.R
     return nil
 }
 
-func (instance *recordingCloseTransport) Nack(runtimeInstance containercontract.Runtime, envelope messagebuscontract.Envelope, config messagebuscontract.NackConfig) error {
+func (instance *recordingCloseTransport) Nack(runtimeInstance containercontract.Runtime, envelope messagebuscontract.Envelope, options messagebuscontract.NackOptions) error {
     return nil
 }
 

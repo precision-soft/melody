@@ -159,12 +159,12 @@ func TestMigrateModuleConfig_PinsTheBaseFamilyToTheCatalogueAndTheArchiveToItsCo
         t.Fatal("expected the base family to carry the catalogue's migration set")
     }
 
-    if "default" != config.Options.ManagerName {
-        t.Fatalf("expected the base family pinned to the catalogue's manager, got %q", config.Options.ManagerName)
+    if "default" != config.Command.ManagerName {
+        t.Fatalf("expected the base family pinned to the catalogue's manager, got %q", config.Command.ManagerName)
     }
 
-    if serviceDatabaseRegistry != config.Options.ManagerRegistryServiceId {
-        t.Fatalf("expected the registry named by the service the wiring publishes, got %q", config.Options.ManagerRegistryServiceId)
+    if serviceDatabaseRegistry != config.Command.ManagerRegistryServiceId {
+        t.Fatalf("expected the registry named by the service the wiring publishes, got %q", config.Command.ManagerRegistryServiceId)
     }
 
     if 1 != len(config.Contexts) {

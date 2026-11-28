@@ -70,7 +70,7 @@ func runDebugCommand(
     commandArguments = append(commandArguments, command.Name())
     commandArguments = append(commandArguments, arguments...)
 
-    runErr := melodycli.DispatchCommand(context.Background(), command, runtimeInstance, commandArguments, buffer, melodycli.DispatchConfig{})
+    runErr := melodycli.DispatchCommand(context.Background(), command, runtimeInstance, commandArguments, buffer, melodycli.DispatchOptions{})
 
     return buffer.String(), runErr
 }

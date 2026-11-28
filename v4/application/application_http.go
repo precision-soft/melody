@@ -442,7 +442,7 @@ func awaitHttpServerEnd(
         if nil != serveErr && false == errors.Is(serveErr, nethttp.ErrServerClosed) {
             logger.Error(
                 "http server error",
-                exception.LogContext(serveErr, exception.LogContextConfig{}),
+                exception.LogContext(serveErr, exception.LogContextOptions{}),
             )
 
             runErrs = append(runErrs, serveErr)
@@ -451,7 +451,7 @@ func awaitHttpServerEnd(
         if nil != shutdownErr {
             logger.Error(
                 "http server shutdown error",
-                exception.LogContext(shutdownErr, exception.LogContextConfig{}),
+                exception.LogContext(shutdownErr, exception.LogContextOptions{}),
             )
 
             runErrs = append(runErrs, shutdownErr)
@@ -468,7 +468,7 @@ func awaitHttpServerEnd(
         if nil != err && false == errors.Is(err, nethttp.ErrServerClosed) {
             logger.Error(
                 "http server error",
-                exception.LogContext(err, exception.LogContextConfig{}),
+                exception.LogContext(err, exception.LogContextOptions{}),
             )
 
             return markHttpRunErrorLogged(err)
@@ -639,7 +639,7 @@ func awaitOpenRequestScopes(
                 ctx.Err(),
             )
 
-            logger.Error("http server shutdown error", exception.LogContext(drainErr, exception.LogContextConfig{}))
+            logger.Error("http server shutdown error", exception.LogContext(drainErr, exception.LogContextOptions{}))
 
             return drainErr
 

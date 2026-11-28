@@ -35,8 +35,8 @@ func TestResolvePresignExpiry_ReadsTheRule(t *testing.T) {
             t.Fatalf("%s: expected the expiry refused, got %s (%v)", name, resolved, resolveErr)
         }
 
-        if "PresignConfig.Expiry" != exception.FromError(resolveErr).Context()["field"] {
-            t.Fatalf("%s: expected the refusal to name PresignConfig.Expiry, got %v", name, exception.FromError(resolveErr).Context())
+        if "PresignOptions.Expiry" != exception.FromError(resolveErr).Context()["field"] {
+            t.Fatalf("%s: expected the refusal to name PresignOptions.Expiry, got %v", name, exception.FromError(resolveErr).Context())
         }
 
         if true == exception.ChainIs(resolveErr, ErrPresignUnsupported) {
@@ -61,6 +61,10 @@ func TestResolvePresignMethod_AdmitsGetAndPutOnly(t *testing.T) {
 
         if method != exception.FromError(resolveErr).Context()["method"] {
             t.Fatalf("%q: expected the refusal to name the method, got %v", method, exception.FromError(resolveErr).Context())
+        }
+
+        if "PresignOptions.Method" != exception.FromError(resolveErr).Context()["field"] {
+            t.Fatalf("%q: expected the refusal to name PresignOptions.Method, got %v", method, exception.FromError(resolveErr).Context())
         }
     }
 }

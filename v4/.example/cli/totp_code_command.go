@@ -62,7 +62,7 @@ func (instance *TotpCodeCommand) Run(
         return clockErr
     }
 
-    code, codeErr := totp.GenerateCodeAt(secret, clockInstance.Now(), totp.Config{})
+    code, codeErr := totp.GenerateCodeAt(secret, clockInstance.Now(), totp.Options{})
     if nil != codeErr {
         return codeErr
     }

@@ -220,7 +220,7 @@ func (instance *FileServer) Serve(
             "static serve read failed",
             exception.LogContext(
                 readErr,
-                exception.LogContextConfig{
+                exception.LogContextOptions{
                     Extra: exceptioncontract.Context{
                         "relativePath": resolved.relativePath,
                     },
@@ -426,7 +426,7 @@ func (instance *FileServer) resolveAndOpen(
             "static serve stat failed",
             exception.LogContext(
                 statErr,
-                exception.LogContextConfig{
+                exception.LogContextOptions{
                     Extra: exceptioncontract.Context{
                         "relativePath": relativePath,
                     },
@@ -606,7 +606,7 @@ var fallbackContentTypeByExtension = map[string]string{
 func logOpenFailure(logger loggingcontract.Logger, relativePath string, openErr error) {
     logContext := exception.LogContext(
         openErr,
-        exception.LogContextConfig{
+        exception.LogContextOptions{
             Extra: exceptioncontract.Context{
                 "relativePath": relativePath,
             },

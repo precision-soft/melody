@@ -89,7 +89,7 @@ func (instance *runtimeRecordingNonceGuard) Remember(runtimeInstance containerco
 
 func TestTotpSecondFactorAuthenticator_ReadsItsStoresThroughTheRuntimeItWasHanded(t *testing.T) {
     secret := "JBSWY3DPEHPK3PXP"
-    code, codeErr := totp.GenerateCodeAt(secret, time.Now(), totp.Config{})
+    code, codeErr := totp.GenerateCodeAt(secret, time.Now(), totp.Options{})
     if nil != codeErr {
         t.Fatalf("generate: %v", codeErr)
     }

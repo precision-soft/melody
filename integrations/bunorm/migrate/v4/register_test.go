@@ -47,14 +47,14 @@ func TestRegisterCommands_NilMigrationsIsRefused(t *testing.T) {
         }
     }()
 
-    RegisterCommands(nil, Options{})
+    RegisterCommands(nil, CommandConfig{})
 }
 
 /* the module gates its own optional set before calling the registrar, so a binary that registers only migration contexts never reaches the registrar's nil-migrations refusal — the context-only shape is the one legal reading of absent Migrations. */
 func TestModule_WithContextsOnlyDoesNotReachTheRegistrarsRefusal(t *testing.T) {
     module := NewModule(ModuleConfig{
         Migrations: nil,
-        Options:    resolvedDefaultOptions,
+        Command:    resolvedDefaultOptions,
         Contexts: []ContextConfig{
             {Name: "reporting", Migrations: migrate.NewMigrations()},
         },
@@ -67,7 +67,7 @@ func TestModule_WithContextsOnlyDoesNotReachTheRegistrarsRefusal(t *testing.T) {
 }
 
 func TestRegisterCommands_EmptyOptionsResolveToDefaults(t *testing.T) {
-    commands := RegisterCommands(migrate.NewMigrations(), Options{})
+    commands := RegisterCommands(migrate.NewMigrations(), CommandConfig{})
 
     expectedNames := []string{"db:init", "db:migrate", "db:rollback", "db:status", "db:unlock", "db:create"}
     names := commandNames(commands)
@@ -88,13 +88,13 @@ func TestRegisterCommands_EmptyOptionsResolveToDefaults(t *testing.T) {
         }
     }
 
-    if migrateCommand := commands[1].(*MigrateCommand); DefaultManagerRegistryServiceId != migrateCommand.base.options.ManagerRegistryServiceId {
-        t.Fatalf("expected the registry service id to default to %q, got %q", DefaultManagerRegistryServiceId, migrateCommand.base.options.ManagerRegistryServiceId)
+    if migrateCommand := commands[1].(*MigrateCommand); DefaultManagerRegistryServiceId != migrateCommand.base.config.ManagerRegistryServiceId {
+        t.Fatalf("expected the registry service id to default to %q, got %q", DefaultManagerRegistryServiceId, migrateCommand.base.config.ManagerRegistryServiceId)
     }
 }
 
 func TestRegisterCommands_CustomPrefixAndManagerFlagName(t *testing.T) {
-    options := Options{
+    options := CommandConfig{
         ManagerRegistryServiceId: "service.custom.registry",
         ManagerFlagName:          "connection",
         CommandPrefix:            "database",
@@ -122,7 +122,7 @@ func TestRegisterCommands_CustomPrefixAndManagerFlagName(t *testing.T) {
 }
 
 func TestRegisterCommands_MetadataIsComplete(t *testing.T) {
-    commands := RegisterCommands(migrate.NewMigrations(), Options{})
+    commands := RegisterCommands(migrate.NewMigrations(), CommandConfig{})
 
     for _, command := range commands {
         if "" == command.Name() {
@@ -155,7 +155,7 @@ func TestRegisterContextCommands_BuildsOneFamilyPerContext(t *testing.T) {
             {Name: "platform", Migrations: migrate.NewMigrations()},
             {Name: "payment", Migrations: migrate.NewMigrations()},
         },
-        Options{},
+        CommandConfig{},
     )
 
     expectedNames := map[string]bool{
@@ -192,7 +192,7 @@ func TestRegisterContextCommands_BuildsOneFamilyPerContext(t *testing.T) {
 }
 
 func TestRegisterContextCommands_EmptyContextsBuildNothing(t *testing.T) {
-    if commands := RegisterContextCommands(nil, Options{}); 0 != len(commands) {
+    if commands := RegisterContextCommands(nil, CommandConfig{}); 0 != len(commands) {
         t.Fatalf("expected no commands, got %d", len(commands))
     }
 }
@@ -210,12 +210,12 @@ func TestRegisterCommands_RefusesAnUnlockTimeoutOutsideItsRuleNamingTheField(t *
                     t.Fatal("expected the unlock timeout refused")
                 }
 
-                if "Options.UnlockTimeout" != exception.LogContext(recoveredErr, exception.LogContextConfig{})["field"] {
-                    t.Fatalf("expected the refusal to name Options.UnlockTimeout, got %v", recoveredErr)
+                if "CommandConfig.UnlockTimeout" != exception.LogContext(recoveredErr, exception.LogContextOptions{})["field"] {
+                    t.Fatalf("expected the refusal to name CommandConfig.UnlockTimeout, got %v", recoveredErr)
                 }
             }()
 
-            RegisterCommands(migrate.NewMigrations(), Options{UnlockTimeout: unlockTimeout})
+            RegisterCommands(migrate.NewMigrations(), CommandConfig{UnlockTimeout: unlockTimeout})
         })
     }
 }

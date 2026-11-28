@@ -25,7 +25,7 @@ func PlatformCheckHandler() melodyhttpcontract.Handler {
             runtimeInstance,
             locker,
             "example.platform.check",
-            melodylock.ExclusiveConfig{Ttl: melodybound.Of(5 * time.Second)},
+            melodylock.ExclusiveOptions{Ttl: melodybound.Of(5 * time.Second)},
             func(exclusiveRuntime melodycontainercontract.Runtime) error {
                 var checkErr error
                 stored, checkErr = checkStorage(melodystorage.FromRuntime(exclusiveRuntime))

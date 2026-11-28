@@ -230,7 +230,7 @@ func TestHmacEnvelopeSigner_SignReturnsAProviderFailureMarked(t *testing.T) {
 func TestHmacEnvelopeSigner_SignRefusesANilRuntime(t *testing.T) {
     signer := NewHmacEnvelopeSigner(hmacTestRuntime(), hmacSignerProbeSecrets(), "billing", HmacEnvelopeSignerConfig{})
 
-    if _, signErr := signer.Sign(nil, "GET", "/internal", nil, SignOptions{}); "runtimeInstance" != exception.LogContext(signErr, exception.LogContextConfig{})["argument"] {
+    if _, signErr := signer.Sign(nil, "GET", "/internal", nil, SignOptions{}); "runtimeInstance" != exception.LogContext(signErr, exception.LogContextOptions{})["argument"] {
         t.Fatalf("expected a nil runtime refused naming the argument, got %v", signErr)
     }
 }

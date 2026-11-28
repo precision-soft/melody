@@ -730,7 +730,7 @@ func TestCollectModuleHttpHandlerDecorators_ANilDecoratorIsRefusedNamingTheModul
             t.Fatal("expected a nil handler decorator to be refused at boot")
         }
 
-        logContext := exception.LogContext(recoveredErr, exception.LogContextConfig{})
+        logContext := exception.LogContext(recoveredErr, exception.LogContextOptions{})
         if "decorator.module" != logContext["module"] || 1 != logContext["index"] {
             t.Fatalf("expected the refusal to name the module and index 1, got %v: %v", logContext, recoveredErr)
         }
@@ -761,7 +761,7 @@ func TestRefuseDuplicateModules_RaisesTheReportNamingTheModuleAndItsCaller(t *te
         t.Fatalf("expected the report to panic with an error, got %v", recovered)
     }
 
-    collisions, _ := exception.LogContext(report, exception.LogContextConfig{})["collisions"].([]string)
+    collisions, _ := exception.LogContext(report, exception.LogContextOptions{})["collisions"].([]string)
     if 1 != len(collisions) || false == strings.HasPrefix(collisions[0], `module "twin" registered at `) || false == strings.Contains(collisions[0], "application_module_test.go") {
         t.Fatalf("expected one module line naming the caller, got %v", collisions)
     }
@@ -793,7 +793,7 @@ func TestRefuseDuplicateModules_RaisesTheReportNamingBothSpellings(t *testing.T)
         t.Fatalf("expected the report to panic with an error, got %v", recovered)
     }
 
-    collisions, _ := exception.LogContext(report, exception.LogContextConfig{})["collisions"].([]string)
+    collisions, _ := exception.LogContext(report, exception.LogContextOptions{})["collisions"].([]string)
     if 1 != len(collisions) || false == strings.HasPrefix(collisions[0], `module "Twin" registered at `) || false == strings.HasSuffix(collisions[0], `, already registered as "twin"`) {
         t.Fatalf("expected one module line naming both spellings, got %v", collisions)
     }

@@ -40,7 +40,7 @@ func (instance *closedQueueTransport) Ack(runtimeInstance containercontract.Runt
     return nil
 }
 
-func (instance *closedQueueTransport) Nack(runtimeInstance containercontract.Runtime, envelope messagebuscontract.Envelope, config messagebuscontract.NackConfig) error {
+func (instance *closedQueueTransport) Nack(runtimeInstance containercontract.Runtime, envelope messagebuscontract.Envelope, options messagebuscontract.NackOptions) error {
     return nil
 }
 
@@ -255,9 +255,9 @@ func (instance *recordingNackTransport) Ack(runtimeInstance containercontract.Ru
     return nil
 }
 
-func (instance *recordingNackTransport) Nack(runtimeInstance containercontract.Runtime, envelope messagebuscontract.Envelope, config messagebuscontract.NackConfig) error {
+func (instance *recordingNackTransport) Nack(runtimeInstance containercontract.Runtime, envelope messagebuscontract.Envelope, options messagebuscontract.NackOptions) error {
     instance.nackCount++
-    instance.nackRequeue = config.Requeue
+    instance.nackRequeue = options.Requeue
     instance.nackEnvelope = envelope
     return nil
 }
@@ -280,7 +280,7 @@ func (instance *alwaysFailingTransport) Ack(runtimeInstance containercontract.Ru
     return nil
 }
 
-func (instance *alwaysFailingTransport) Nack(runtimeInstance containercontract.Runtime, envelope messagebuscontract.Envelope, config messagebuscontract.NackConfig) error {
+func (instance *alwaysFailingTransport) Nack(runtimeInstance containercontract.Runtime, envelope messagebuscontract.Envelope, options messagebuscontract.NackOptions) error {
     return nil
 }
 
@@ -600,9 +600,9 @@ func (instance *contextAwareTransport) Ack(runtimeInstance containercontract.Run
     return instance.ackErr
 }
 
-func (instance *contextAwareTransport) Nack(runtimeInstance containercontract.Runtime, envelope messagebuscontract.Envelope, config messagebuscontract.NackConfig) error {
+func (instance *contextAwareTransport) Nack(runtimeInstance containercontract.Runtime, envelope messagebuscontract.Envelope, options messagebuscontract.NackOptions) error {
     instance.nackCalls++
-    instance.nackRequeue = config.Requeue
+    instance.nackRequeue = options.Requeue
     instance.nackEnvelope = envelope
     instance.nackErr = runtimeInstance.Context().Err()
 
@@ -890,7 +890,7 @@ func TestDispatchSafely_ATypedNilPanicIsAnsweredWithoutACause(t *testing.T) {
         t.Fatalf("expected the recovered value carried as for a non-error panic, got %v", melodyErr.Context())
     }
 
-    _ = exception.LogContext(dispatchErr, exception.LogContextConfig{})
+    _ = exception.LogContext(dispatchErr, exception.LogContextOptions{})
 }
 
 type typedNilAckPanickingTransport struct {
@@ -1358,8 +1358,8 @@ func (instance valueTransport) Ack(runtimeInstance containercontract.Runtime, en
     return instance.inner.Ack(runtimeInstance, envelope)
 }
 
-func (instance valueTransport) Nack(runtimeInstance containercontract.Runtime, envelope messagebuscontract.Envelope, config messagebuscontract.NackConfig) error {
-    return instance.inner.Nack(runtimeInstance, envelope, config)
+func (instance valueTransport) Nack(runtimeInstance containercontract.Runtime, envelope messagebuscontract.Envelope, options messagebuscontract.NackOptions) error {
+    return instance.inner.Nack(runtimeInstance, envelope, options)
 }
 
 func (instance valueTransport) CloseWithContext(closeContext context.Context) error {

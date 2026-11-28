@@ -502,8 +502,8 @@ func TestEnsureArchiveMigratedNamesTheArchiveSetAndTheStepOverADatabaseThatRefus
         t.Fatalf("expected the driver's refusal to stay the cause, got %v", ensureErr)
     }
 
-    if "archive" != exception.LogContext(ensureErr, exception.LogContextConfig{})["set"] || "db:archive:unlock" != exception.LogContext(ensureErr, exception.LogContextConfig{})["unlockCommand"] {
-        t.Fatalf("expected the context to carry the set and its unlock command, got %v", exception.LogContext(ensureErr, exception.LogContextConfig{}))
+    if "archive" != exception.LogContext(ensureErr, exception.LogContextOptions{})["set"] || "db:archive:unlock" != exception.LogContext(ensureErr, exception.LogContextOptions{})["unlockCommand"] {
+        t.Fatalf("expected the context to carry the set and its unlock command, got %v", exception.LogContext(ensureErr, exception.LogContextOptions{}))
     }
 }
 
@@ -557,8 +557,8 @@ func TestEnsureMigratedNamesTheSetWhenTheLockWaitIsCancelled(t *testing.T) {
         t.Fatalf("expected the application's own exception around the cancellation, got %T: %v", ensureErr, ensureErr)
     }
 
-    if "waiting for the migration lock" != exception.LogContext(ensureErr, exception.LogContextConfig{})["step"] {
-        t.Fatalf("expected the step named, got %v", exception.LogContext(ensureErr, exception.LogContextConfig{}))
+    if "waiting for the migration lock" != exception.LogContext(ensureErr, exception.LogContextOptions{})["step"] {
+        t.Fatalf("expected the step named, got %v", exception.LogContext(ensureErr, exception.LogContextOptions{}))
     }
 }
 
@@ -772,11 +772,11 @@ func TestEnsureMigratedRefusesALockInsertTheDatabaseDeniesAtOnce(t *testing.T) {
     if 50*time.Millisecond < cost {
         t.Fatalf("expected the refusal at once, not after a wait, got %v", cost)
     }
-    if "taking the migration lock" != exception.LogContext(ensureErr, exception.LogContextConfig{})["step"] {
-        t.Fatalf("expected the step named, got %v", exception.LogContext(ensureErr, exception.LogContextConfig{}))
+    if "taking the migration lock" != exception.LogContext(ensureErr, exception.LogContextOptions{})["step"] {
+        t.Fatalf("expected the step named, got %v", exception.LogContext(ensureErr, exception.LogContextOptions{}))
     }
-    if _, namesTheLocksTable := exception.LogContext(ensureErr, exception.LogContextConfig{})["locksTable"]; true == namesTheLocksTable {
-        t.Fatalf("expected no held-lock refusal, got %v", exception.LogContext(ensureErr, exception.LogContextConfig{}))
+    if _, namesTheLocksTable := exception.LogContext(ensureErr, exception.LogContextOptions{})["locksTable"]; true == namesTheLocksTable {
+        t.Fatalf("expected no held-lock refusal, got %v", exception.LogContext(ensureErr, exception.LogContextOptions{}))
     }
     if false == errors.Is(ensureErr, denied) {
         t.Fatalf("expected the driver's refusal to stay the cause, got %v", ensureErr)
@@ -805,8 +805,8 @@ func TestEnsureArchiveMigratedRefusesALockInsertTheDatabaseDeniesAtOnce(t *testi
     if 50*time.Millisecond < cost {
         t.Fatalf("expected the refusal at once, not after a wait, got %v", cost)
     }
-    if "taking the migration lock" != exception.LogContext(ensureErr, exception.LogContextConfig{})["step"] || "archive" != exception.LogContext(ensureErr, exception.LogContextConfig{})["set"] {
-        t.Fatalf("expected the archive set and the step named, got %v", exception.LogContext(ensureErr, exception.LogContextConfig{}))
+    if "taking the migration lock" != exception.LogContext(ensureErr, exception.LogContextOptions{})["step"] || "archive" != exception.LogContext(ensureErr, exception.LogContextOptions{})["set"] {
+        t.Fatalf("expected the archive set and the step named, got %v", exception.LogContext(ensureErr, exception.LogContextOptions{}))
     }
 }
 
@@ -831,8 +831,8 @@ func TestEnsureArchiveMigratedWaitsForALockRowThatExists(t *testing.T) {
     if nil == ensureErr {
         t.Fatal("expected the held lock to refuse once the window is spent")
     }
-    if migrationLocksTable != exception.LogContext(ensureErr, exception.LogContextConfig{})["locksTable"] {
-        t.Fatalf("expected the held-lock refusal naming the locks table, got %v", exception.LogContext(ensureErr, exception.LogContextConfig{}))
+    if migrationLocksTable != exception.LogContext(ensureErr, exception.LogContextOptions{})["locksTable"] {
+        t.Fatalf("expected the held-lock refusal naming the locks table, got %v", exception.LogContext(ensureErr, exception.LogContextOptions{}))
     }
 }
 
@@ -882,11 +882,11 @@ func TestEnsureMigratedRefusesATransientLockRefusalThatOutlivesTheWindow(t *test
     refuseLockInsertTimes(recorder, refusal, 1<<30)
 
     ensureErr := EnsureMigrated(context.Background(), database)
-    if nil == ensureErr || "taking the migration lock through the retry window" != exception.LogContext(ensureErr, exception.LogContextConfig{})["step"] {
+    if nil == ensureErr || "taking the migration lock through the retry window" != exception.LogContext(ensureErr, exception.LogContextOptions{})["step"] {
         t.Fatalf("expected the transient refusal to be reported once the window passed, got %v", ensureErr)
     }
-    if _, namesTheLocksTable := exception.LogContext(ensureErr, exception.LogContextConfig{})["locksTable"]; true == namesTheLocksTable {
-        t.Fatalf("expected no held-lock refusal, got %v", exception.LogContext(ensureErr, exception.LogContextConfig{}))
+    if _, namesTheLocksTable := exception.LogContext(ensureErr, exception.LogContextOptions{})["locksTable"]; true == namesTheLocksTable {
+        t.Fatalf("expected no held-lock refusal, got %v", exception.LogContext(ensureErr, exception.LogContextOptions{}))
     }
     if false == errors.Is(ensureErr, refusal) {
         t.Fatalf("expected the driver's refusal to stay the cause, got %v", ensureErr)
@@ -914,8 +914,8 @@ func TestEnsureMigratedAnswersTheContextThatEndedDuringTheLockInsert(t *testing.
     if false == errors.Is(ensureErr, context.Canceled) {
         t.Fatalf("expected the context's error, got %v", ensureErr)
     }
-    if "waiting for the migration lock" != exception.LogContext(ensureErr, exception.LogContextConfig{})["step"] {
-        t.Fatalf("expected the ended context wrapped as the wait, not refused as the lock step, got %v", exception.LogContext(ensureErr, exception.LogContextConfig{}))
+    if "waiting for the migration lock" != exception.LogContext(ensureErr, exception.LogContextOptions{})["step"] {
+        t.Fatalf("expected the ended context wrapped as the wait, not refused as the lock step, got %v", exception.LogContext(ensureErr, exception.LogContextOptions{}))
     }
 }
 

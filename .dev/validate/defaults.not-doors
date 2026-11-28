@@ -15,6 +15,7 @@ integrations/amqp/v4.ModuleConfig.ConnectionBootFailure ~ hardens only: the zero
 integrations/amqp/v4.ModuleConfig.ConnectionBuiltAtBoot ~ moves the dial into Boot; off dials at first use, nothing guarded
 integrations/aws/s3/v4.BucketCheckConfig.BootFailure ~ hardens only: the zero value warns, the other mode fails the boot
 integrations/aws/s3/v4.BucketCheckConfig.Enabled ~ turns an extra boot check on; off checks nothing the default checked
+integrations/bunorm/migrate/v4.RunnerOptions.NoColor ~ colour of the per-query lines, nothing guarded
 integrations/bunorm/v4.ProviderDefinition.IsDefault ~ selects the default connection among the registered ones
 integrations/bunorm/v4/audit.EntityOptions.CaptureDeleteBeforeImage ~ widens the trail: the delete is recorded either way, on it carries the row's values too
 integrations/bunorm/v4/audit.RecorderConfig.OwnsStorage ~ ownership of a close: who closes the storage, nothing guarded
@@ -29,11 +30,16 @@ integrations/websocket/v4.StreamHandlerConfig.BinaryWrites ~ the frame type of a
 v4/application.ApplicationConfig.ContainerTeardownSequential ~ the order of the teardown, waves or one by one; every service is closed either way
 v4/cache.ManagerConfig.OwnsBackend ~ ownership of a close: who closes the backend, nothing guarded
 v4/cache/contract.CounterOptions.RefreshTtl ~ the expiry policy of a counter the caller asks for, fixed or sliding
+v4/cli/output.Options.Format ~ the rendering of a command's output, chosen per run
+v4/cli/output.Options.NoColor ~ colour of the output, nothing guarded
+v4/cli/output.Options.Order ~ the order of a listing, chosen per run
+v4/cli/output.Options.Quiet ~ the detail of the output, nothing guarded
+v4/cli/output.Options.Verbose ~ the detail of the output, nothing guarded
 v4/container.ContainerConfig.TeardownSequential ~ the order of the teardown, waves or one by one; every service is closed either way
 v4/container/contract.OverrideOptions.ClosedWithScope ~ ownership of a close: the scope closes the installed value, the root refuses it
 v4/container/contract.RegisterOptions.BootFailure ~ hardens only: the zero value warns, the other mode fails the boot
 v4/container/contract.RegisterOptions.BuiltAtBoot ~ moves the build into Boot; off builds at first use, nothing guarded
-v4/exception.FromErrorConfig.Level ~ the journal level of a record
+v4/exception.FromErrorOptions.Level ~ the journal level of a record
 v4/http/middleware/pipeline.HttpMiddlewareDefinition.ReplaceExisting ~ replaces a definition the same deployment declared, refused beside AllowDuplicates; no framework middleware is removed by it
 v4/http/static.Config.Mode ~ selects the file system, a directory or an embedded tree; both are confined the same way
 v4/http/static.Config.WeakEtag ~ the form of the validator, weak or strong
@@ -42,7 +48,7 @@ v4/logging.JsonLoggerConfig.MinLevel ~ the lowest level written; redaction appli
 v4/logging.RecoverOptions.PanicAgain ~ what the deferred recovery does with a panic it logged, chosen per call: nothing is guarded either way
 v4/mailer.SmtpConfig.ImplicitTls ~ selects TLS from the first byte in place of STARTTLS; neither form is plaintext, AllowPlaintext is the door
 v4/mailer.SmtpConfig.RequireAuthentication ~ hardens only: on refuses a send without a username, off is the default
-v4/messagebus/contract.NackConfig.Requeue ~ the outcome of one negative acknowledgement, chosen per call
+v4/messagebus/contract.NackOptions.Requeue ~ the outcome of one negative acknowledgement, chosen per call
 v4/security.CompiledFirewallConfig.AccessControlSource ~ the diagnostic of where a compiled firewall's access control came from
 v4/security.CompiledFirewallConfig.AccessDecisionManagerSource ~ the diagnostic of where a compiled firewall's decision manager came from
 v4/security.CompiledFirewallConfig.AccessDeniedHandlerSource ~ the diagnostic of where a compiled firewall's denied handler came from

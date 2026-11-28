@@ -45,7 +45,7 @@ func (instance *CategoryService) List(runtimeInstance melodycontainercontract.Ru
     categories, rememberErr := melodycache.Remember(
         melodycache.For(runtimeInstance, instance.cache),
         CacheKeyCategoryList,
-        melodycache.RememberConfig{
+        melodycache.RememberOptions{
             Ttl: melodybound.Of(entityCacheTtl),
         },
         func(flightRuntime melodycontainercontract.Runtime, _ *melodycache.RememberItem) ([]*entity.Category, error) {

@@ -65,7 +65,7 @@ func (instance *CatalogReportRefreshCommand) Run(runtimeInstance melodycontainer
         runtimeInstance,
         archiveLocker,
         archiveLockName,
-        melodylock.ExclusiveConfig{Ttl: melodybound.Of(archiveLockTtl)},
+        melodylock.ExclusiveOptions{Ttl: melodybound.Of(archiveLockTtl)},
         func(heldRuntime melodycontainercontract.Runtime) error {
             return instance.refresh(heldRuntime, reportService, exporter, writer, nil)
         },

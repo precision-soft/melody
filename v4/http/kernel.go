@@ -204,12 +204,12 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             }
 
             if nil != requestLogger {
-                requestLogger.Error("failed to close service container scope", exception.LogContext(scopeCloseErr, exception.LogContextConfig{}))
+                requestLogger.Error("failed to close service container scope", exception.LogContext(scopeCloseErr, exception.LogContextOptions{}))
 
                 return
             }
 
-            logging.EmergencyLogger().Error("failed to close service container scope", exception.LogContext(scopeCloseErr, exception.LogContextConfig{}))
+            logging.EmergencyLogger().Error("failed to close service container scope", exception.LogContext(scopeCloseErr, exception.LogContextOptions{}))
         }()
 
         /* the last guard, for the window between the scope opening and the main guard's installation, and for a panic inside the main guard */
@@ -239,7 +239,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                     "unhandled http error before the kernel recovery guard",
                     exception.LogContext(
                         recoveredErr,
-                        exception.LogContextConfig{
+                        exception.LogContextOptions{
                             Extra: exceptioncontract.Context{
                                 /* named explicitly: the emergency logger does not inject it */
                                 "requestId":  requestId,
@@ -503,7 +503,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                     "unhandled http error",
                     exception.LogContext(
                         recoveredErr,
-                        exception.LogContextConfig{
+                        exception.LogContextOptions{
                             Extra: exceptioncontract.Context{
                                 "method":     internal.BoundDiagnosticText(melodyRequest.HttpRequest().Method),
                                 "path":       internal.BoundDiagnosticText(melodyRequest.HttpRequest().URL.Path),
@@ -764,7 +764,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                 "a handler answered over a request form that failed to parse",
                 exception.LogContext(
                     formErr,
-                    exception.LogContextConfig{
+                    exception.LogContextOptions{
                         Extra: exceptioncontract.Context{
                             "method": internal.BoundDiagnosticText(request.Method),
                             "path":   internal.BoundDiagnosticText(request.URL.Path),
@@ -958,7 +958,7 @@ func (instance *Kernel) raiseException(
         closeDiscardedResponseBody(answered, requestLogger)
     }
 
-    return renderExceptionSafely(runtimeInstance, request, exceptionEvent.Err(), requestLogger, ExceptionRenderConfig{DebugMode: debugMode, UnavailableRetryAfter: bound.Of(exceptionEvent.UnavailableRetryAfter())})
+    return renderExceptionSafely(runtimeInstance, request, exceptionEvent.Err(), requestLogger, ExceptionRenderOptions{DebugMode: debugMode, UnavailableRetryAfter: bound.Of(exceptionEvent.UnavailableRetryAfter())})
 }
 
 func renderExceptionSafely(
@@ -966,7 +966,7 @@ func renderExceptionSafely(
     request httpcontract.Request,
     err error,
     requestLogger loggingcontract.Logger,
-    renderConfig ExceptionRenderConfig,
+    renderConfig ExceptionRenderOptions,
 ) (rendered httpcontract.Response) {
     defer func() {
         recoveredValue := recover()
@@ -978,7 +978,7 @@ func renderExceptionSafely(
             "the exception renderer panicked",
             exception.LogContext(
                 RecoverToError(recoveredValue),
-                exception.LogContextConfig{
+                exception.LogContextOptions{
                     Extra: exceptioncontract.Context{
                         "panicStack": string(debug.Stack()),
                     },
@@ -1030,7 +1030,7 @@ func (instance *Kernel) logEventDispatchError(
 
     logger.Error(
         message,
-        exception.LogContext(dispatchErr, exception.LogContextConfig{}),
+        exception.LogContext(dispatchErr, exception.LogContextOptions{}),
     )
 
     _ = exception.MarkLogged(dispatchErr)
@@ -1054,7 +1054,7 @@ func logHandlerError(requestLogger loggingcontract.Logger, message string, handl
 
     logContext := exception.LogContext(
         handlerErr,
-        exception.LogContextConfig{
+        exception.LogContextOptions{
             Extra: exceptioncontract.Context{
                 "method": internal.BoundDiagnosticText(method),
                 "path":   internal.BoundDiagnosticText(path),

@@ -756,7 +756,7 @@ func allowRequestUnderLimit(settings rateLimitSettings, runtimeInstance containe
     if nil != allowErr && false == exception.IsAlreadyLogged(allowErr) {
         logger := logging.LoggerFromRuntime(runtimeInstance)
         if nil != logger {
-            recordContext := exception.LogContext(allowErr, exception.LogContextConfig{Extra: exceptioncontract.Context{"key": key}})
+            recordContext := exception.LogContext(allowErr, exception.LogContextOptions{Extra: exceptioncontract.Context{"key": key}})
 
             if true == exception.ChainIs(allowErr, context.Canceled) || nil != runtimeInstance.Context().Err() {
                 logger.Warning("rate limiter call ended by the caller", recordContext)

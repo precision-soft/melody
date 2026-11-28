@@ -169,7 +169,7 @@ func TestHmacTokenSource_AShortSecretOfACustomProviderVerifiesNothing(t *testing
 
     cause := expectUnavailableToken(t, token)
 
-    context := exception.LogContext(cause, exception.LogContextConfig{})
+    context := exception.LogContext(cause, exception.LogContextOptions{})
     rendered := fmt.Sprintf("%v", context)
     for _, expected := range []string{"argument:secrets", "key-custom", "secretLength:19", "minimumLength:32"} {
         if false == strings.Contains(rendered, expected) {

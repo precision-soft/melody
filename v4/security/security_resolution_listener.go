@@ -203,5 +203,5 @@ func resolutionLogContext(
         context[key] = value
     }
 
-    return exception.LogContext(err, exception.LogContextConfig{Extra: context})
+    return exception.LogContext(err, exception.LogContextOptions{Extra: context})
 }

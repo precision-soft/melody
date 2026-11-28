@@ -7,8 +7,8 @@ import (
     "github.com/uptrace/bun/migrate"
 )
 
-func NewRollbackCommand(migrations *migrate.Migrations, options Options) *RollbackCommand {
-    return &RollbackCommand{base: newBaseCommand(migrations, options)}
+func NewRollbackCommand(migrations *migrate.Migrations, config CommandConfig) *RollbackCommand {
+    return &RollbackCommand{base: newBaseCommand(migrations, config)}
 }
 
 type RollbackCommand struct {
@@ -16,7 +16,7 @@ type RollbackCommand struct {
 }
 
 func (instance *RollbackCommand) Name() string {
-    return instance.base.options.CommandPrefix + ":rollback"
+    return instance.base.config.CommandPrefix + ":rollback"
 }
 
 func (instance *RollbackCommand) Description() string {
@@ -55,11 +55,11 @@ func (instance *RollbackCommand) runRollback(
 
     /* take the bun migration lock so two replicas rolling back concurrently cannot both act on the same applied group. */
     if lockErr := migrator.Lock(ctx); nil != lockErr {
-        return lockRefusal(ctx, db, lockErr, managerName, tables.locks, instance.base.options.CommandPrefix+":unlock")
+        return lockRefusal(ctx, db, lockErr, managerName, tables.locks, instance.base.config.CommandPrefix+":unlock")
     }
     /* the unlock failure becomes the command's verdict only when the rollback itself succeeded: a failed rollback keeps its own error, with the unlock failure printed beside it */
     defer func() {
-        unlockErr := unlockMigrations(ctx, migrator, outputInstance, tables.locks, instance.base.options.CommandPrefix+":unlock", instance.base.unlockTimeout)
+        unlockErr := unlockMigrations(ctx, migrator, outputInstance, tables.locks, instance.base.config.CommandPrefix+":unlock", instance.base.unlockTimeout)
         if nil == runErr && nil != unlockErr {
             runErr = unlockErr
         }

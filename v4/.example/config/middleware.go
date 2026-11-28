@@ -80,7 +80,7 @@ func journalUnderHandlerError(runtimeInstance melodycontainercontract.Runtime, h
         return trailErr
     }
 
-    examplejournal.LoggerOr(runtimeInstance, melodylogging.EmergencyLogger()).Error(message, melodyexception.LogContext(trailErr, melodyexception.LogContextConfig{}))
+    examplejournal.LoggerOr(runtimeInstance, melodylogging.EmergencyLogger()).Error(message, melodyexception.LogContext(trailErr, melodyexception.LogContextOptions{}))
 
     return handlerErr
 }

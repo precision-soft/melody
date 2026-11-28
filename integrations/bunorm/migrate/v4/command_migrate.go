@@ -16,9 +16,9 @@ import (
     "github.com/uptrace/bun/migrate"
 )
 
-func NewMigrateCommand(migrations *migrate.Migrations, options Options) *MigrateCommand {
+func NewMigrateCommand(migrations *migrate.Migrations, config CommandConfig) *MigrateCommand {
     return &MigrateCommand{
-        base: newBaseCommand(migrations, options),
+        base: newBaseCommand(migrations, config),
     }
 }
 
@@ -27,7 +27,7 @@ type MigrateCommand struct {
 }
 
 func (instance *MigrateCommand) Name() string {
-    return instance.base.options.CommandPrefix + ":migrate"
+    return instance.base.config.CommandPrefix + ":migrate"
 }
 
 func (instance *MigrateCommand) Description() string {
@@ -72,11 +72,11 @@ func (instance *MigrateCommand) runMigrate(
 
     /* take the bun migration lock so two replicas running the migrate command during a rolling deploy cannot both compute the same pending set and double-apply a migration. */
     if lockErr := migrator.Lock(ctx); nil != lockErr {
-        return lockRefusal(ctx, db, lockErr, managerName, tables.locks, instance.base.options.CommandPrefix+":unlock")
+        return lockRefusal(ctx, db, lockErr, managerName, tables.locks, instance.base.config.CommandPrefix+":unlock")
     }
     /* the unlock failure becomes the command's verdict only when the migration itself succeeded: a failed migration keeps its own error, with the unlock failure printed beside it */
     defer func() {
-        unlockErr := unlockMigrations(ctx, migrator, outputInstance, tables.locks, instance.base.options.CommandPrefix+":unlock", instance.base.unlockTimeout)
+        unlockErr := unlockMigrations(ctx, migrator, outputInstance, tables.locks, instance.base.config.CommandPrefix+":unlock", instance.base.unlockTimeout)
         if nil == runErr && nil != unlockErr {
             runErr = unlockErr
         }

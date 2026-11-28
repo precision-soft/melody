@@ -100,7 +100,7 @@ func migrateModuleConfig() bunormmigrate.ModuleConfig {
                 Migrations: migration.ArchiveMigrations,
             },
         },
-        Options: bunormmigrate.Options{
+        Command: bunormmigrate.CommandConfig{
             ManagerRegistryServiceId: serviceDatabaseRegistry,
             ManagerName:              databaseManagerName,
         },
@@ -127,7 +127,7 @@ func (instance *Module) registerHubShutdown(registrar httpShutdownRegistrar) {
         if nil != closeErr {
             hubShutdownWarningLogger().Warning(
                 "the server sent event hub did not close within the http shutdown budget",
-                melodyexception.LogContext(closeErr, melodyexception.LogContextConfig{}),
+                melodyexception.LogContext(closeErr, melodyexception.LogContextOptions{}),
             )
         }
     })

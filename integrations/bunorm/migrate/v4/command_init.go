@@ -7,9 +7,9 @@ import (
     "github.com/uptrace/bun/migrate"
 )
 
-func NewInitializeCommand(migrations *migrate.Migrations, options Options) *InitializeCommand {
+func NewInitializeCommand(migrations *migrate.Migrations, config CommandConfig) *InitializeCommand {
     return &InitializeCommand{
-        base: newBaseCommand(migrations, options),
+        base: newBaseCommand(migrations, config),
     }
 }
 
@@ -18,7 +18,7 @@ type InitializeCommand struct {
 }
 
 func (instance *InitializeCommand) Name() string {
-    return instance.base.options.CommandPrefix + ":init"
+    return instance.base.config.CommandPrefix + ":init"
 }
 
 func (instance *InitializeCommand) Description() string {

@@ -3569,8 +3569,8 @@ func TestManagerRegistry_AWaiterLeavesWhenItsOwnContextEndsAndTheOpenGoesOn(t *t
         t.Fatalf("expected the waiter to leave with its own cause, got %v, %v", waiter.manager, waiter.err)
     }
 
-    if "main" != exception.LogContext(waiter.err, exception.LogContextConfig{})["manager"] {
-        t.Fatalf("expected the departure to name the manager, got %v", exception.LogContext(waiter.err, exception.LogContextConfig{}))
+    if "main" != exception.LogContext(waiter.err, exception.LogContextOptions{})["manager"] {
+        t.Fatalf("expected the departure to name the manager, got %v", exception.LogContext(waiter.err, exception.LogContextOptions{}))
     }
 
     lateWaiterAnswered := managerInBackground(registry, testRuntime())
@@ -3911,7 +3911,7 @@ func TestManagerRegistry_ADoneWaiterOfAnOpenItsOpenerLeftAnswersItsOwnRefusal(t 
         t.Fatalf("expected the waiter's own refusal, got %v, %v", waiter.manager, waiter.err)
     }
 
-    if "main" != exception.LogContext(waiter.err, exception.LogContextConfig{})["manager"] {
+    if "main" != exception.LogContext(waiter.err, exception.LogContextOptions{})["manager"] {
         t.Fatalf("expected the waiter's refusal to name the manager, got %v", waiter.err)
     }
 

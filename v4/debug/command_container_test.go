@@ -65,7 +65,7 @@ func TestResolveErrorContextJson_RedactsStackOnMarshalFailure(t *testing.T) {
 
     result := resolveErrorContextJson(
         resolveErr,
-        output.Option{
+        output.Options{
             Format:         output.FormatTable,
             VerbosityLevel: 0,
         },
@@ -306,8 +306,8 @@ func TestMain(mainInstance *testing.M) {
     os.Exit(mainInstance.Run())
 }
 
-func fullVerbosityTableOption() output.Option {
-    return output.Option{
+func fullVerbosityTableOption() output.Options {
+    return output.Options{
         Format:         output.FormatTable,
         VerbosityLevel: 3,
     }
@@ -535,7 +535,7 @@ func TestResolveErrorContextJson_RedactsInsideANamedNestedMapOnMarshalFailure(t 
 
     result := resolveErrorContextJson(
         exception.NewError("boom", contextValue, nil),
-        output.Option{
+        output.Options{
             Format:         output.FormatTable,
             VerbosityLevel: 0,
         },
@@ -558,7 +558,7 @@ func TestResolveErrorContextJson_DoesNotTruncateTheJsonFormat(t *testing.T) {
 
     jsonResult := resolveErrorContextJson(
         resolveErr,
-        output.Option{
+        output.Options{
             Format:         output.FormatJson,
             VerbosityLevel: 0,
         },
@@ -574,7 +574,7 @@ func TestResolveErrorContextJson_DoesNotTruncateTheJsonFormat(t *testing.T) {
 
     tableResult := resolveErrorContextJson(
         resolveErr,
-        output.Option{
+        output.Options{
             Format:         output.FormatTable,
             VerbosityLevel: 0,
         },
@@ -753,7 +753,7 @@ func TestBuildContainerServiceTableRows_HealthyService_OccupiesOneRow(t *testing
             Name:     "service.mailer",
             TypeName: "*mailer.Mailer",
         },
-        output.Option{Format: output.FormatTable},
+        output.Options{Format: output.FormatTable},
     )
 
     if 1 != len(rows) {
@@ -773,7 +773,7 @@ func TestBuildContainerServiceTableRows_FailingService_ReplacesTheTypeAndRepeats
             ErrorString:     "dial refused",
             ErrorCauseChain: []string{"connection refused"},
         },
-        output.Option{Format: output.FormatTable, VerbosityLevel: 3},
+        output.Options{Format: output.FormatTable, VerbosityLevel: 3},
     )
 
     if 2 > len(rows) {
@@ -916,7 +916,7 @@ func TestResolveErrorContextJson_FullVerbosityShowsTheNoiseKeys(t *testing.T) {
 
     fullResult := resolveErrorContextJson(
         resolveErr,
-        output.Option{
+        output.Options{
             Format:         output.FormatTable,
             VerbosityLevel: 3,
         },
@@ -928,7 +928,7 @@ func TestResolveErrorContextJson_FullVerbosityShowsTheNoiseKeys(t *testing.T) {
 
     plainResult := resolveErrorContextJson(
         resolveErr,
-        output.Option{
+        output.Options{
             Format:         output.FormatTable,
             VerbosityLevel: 2,
         },
@@ -1301,7 +1301,7 @@ func TestResolveErrorContextJson_AContextTheEncoderRefusesStaysParseableJson(t *
         errors.New("connection refused"),
     )
 
-    jsonOption := output.Option{Format: output.FormatJson}
+    jsonOption := output.Options{Format: output.FormatJson}
 
     rendered := resolveErrorContextJson(resolveErr, jsonOption)
 
@@ -1319,7 +1319,7 @@ func TestResolveErrorContextJson_AContextTheEncoderRefusesStaysParseableJson(t *
         t.Fatalf("expected the rendering to name the culprit, got %q", rendered)
     }
 
-    tableRendered := resolveErrorContextJson(resolveErr, output.Option{Format: output.FormatTable, TableMaxWidth: bound.Of(400)})
+    tableRendered := resolveErrorContextJson(resolveErr, output.Options{Format: output.FormatTable, TableMaxWidth: bound.Of(400)})
     if true == strings.HasPrefix(tableRendered, "{\"raw\"") {
         t.Fatalf("expected the table to keep the bare rendering, got %q", tableRendered)
     }

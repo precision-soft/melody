@@ -391,7 +391,7 @@ func TestNewRoot_RefusesAnErrorCauseChainDepthOutsideItsRuleNamingTheField(t *te
         t.Run(name, func(t *testing.T) {
             defer func() {
                 recoveredErr, isError := recover().(error)
-                if false == isError || "RootConfig.ErrorCauseChainDepth" != exception.LogContext(recoveredErr, exception.LogContextConfig{})["field"] {
+                if false == isError || "RootConfig.ErrorCauseChainDepth" != exception.LogContext(recoveredErr, exception.LogContextOptions{})["field"] {
                     t.Fatalf("expected the refusal naming RootConfig.ErrorCauseChainDepth, got %v", recoveredErr)
                 }
             }()

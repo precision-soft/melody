@@ -25,8 +25,8 @@ func isNilInterfaceValue(value any) bool {
     }
 }
 
-/* LogContextConfig declares what LogContext adds to the error's own context: Extra merged on top, its keys winning, nil adding nothing, and CauseChainDepth, how many links of the cause chain and of the cause context chain are written, 8 when left out, at least 1, a negative one refused. */
-type LogContextConfig struct {
+/* LogContextOptions declares what LogContext adds to the error's own context: Extra merged on top, its keys winning, nil adding nothing, and CauseChainDepth, how many links of the cause chain and of the cause context chain are written, 8 when left out, at least 1, a negative one refused. */
+type LogContextOptions struct {
     Extra           exceptioncontract.Context
     CauseChainDepth int
 }
@@ -34,16 +34,16 @@ type LogContextConfig struct {
 const logContextDefaultCauseChainDepth = 8
 
 /* LogContext assembles the loggable context of an error: its message under "error", the context of the nearest ContextProvider in its chain, the cause chain walked from the error's own wrap link to the configured depth, and the configured extra merged on top; a nil or typed-nil error answers a copy of the extra. A negative depth panics naming the field, before the error is read. */
-func LogContext(err error, config LogContextConfig) exceptioncontract.Context {
-    causeChainDepth := resolveLogContextCauseChainDepth(config.CauseChainDepth)
+func LogContext(err error, options LogContextOptions) exceptioncontract.Context {
+    causeChainDepth := resolveLogContextCauseChainDepth(options.CauseChainDepth)
 
     if true == isNilInterfaceValue(err) {
-        if nil == config.Extra {
+        if nil == options.Extra {
             return nil
         }
 
-        copiedExtra := make(exceptioncontract.Context, len(config.Extra))
-        for key, value := range config.Extra {
+        copiedExtra := make(exceptioncontract.Context, len(options.Extra))
+        for key, value := range options.Extra {
             copiedExtra[key] = value
         }
 
@@ -95,7 +95,7 @@ func LogContext(err error, config LogContextConfig) exceptioncontract.Context {
         }
     }
 
-    for key, value := range config.Extra {
+    for key, value := range options.Extra {
         context[key] = value
     }
 
@@ -108,7 +108,7 @@ func resolveLogContextCauseChainDepth(causeChainDepth int) int {
             NewError(
                 "the limit is below its minimum",
                 exceptioncontract.Context{
-                    "field":   "LogContextConfig.CauseChainDepth",
+                    "field":   "LogContextOptions.CauseChainDepth",
                     "value":   strconv.Itoa(causeChainDepth),
                     "minimum": "1",
                 },
@@ -145,8 +145,8 @@ func FromError(err error) *Error {
     return NewError(renderErrorText(err), context, err)
 }
 
-/* FromErrorConfig declares what FromErrorAs sets on the error it wraps; the zero value sets nothing. */
-type FromErrorConfig struct {
+/* FromErrorOptions declares what FromErrorAs sets on the error it wraps; the zero value sets nothing. */
+type FromErrorOptions struct {
     /* Level is the level of the record; error when left out. */
     Level loggingcontract.Level
 
@@ -154,9 +154,9 @@ type FromErrorConfig struct {
     Context exceptioncontract.Context
 }
 
-/* FromErrorAs wraps err as FromError does, at the config's level and with its context; a config with no level and an empty context answers exactly what FromError answers, an *Error passed through unchanged, and any other config always wraps. */
-func FromErrorAs(err error, config FromErrorConfig) *Error {
-    if "" == config.Level && 0 == len(config.Context) {
+/* FromErrorAs wraps err as FromError does, at the options' level and with their context; options with no level and an empty context answer exactly what FromError answers, an *Error passed through unchanged, and any other config always wraps. */
+func FromErrorAs(err error, options FromErrorOptions) *Error {
+    if "" == options.Level && 0 == len(options.Context) {
         return FromError(err)
     }
 
@@ -164,7 +164,7 @@ func FromErrorAs(err error, config FromErrorConfig) *Error {
         return nil
     }
 
-    level := config.Level
+    level := options.Level
     if "" == level {
         level = loggingcontract.LevelError
     }
@@ -178,7 +178,7 @@ func FromErrorAs(err error, config FromErrorConfig) *Error {
         }
     }
 
-    for key, value := range config.Context {
+    for key, value := range options.Context {
         mergedContext[key] = value
     }
 

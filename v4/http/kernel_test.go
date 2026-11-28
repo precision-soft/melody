@@ -4273,7 +4273,7 @@ func TestKernel_TheWaitersOfOneRememberFlightFileOneRecordEach(t *testing.T) {
             _, rememberErr := cache.Remember(
                 cache.For(runtime.WithContext(runtimeInstance, context.Background()), cacheManager),
                 "the-flight",
-                cache.RememberConfig{Ttl: bound.Of(time.Minute)},
+                cache.RememberOptions{Ttl: bound.Of(time.Minute)},
                 func(_ containercontract.Runtime, _ *cache.RememberItem) (any, error) {
                     <-release
 
@@ -5037,7 +5037,7 @@ func TestRenderExceptionSafely_ARendererThatPanicsAnswersTheStatic500(t *testing
     request := httptest.NewRequest(nethttp.MethodGet, "/fail", nil)
     request.Header.Set("Accept", "application/json")
 
-    response := renderExceptionSafely(newTestRuntime(), testhelper.NewHttpTestRequestFromHttpRequest(request), failure, capture, ExceptionRenderConfig{})
+    response := renderExceptionSafely(newTestRuntime(), testhelper.NewHttpTestRequestFromHttpRequest(request), failure, capture, ExceptionRenderOptions{})
 
     if nethttp.StatusInternalServerError != response.StatusCode() {
         t.Fatalf("expected the static 500, got %d", response.StatusCode())
@@ -5668,7 +5668,7 @@ func TestNewKernel_RefusesAnUnavailableRetryAfterOutsideItsRule(t *testing.T) {
         t.Run(name, func(t *testing.T) {
             defer func() {
                 recoveredErr, isError := recover().(error)
-                if false == isError || "KernelConfig.UnavailableRetryAfter" != exception.LogContext(recoveredErr, exception.LogContextConfig{})["field"] {
+                if false == isError || "KernelConfig.UnavailableRetryAfter" != exception.LogContext(recoveredErr, exception.LogContextOptions{})["field"] {
                     t.Fatalf("expected a refusal naming KernelConfig.UnavailableRetryAfter, got %v", recoveredErr)
                 }
             }()

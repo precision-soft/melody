@@ -606,7 +606,7 @@ var shieldedCloseStep = logging.RunShieldedStep
 func (instance *Application) closeAndExitOnFailure() {
     var closeErr error
 
-    completed := shieldedCloseStep("closing the application", logging.ShieldedStepConfig{Budget: instance.teardownBudget()}, func(closeContext context.Context) {
+    completed := shieldedCloseStep("closing the application", logging.ShieldedStepOptions{Budget: instance.teardownBudget()}, func(closeContext context.Context) {
         closeErr = instance.close(closeContext)
     })
 
@@ -646,13 +646,13 @@ func (instance *Application) teardownBudget() (teardownBudget bound.Duration) {
 }
 
 /* exitConfig answers the panic path's step before os.Exit, the teardown under its configured budget; an unlimited budget is left out, so the hook runs under the exit handler's default, since this path must still reach os.Exit. */
-func (instance *Application) exitConfig() logging.ExitConfig {
+func (instance *Application) exitConfig() logging.ExitOptions {
     beforeExitBudget := instance.teardownBudget()
     if true == beforeExitBudget.IsUnlimited() {
         beforeExitBudget = bound.Duration{}
     }
 
-    return logging.ExitConfig{
+    return logging.ExitOptions{
         BeforeExit:       instance.closeBeforeExit,
         BeforeExitBudget: beforeExitBudget,
     }

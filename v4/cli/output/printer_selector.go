@@ -5,7 +5,7 @@ import (
 )
 
 /* SelectPrinter answers the printer the option asks for, refusing a TableMaxWidth its rule does not admit whatever the format. */
-func SelectPrinter(option Option) (Printer, error) {
+func SelectPrinter(option Options) (Printer, error) {
     normalized := normalizeOptionChoices(option)
 
     tableMaxWidth, resolveErr := bound.Resolve(normalized.TableMaxWidth, OptionTableMaxWidthRule())

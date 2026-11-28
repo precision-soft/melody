@@ -209,7 +209,7 @@ func TestMigrate_WithholdsTheServerMessageOfADuplicateOrAnIncorrectString(t *tes
             t.Fatalf("%d: expected the refused write reported", number)
         }
 
-        rendered := fmt.Sprintf("%v %+v", runErr, exception.LogContext(runErr, exception.LogContextConfig{}))
+        rendered := fmt.Sprintf("%v %+v", runErr, exception.LogContext(runErr, exception.LogContextOptions{}))
         if true == strings.Contains(rendered, "the secret plaintext") || false == strings.Contains(rendered, fmt.Sprint(number)) {
             t.Fatalf("%d: expected the number without the quoted value, got %s", number, rendered)
         }
@@ -289,7 +289,7 @@ func TestMigrateDecrypt_LiveAStrictSessionRefusesTheLossyWriteAndKeepsTheSeal(t 
         t.Fatalf("expected the write refused by the server, the judge passing, got %v", runErr)
     }
 
-    rendered := fmt.Sprintf("%v %+v", runErr, exception.LogContext(runErr, exception.LogContextConfig{}))
+    rendered := fmt.Sprintf("%v %+v", runErr, exception.LogContext(runErr, exception.LogContextOptions{}))
     /* MySQL 8.4 answers this write with 3988, a conversion impossible for the parameter, whose message names no value; a 1366 or a 1062, which do quote it, is withheld by the run */
     if true == strings.Contains(rendered, "secret") || true == strings.Contains(rendered, "\\xC5") {
         t.Fatalf("expected no plaintext in the refusal, got %s", rendered)
@@ -406,7 +406,7 @@ func TestMigrate_AWithheldRefusalKeepsItsTypedNumber(t *testing.T) {
 
     var serverErr *mysql.MySQLError
     chain := strings.Join(exception.BuildCauseChain(runErr, 8), ": ")
-    if false == errors.As(runErr, &serverErr) || 1644 != serverErr.Number || true == strings.Contains(chain+fmt.Sprint(exception.LogContext(runErr, exception.LogContextConfig{})), "plain") || false == strings.Contains(chain, "1644 (45000)") {
+    if false == errors.As(runErr, &serverErr) || 1644 != serverErr.Number || true == strings.Contains(chain+fmt.Sprint(exception.LogContext(runErr, exception.LogContextOptions{})), "plain") || false == strings.Contains(chain, "1644 (45000)") {
         t.Fatalf("expected the number typed and in the chain, the value withheld, got %s", chain)
     }
 }

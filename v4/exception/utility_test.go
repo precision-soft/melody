@@ -48,17 +48,17 @@ func TestFromError_WrapsNonExceptionError(t *testing.T) {
 }
 
 func TestFromErrorAs_TheZeroConfigAnswersWhatFromErrorAnswers(t *testing.T) {
-    if nil != FromErrorAs(nil, FromErrorConfig{}) {
+    if nil != FromErrorAs(nil, FromErrorOptions{}) {
         t.Fatalf("expected nil for nil")
     }
 
     own := NewWarning("own", nil, nil)
-    if own != FromErrorAs(own, FromErrorConfig{}) {
+    if own != FromErrorAs(own, FromErrorOptions{}) {
         t.Fatalf("expected an *Error passed through unchanged")
     }
 
     plainErr := errors.New("plain")
-    wrapped := FromErrorAs(plainErr, FromErrorConfig{})
+    wrapped := FromErrorAs(plainErr, FromErrorOptions{})
     if loggingcontract.LevelError != wrapped.Level() || "plain" != wrapped.Message() || false == errors.Is(wrapped, plainErr) {
         t.Fatalf("expected the plain error wrapped at error level, got %v %q", wrapped.Level(), wrapped.Message())
     }
@@ -67,7 +67,7 @@ func TestFromErrorAs_TheZeroConfigAnswersWhatFromErrorAnswers(t *testing.T) {
 func TestFromErrorAs_AContextAloneWrapsAtErrorLevel(t *testing.T) {
     own := NewWarning("own", nil, nil)
 
-    wrapped := FromErrorAs(own, FromErrorConfig{Context: exceptioncontract.Context{"orderId": 7}})
+    wrapped := FromErrorAs(own, FromErrorOptions{Context: exceptioncontract.Context{"orderId": 7}})
     if own == wrapped {
         t.Fatalf("expected a config that sets something to wrap even an *Error")
     }
@@ -255,7 +255,7 @@ func TestBuildCauseContextChain_MixedErrorTypes_IncludesNilForPlainErrors(t *tes
 }
 
 func TestLogContext_NilError_ReturnsNil(t *testing.T) {
-    context := LogContext(nil, LogContextConfig{})
+    context := LogContext(nil, LogContextOptions{})
     if nil != context {
         t.Fatalf("expected nil context for nil error")
     }
@@ -263,7 +263,7 @@ func TestLogContext_NilError_ReturnsNil(t *testing.T) {
 
 func TestLogContext_NilErrorWithExtra_ReturnsMerged(t *testing.T) {
     extra := map[string]any{"key": "value"}
-    context := LogContext(nil, LogContextConfig{Extra: extra})
+    context := LogContext(nil, LogContextOptions{Extra: extra})
     if nil == context {
         t.Fatalf("expected non-nil context")
     }
@@ -276,7 +276,7 @@ func TestLogContext_NilErrorWithExtra_ReturnsMerged(t *testing.T) {
 func TestLogContext_PlainError_SetsErrorField(t *testing.T) {
     plainErr := errors.New("plain error")
 
-    context := LogContext(plainErr, LogContextConfig{})
+    context := LogContext(plainErr, LogContextOptions{})
     if nil == context {
         t.Fatalf("expected non-nil context")
     }
@@ -290,7 +290,7 @@ func TestLogContext_ExceptionErrorWithCause_IncludesCauseChain(t *testing.T) {
     rootErr := errors.New("root cause")
     exceptionErr := NewError("main error", nil, rootErr)
 
-    context := LogContext(exceptionErr, LogContextConfig{})
+    context := LogContext(exceptionErr, LogContextOptions{})
     if nil == context {
         t.Fatalf("expected non-nil context")
     }
@@ -325,7 +325,7 @@ func TestLogContext_WithExtra_MergesExtraIntoContext(t *testing.T) {
     exceptionErr := NewError("msg", map[string]any{"existing": "yes", "shared": "error"}, nil)
     extra := map[string]any{"extra": "value", "shared": "extra"}
 
-    context := LogContext(exceptionErr, LogContextConfig{Extra: extra})
+    context := LogContext(exceptionErr, LogContextOptions{Extra: extra})
     if nil == context {
         t.Fatalf("expected non-nil context")
     }
@@ -346,7 +346,7 @@ func TestLogContext_WithExtra_MergesExtraIntoContext(t *testing.T) {
 func TestLogContext_TypedNilError_ReturnsNil(t *testing.T) {
     typedNil := (*Error)(nil)
 
-    if nil != LogContext(typedNil, LogContextConfig{}) {
+    if nil != LogContext(typedNil, LogContextOptions{}) {
         t.Fatalf("expected nil context for a typed-nil error")
     }
 }
@@ -355,7 +355,7 @@ func TestLogContext_TypedNilErrorWithExtra_ReturnsACopyOfTheExtra(t *testing.T) 
     typedNil := (*HttpException)(nil)
     extra := map[string]any{"first": 1, "second": 2}
 
-    context := LogContext(typedNil, LogContextConfig{Extra: extra})
+    context := LogContext(typedNil, LogContextOptions{Extra: extra})
 
     if 2 != len(context) || 1 != context["first"] || 2 != context["second"] {
         t.Fatalf("expected the extra answered, got %v", context)
@@ -380,7 +380,7 @@ func (instance *nilProviderWrapper) Unwrap() error {
 }
 
 func TestLogContext_TypedNilProviderInChain_DoesNotPanic(t *testing.T) {
-    context := LogContext(&nilProviderWrapper{}, LogContextConfig{})
+    context := LogContext(&nilProviderWrapper{}, LogContextOptions{})
 
     if "wrapper" != context["error"] {
         t.Fatalf("expected the error key, got %v", context)
@@ -399,7 +399,7 @@ func TestLogContext_CauseChainDepth_IsEightWhenLeftOutAndCutsBothChains(t *testi
     topErr := fmt.Errorf("top: %w", causeErr)
 
     for depth, expectedLinks := range map[int]int{0: 8, 1: 1, 2: 2, 10: 10, 20: 12} {
-        context := LogContext(topErr, LogContextConfig{CauseChainDepth: depth})
+        context := LogContext(topErr, LogContextOptions{CauseChainDepth: depth})
 
         causeChain, _ := context["causeChain"].([]string)
         causeContextChain, _ := context["causeContextChain"].([]map[string]any)
@@ -430,12 +430,12 @@ func TestLogContext_ANegativeCauseChainDepth_PanicsNamingTheFieldBeforeTheErrorI
                     t.Fatalf("%s: unexpected message %q", name, refusal.Message())
                 }
 
-                if "LogContextConfig.CauseChainDepth" != refusal.Context()["field"] || "-1" != refusal.Context()["value"] || "1" != refusal.Context()["minimum"] {
+                if "LogContextOptions.CauseChainDepth" != refusal.Context()["field"] || "-1" != refusal.Context()["value"] || "1" != refusal.Context()["minimum"] {
                     t.Fatalf("%s: expected the field, the value and the minimum named, got %v", name, refusal.Context())
                 }
             }()
 
-            LogContext(err, LogContextConfig{Extra: exceptioncontract.Context{"key": "value"}, CauseChainDepth: -1})
+            LogContext(err, LogContextOptions{Extra: exceptioncontract.Context{"key": "value"}, CauseChainDepth: -1})
         }()
     }
 }
@@ -451,7 +451,7 @@ func TestLogContext_ACallersMergedExtra_KeepsItsOrder(t *testing.T) {
         }
     }
 
-    context := LogContext(errors.New("boom"), LogContextConfig{Extra: merged})
+    context := LogContext(errors.New("boom"), LogContextOptions{Extra: merged})
 
     if 1 != context["first"] || 2 != context["second"] {
         t.Fatalf("expected both extras merged, got %v", context)
@@ -471,7 +471,7 @@ func TestLogContext_HttpExceptionWrappingError_KeepsTheInnerErrorAndItsContext(t
     )
     topErr := NewHttpError(500, HttpErrorConfig{Message: "boom", Cause: innerErr})
 
-    context := LogContext(topErr, LogContextConfig{})
+    context := LogContext(topErr, LogContextOptions{})
 
     if "inner" != context["cause"] {
         t.Fatalf("expected the wrapped error as the cause, got %v", context["cause"])
@@ -521,7 +521,7 @@ func TestFromError_TypedNilProviderInChain_DoesNotPanic(t *testing.T) {
 func TestFromErrorAs_ALevel_TypedNil_ReturnsNil(t *testing.T) {
     typedNil := (*HttpException)(nil)
 
-    if nil != FromErrorAs(typedNil, FromErrorConfig{Level: loggingcontract.LevelWarning}) {
+    if nil != FromErrorAs(typedNil, FromErrorOptions{Level: loggingcontract.LevelWarning}) {
         t.Fatalf("expected nil for a typed-nil error")
     }
 }
@@ -529,7 +529,7 @@ func TestFromErrorAs_ALevel_TypedNil_ReturnsNil(t *testing.T) {
 func TestFromErrorAs_ALevelAndAContext_TypedNil_ReturnsNil(t *testing.T) {
     typedNil := (*Error)(nil)
 
-    if nil != FromErrorAs(typedNil, FromErrorConfig{Level: loggingcontract.LevelWarning, Context: nil}) {
+    if nil != FromErrorAs(typedNil, FromErrorOptions{Level: loggingcontract.LevelWarning, Context: nil}) {
         t.Fatalf("expected nil for a typed-nil error")
     }
 }
@@ -541,19 +541,19 @@ func TestIsNilInterfaceValue_PlainNil_AnswersTrue(t *testing.T) {
 }
 
 func TestLogContext_NilExtra_AddsNothingOnBothPaths(t *testing.T) {
-    onlyNilExtra := LogContext(nil, LogContextConfig{})
+    onlyNilExtra := LogContext(nil, LogContextOptions{})
 
     if nil != onlyNilExtra {
         t.Fatalf("expected nil when the extra is nil, got %v", onlyNilExtra)
     }
 
-    emptyExtra := LogContext(nil, LogContextConfig{Extra: exceptioncontract.Context{}})
+    emptyExtra := LogContext(nil, LogContextOptions{Extra: exceptioncontract.Context{}})
 
     if nil == emptyExtra || 0 != len(emptyExtra) {
         t.Fatalf("expected an empty copy of an empty extra, got %v", emptyExtra)
     }
 
-    withError := LogContext(errors.New("boom"), LogContextConfig{})
+    withError := LogContext(errors.New("boom"), LogContextOptions{})
 
     if 1 != len(withError) || "boom" != withError["error"] {
         t.Fatalf("expected the error's context alone beside a nil extra, got %v", withError)
@@ -570,7 +570,7 @@ func TestLogContext_ProviderContextCannotOverwriteTheErrorKey(t *testing.T) {
         nil,
     )
 
-    context := LogContext(err, LogContextConfig{})
+    context := LogContext(err, LogContextOptions{})
 
     if "the real message" != context["error"] {
         t.Fatalf("expected the error's own message under the error key, got %v", context["error"])
@@ -631,7 +631,7 @@ func TestErrorUtilities_ValueTypedError_IsNotReadAsNil(t *testing.T) {
         t.Fatalf("expected a struct-valued error not to read as nil")
     }
 
-    context := LogContext(valueError{message: "boom"}, LogContextConfig{})
+    context := LogContext(valueError{message: "boom"}, LogContextOptions{})
 
     if "boom" != context["error"] {
         t.Fatalf("expected the value-typed error to be described, got %v", context)
@@ -647,7 +647,7 @@ func TestErrorUtilities_ValueTypedError_IsNotReadAsNil(t *testing.T) {
 func TestFromErrorAs_ALevel_CarriesTheRequestedLevelAndWrapsTheError(t *testing.T) {
     foreignError := errors.New("foreign")
 
-    converted := FromErrorAs(foreignError, FromErrorConfig{Level: loggingcontract.LevelInfo})
+    converted := FromErrorAs(foreignError, FromErrorOptions{Level: loggingcontract.LevelInfo})
 
     if nil == converted {
         t.Fatalf("expected a converted error")
@@ -669,7 +669,7 @@ func TestFromErrorAs_ALevel_CarriesTheRequestedLevelAndWrapsTheError(t *testing.
 func TestFromErrorAs_ALevel_TakesTheContextOfTheProviderInTheChain(t *testing.T) {
     inner := NewError("inner", map[string]any{"serviceName": "service.mailer"}, nil)
 
-    converted := FromErrorAs(fmt.Errorf("wrapped: %w", inner), FromErrorConfig{Level: loggingcontract.LevelWarning})
+    converted := FromErrorAs(fmt.Errorf("wrapped: %w", inner), FromErrorOptions{Level: loggingcontract.LevelWarning})
 
     if nil == converted {
         t.Fatalf("expected a converted error")
@@ -696,7 +696,7 @@ func TestFromErrorAs_ALevelAndAContext_MergesTheProviderContextUnderTheGivenOne(
 
     converted := FromErrorAs(
         fmt.Errorf("wrapped: %w", inner),
-        FromErrorConfig{
+        FromErrorOptions{
             Level: loggingcontract.LevelEmergency,
             Context: map[string]any{
                 "attempt": 2,
@@ -727,7 +727,7 @@ func TestFromErrorAs_ALevelAndAContext_MergesTheProviderContextUnderTheGivenOne(
 }
 
 func TestFromErrorAs_ALevelAndAContext_WithoutProviderOrContext_StillConverts(t *testing.T) {
-    converted := FromErrorAs(errors.New("plain"), FromErrorConfig{Level: loggingcontract.LevelDebug, Context: nil})
+    converted := FromErrorAs(errors.New("plain"), FromErrorOptions{Level: loggingcontract.LevelDebug, Context: nil})
 
     if nil == converted {
         t.Fatalf("expected a converted error")
@@ -757,7 +757,7 @@ func TestFromError_TakesTheContextOfTheProviderInTheChain(t *testing.T) {
 }
 
 func TestFromErrorAs_TypedNilProviderInChain_DoNotPanic(t *testing.T) {
-    withLevel := FromErrorAs(&nilProviderWrapper{}, FromErrorConfig{Level: loggingcontract.LevelWarning})
+    withLevel := FromErrorAs(&nilProviderWrapper{}, FromErrorOptions{Level: loggingcontract.LevelWarning})
 
     if nil == withLevel || "wrapper" != withLevel.Message() {
         t.Fatalf("expected the wrapper to convert, got %v", withLevel)
@@ -765,7 +765,7 @@ func TestFromErrorAs_TypedNilProviderInChain_DoNotPanic(t *testing.T) {
 
     withContext := FromErrorAs(
         &nilProviderWrapper{},
-        FromErrorConfig{
+        FromErrorOptions{
             Level:   loggingcontract.LevelWarning,
             Context: map[string]any{"key": "value"},
         },
@@ -917,7 +917,7 @@ func TestIsAlreadyLogged_TypedNilCarriesNoMarkAndDoesNotPanic(t *testing.T) {
 }
 
 func TestLogContext_ContainsAPanickingErrorMessage(t *testing.T) {
-    logContext := LogContext(&panickingTextError{}, LogContextConfig{})
+    logContext := LogContext(&panickingTextError{}, LogContextOptions{})
 
     errorText, isString := logContext["error"].(string)
     if false == isString {
@@ -1067,7 +1067,7 @@ func TestLogContext_AJoinedCauseReachesTheRecord(t *testing.T) {
         errors.Join(firstCause, secondCause),
     )
 
-    context := LogContext(top, LogContextConfig{})
+    context := LogContext(top, LogContextOptions{})
 
     causeChain, isChain := context["causeChain"].([]string)
     if false == isChain {
@@ -1102,7 +1102,7 @@ func TestLogContext_ABareJoinIsWalkedAsItsBranches(t *testing.T) {
         NewError("the second destination refused", exceptioncontract.Context{"destination": "b"}, nil),
     )
 
-    context := LogContext(joined, LogContextConfig{})
+    context := LogContext(joined, LogContextOptions{})
 
     causeChain, isChain := context["causeChain"].([]string)
     if false == isChain || 2 != len(causeChain) {
@@ -1157,7 +1157,7 @@ func (instance *contextPanicProviderError) Context() exceptioncontract.Context {
 func TestLogContext_AProviderWhoseContextPanicsIsContained(t *testing.T) {
     foreignErr := &contextPanicProviderError{}
 
-    logContext := LogContext(foreignErr, LogContextConfig{})
+    logContext := LogContext(foreignErr, LogContextOptions{})
     if nil == logContext {
         t.Fatalf("expected the record to survive the panicking context")
     }
@@ -1167,7 +1167,7 @@ func TestLogContext_AProviderWhoseContextPanicsIsContained(t *testing.T) {
     }
 
     wrapped := NewError("wrapper", nil, foreignErr)
-    wrappedContext := LogContext(wrapped, LogContextConfig{})
+    wrappedContext := LogContext(wrapped, LogContextOptions{})
     if nil == wrappedContext {
         t.Fatalf("expected the record of the wrapper to survive the cause's panicking context")
     }
@@ -1205,7 +1205,7 @@ func TestFromError_AnErrorWhoseMessagePanicsIsStillWrapped(t *testing.T) {
 }
 
 func TestFromErrorAs_ALevel_AnErrorWhoseMessagePanicsIsStillWrapped(t *testing.T) {
-    wrapped := FromErrorAs(panickingMessageError{}, FromErrorConfig{Level: loggingcontract.LevelWarning})
+    wrapped := FromErrorAs(panickingMessageError{}, FromErrorOptions{Level: loggingcontract.LevelWarning})
 
     if nil == wrapped || "error message panicked: Error() panics" != wrapped.Message() {
         t.Fatalf("expected the recovered message, got %v", wrapped)
@@ -1213,7 +1213,7 @@ func TestFromErrorAs_ALevel_AnErrorWhoseMessagePanicsIsStillWrapped(t *testing.T
 }
 
 func TestFromErrorAs_ALevelAndAContext_AnErrorWhoseMessagePanicsIsStillWrapped(t *testing.T) {
-    wrapped := FromErrorAs(panickingMessageError{}, FromErrorConfig{Level: loggingcontract.LevelWarning, Context: exceptioncontract.Context{"key": "value"}})
+    wrapped := FromErrorAs(panickingMessageError{}, FromErrorOptions{Level: loggingcontract.LevelWarning, Context: exceptioncontract.Context{"key": "value"}})
 
     if nil == wrapped || "error message panicked: Error() panics" != wrapped.Message() || "value" != wrapped.Context()["key"] {
         t.Fatalf("expected the recovered message with the context, got %v", wrapped)
@@ -1306,7 +1306,7 @@ func (panickingMarkError) MarkAsLogged() {
 }
 
 func TestLogContext_AnErrorWhoseUnwrapPanicsKeepsItsMessageAndNamesTheCut(t *testing.T) {
-    context := LogContext(panickingUnwrapError{}, LogContextConfig{})
+    context := LogContext(panickingUnwrapError{}, LogContextOptions{})
 
     if "a link whose Unwrap panics" != context["error"] {
         t.Fatalf("expected the message kept, got %#v", context["error"])
@@ -1318,7 +1318,7 @@ func TestLogContext_AnErrorWhoseUnwrapPanicsKeepsItsMessageAndNamesTheCut(t *tes
 }
 
 func TestLogContext_AJoinWhoseUnwrapPanicsKeepsItsMessageAndNamesTheCut(t *testing.T) {
-    context := LogContext(panickingJoinUnwrapError{}, LogContextConfig{})
+    context := LogContext(panickingJoinUnwrapError{}, LogContextOptions{})
 
     if "a join whose Unwrap panics" != context["error"] {
         t.Fatalf("expected the message kept, got %#v", context["error"])
@@ -1330,7 +1330,7 @@ func TestLogContext_AJoinWhoseUnwrapPanicsKeepsItsMessageAndNamesTheCut(t *testi
 }
 
 func TestLogContext_AnErrorWhoseAsPanicsKeepsItsMessage(t *testing.T) {
-    context := LogContext(panickingAsError{}, LogContextConfig{Extra: exceptioncontract.Context{"table": "audit"}})
+    context := LogContext(panickingAsError{}, LogContextOptions{Extra: exceptioncontract.Context{"table": "audit"}})
 
     if "a link whose As panics" != context["error"] || "audit" != context["table"] {
         t.Fatalf("expected the message and the extra context kept, got %#v", context)
@@ -1340,7 +1340,7 @@ func TestLogContext_AnErrorWhoseAsPanicsKeepsItsMessage(t *testing.T) {
 func TestLogContext_AWrapOverALinkWhoseUnwrapPanicsKeepsTheChainAboveTheCut(t *testing.T) {
     wrapped := NewError("audit storage panicked while saving the entry", nil, panickingUnwrapError{})
 
-    context := LogContext(wrapped, LogContextConfig{})
+    context := LogContext(wrapped, LogContextOptions{})
 
     causeChain, isChain := context["causeChain"].([]string)
     if false == isChain || 2 != len(causeChain) {
@@ -1364,10 +1364,10 @@ func TestFromError_AnErrorWhoseAsPanicsIsStillWrapped(t *testing.T) {
     for name, convert := range map[string]func(error) *Error{
         "FromError": FromError,
         "FromErrorAs with a level": func(err error) *Error {
-            return FromErrorAs(err, FromErrorConfig{Level: loggingcontract.LevelWarning})
+            return FromErrorAs(err, FromErrorOptions{Level: loggingcontract.LevelWarning})
         },
         "FromErrorAs with a level and a context": func(err error) *Error {
-            return FromErrorAs(err, FromErrorConfig{Level: loggingcontract.LevelWarning, Context: exceptioncontract.Context{"key": "value"}})
+            return FromErrorAs(err, FromErrorOptions{Level: loggingcontract.LevelWarning, Context: exceptioncontract.Context{"key": "value"}})
         },
     } {
         converted := convert(panickingAsError{})
@@ -1421,7 +1421,7 @@ func (instance *contextDoublyPanickingProviderError) Context() exceptioncontract
 }
 
 func TestLogContext_AContextPanicValueWhoseRenderingPanicsIsNamedByItsType(t *testing.T) {
-    logContext := LogContext(&contextDoublyPanickingProviderError{}, LogContextConfig{})
+    logContext := LogContext(&contextDoublyPanickingProviderError{}, LogContextOptions{})
 
     rendered, _ := logContext["contextPanicked"].(string)
     if false == strings.Contains(rendered, "contextDoublyPanickingValue") || false == strings.Contains(rendered, "rendering panicked") {
@@ -1460,13 +1460,13 @@ func (instance *receiverContextError) Context() exceptioncontract.Context {
 
 func TestContextDoors_ReadATypedNilProviderAsNoContextAndAPanickingOneAsPanicked(t *testing.T) {
     doors := map[string]func(err error) string{
-        "LogContext": func(err error) string { return fmt.Sprint(LogContext(err, LogContextConfig{})) },
+        "LogContext": func(err error) string { return fmt.Sprint(LogContext(err, LogContextOptions{})) },
         "FromError":  func(err error) string { return fmt.Sprint(FromError(err).Context()) },
         "FromErrorAs with a level": func(err error) string {
-            return fmt.Sprint(FromErrorAs(err, FromErrorConfig{Level: loggingcontract.LevelError}).Context())
+            return fmt.Sprint(FromErrorAs(err, FromErrorOptions{Level: loggingcontract.LevelError}).Context())
         },
         "FromErrorAs with a level and a context": func(err error) string {
-            return fmt.Sprint(FromErrorAs(err, FromErrorConfig{Level: loggingcontract.LevelError, Context: exceptioncontract.Context{"key": "value"}}).Context())
+            return fmt.Sprint(FromErrorAs(err, FromErrorOptions{Level: loggingcontract.LevelError, Context: exceptioncontract.Context{"key": "value"}}).Context())
         },
         "BuildCauseContextChain": func(err error) string { return fmt.Sprint(BuildCauseContextChain(err, 8)) },
     }
@@ -1510,7 +1510,7 @@ func TestChainDoors_ReturnOnAChainThatReachesItself(t *testing.T) {
         chain := newCyclicChain()
         _ = IsAlreadyLogged(chain)
         _ = MarkLogged(chain)
-        done <- LogContext(chain, LogContextConfig{})
+        done <- LogContext(chain, LogContextOptions{})
     }()
 
     select {
@@ -1631,7 +1631,7 @@ func TestChainDoors_ReturnOnACyclicChain(t *testing.T) {
             t.Error("expected the marked error")
         }
 
-        if nil == LogContext(chain, LogContextConfig{}) {
+        if nil == LogContext(chain, LogContextOptions{}) {
             t.Error("expected the context of the chain")
         }
 
@@ -1639,11 +1639,11 @@ func TestChainDoors_ReturnOnACyclicChain(t *testing.T) {
             t.Error("expected the error of the chain")
         }
 
-        if nil == FromErrorAs(chain, FromErrorConfig{Level: loggingcontract.LevelWarning}) {
+        if nil == FromErrorAs(chain, FromErrorOptions{Level: loggingcontract.LevelWarning}) {
             t.Error("expected the error of the chain at the config's level")
         }
 
-        if nil == FromErrorAs(chain, FromErrorConfig{Context: exceptioncontract.Context{"orderId": 7}}) {
+        if nil == FromErrorAs(chain, FromErrorOptions{Context: exceptioncontract.Context{"orderId": 7}}) {
             t.Error("expected the error of the chain with the config's context")
         }
     })

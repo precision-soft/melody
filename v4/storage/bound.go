@@ -71,12 +71,12 @@ func (instance Bound) Delete(key string, options storagecontract.DeleteOptions) 
     return instance.storageInstance.Delete(instance.runtimeInstance, key, options)
 }
 
-func (instance Bound) PresignedUrl(key string, config storagecontract.PresignConfig) (string, error) {
+func (instance Bound) PresignedUrl(key string, options storagecontract.PresignOptions) (string, error) {
     if nilErr := instance.refuseNilStorage(); nil != nilErr {
         return "", nilErr
     }
 
-    return instance.storageInstance.PresignedUrl(instance.runtimeInstance, key, config)
+    return instance.storageInstance.PresignedUrl(instance.runtimeInstance, key, options)
 }
 
 /* a typed-nil storage passes a plain comparison and panics on its first method call */

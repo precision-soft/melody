@@ -125,7 +125,7 @@ func (instance *recordingCloseTransport) Ack(runtimeInstance containercontract.R
     return nil
 }
 
-func (instance *recordingCloseTransport) Nack(runtimeInstance containercontract.Runtime, envelope messagebuscontract.Envelope, config messagebuscontract.NackConfig) error {
+func (instance *recordingCloseTransport) Nack(runtimeInstance containercontract.Runtime, envelope messagebuscontract.Envelope, options messagebuscontract.NackOptions) error {
     return nil
 }
 
@@ -173,7 +173,7 @@ func TestTransportsCloser_ClosesEveryTransportAndJoinsFailures(t *testing.T) {
         t.Fatalf("expected the failing transport's close error to surface")
     }
 
-    if logContext := exception.LogContext(closeErr, exception.LogContextConfig{}); "failing" != logContext["transport"] {
+    if logContext := exception.LogContext(closeErr, exception.LogContextOptions{}); "failing" != logContext["transport"] {
         t.Fatalf("expected the close error to name the failing transport, got context %v", logContext)
     }
 
@@ -202,7 +202,7 @@ func transportsNamedIn(closeErr error) map[string]bool {
 
     joined, isJoined := closeErr.(interface{ Unwrap() []error })
     if false == isJoined {
-        if transport, hasTransport := exception.LogContext(closeErr, exception.LogContextConfig{})["transport"].(string); true == hasTransport {
+        if transport, hasTransport := exception.LogContext(closeErr, exception.LogContextOptions{})["transport"].(string); true == hasTransport {
             named[transport] = true
         }
 
@@ -315,7 +315,7 @@ func TestTransportsCloser_APanickingCloseCarriesTheStackOfThePanic(t *testing.T)
         t.Fatalf("expected the panicking close to surface as a failure")
     }
 
-    panicStack, isString := exception.LogContext(closeErr, exception.LogContextConfig{})["panicStack"].(string)
+    panicStack, isString := exception.LogContext(closeErr, exception.LogContextOptions{})["panicStack"].(string)
     if false == isString || false == strings.Contains(panicStack, "closePanickingTransport") {
         t.Fatalf("expected the stack of the panic, through the transport's own Close, got %q", panicStack)
     }
@@ -330,7 +330,7 @@ func TestRegisterTransports_RefusesANilOrTypedNilEntryByName(t *testing.T) {
         func() {
             defer func() {
                 recovered := recover()
-                if nil == recovered || false == strings.Contains(exception.LogContext(recovered.(error), exception.LogContextConfig{})["error"].(string), "messagebus transport is nil") || name != exception.LogContext(recovered.(error), exception.LogContextConfig{})["name"] {
+                if nil == recovered || false == strings.Contains(exception.LogContext(recovered.(error), exception.LogContextOptions{})["error"].(string), "messagebus transport is nil") || name != exception.LogContext(recovered.(error), exception.LogContextOptions{})["name"] {
                     t.Fatalf("%s: expected the nil entry refused by name at registration, got %v", name, recovered)
                 }
             }()

@@ -115,7 +115,7 @@ func journalBudgetFailure(runtimeInstance melodycontainercontract.Runtime, messa
         return
     }
 
-    logger.Error(message, exception.LogContext(failureErr, exception.LogContextConfig{}))
+    logger.Error(message, exception.LogContext(failureErr, exception.LogContextOptions{}))
 }
 
 func (instance *SecondFactorBudget) carriesSecondFactor(request melodyhttpcontract.Request) bool {

@@ -153,8 +153,8 @@ func TestTableNameKeyRule_AdmitsAPlainIdentifierOfAtMost64Bytes(t *testing.T) {
             t.Fatalf("expected %q refused", refused)
         }
 
-        if KeyMigrationsTable != exception.LogContext(checkErr, exception.LogContextConfig{})["field"] {
-            t.Fatalf("expected the refusal of %q to name the key, got %v", refused, exception.LogContext(checkErr, exception.LogContextConfig{}))
+        if KeyMigrationsTable != exception.LogContext(checkErr, exception.LogContextOptions{})["field"] {
+            t.Fatalf("expected the refusal of %q to name the key, got %v", refused, exception.LogContext(checkErr, exception.LogContextOptions{}))
         }
     }
 }
@@ -190,7 +190,7 @@ func TestNewModule_RefusesKeyDefaultsThatAreNotTwoDifferentIdentifiers(t *testin
 
 func exceptionContextText(err error) string {
     text := ""
-    for key, value := range exception.LogContext(err, exception.LogContextConfig{}) {
+    for key, value := range exception.LogContext(err, exception.LogContextOptions{}) {
         if valueText, isText := value.(string); true == isText {
             text += key + "=" + valueText + " "
         }
@@ -218,12 +218,12 @@ func TestResolveTables_RefusesTwoEqualNamesAndAnUndeclaredBadName(t *testing.T) 
     database, _ := newFakeBunDatabase()
 
     _, equalErr := resolveTables(newRuntimeWithDatabaseAndParameters(t, database, map[string]string{ParameterMigrationsTable: "App", ParameterLocksTable: "app"}))
-    if nil == equalErr || KeyMigrationsTable != exception.LogContext(equalErr, exception.LogContextConfig{})["migrationsField"] || KeyLocksTable != exception.LogContext(equalErr, exception.LogContextConfig{})["locksField"] {
+    if nil == equalErr || KeyMigrationsTable != exception.LogContext(equalErr, exception.LogContextOptions{})["migrationsField"] || KeyLocksTable != exception.LogContext(equalErr, exception.LogContextOptions{})["locksField"] {
         t.Fatalf("expected two equal names refused naming both keys, got %v", equalErr)
     }
 
     _, badErr := resolveTables(newRuntimeWithDatabaseAndParameters(t, database, map[string]string{ParameterLocksTable: "locks; DROP TABLE users"}))
-    if nil == badErr || KeyLocksTable != exception.LogContext(badErr, exception.LogContextConfig{})["field"] {
+    if nil == badErr || KeyLocksTable != exception.LogContext(badErr, exception.LogContextOptions{})["field"] {
         t.Fatalf("expected a name outside the grammar refused naming its key, got %v", badErr)
     }
 }
@@ -282,8 +282,8 @@ func TestLockRefusal_NamesTheConfiguredLocksTable(t *testing.T) {
     }
 
     refusal := lockRefusal(context.Background(), database, errors.New("migrate: migrations table is already locked"), "primary", "app_migration_locks", "db:unlock")
-    if "app_migration_locks" != exception.LogContext(refusal, exception.LogContextConfig{})["locksTable"] || false == strings.Contains(refusal.Error(), "is held") {
-        t.Fatalf("expected the held lock answered on the configured table, got %v %v", refusal, exception.LogContext(refusal, exception.LogContextConfig{}))
+    if "app_migration_locks" != exception.LogContext(refusal, exception.LogContextOptions{})["locksTable"] || false == strings.Contains(refusal.Error(), "is held") {
+        t.Fatalf("expected the held lock answered on the configured table, got %v %v", refusal, exception.LogContext(refusal, exception.LogContextOptions{}))
     }
 }
 
@@ -314,9 +314,9 @@ func TestUnlockMigrations_NamesTheConfiguredLocksTable(t *testing.T) {
     unlocker := &recordingMigrationUnlocker{unlockError: errors.New("delete refused")}
     outputInstance, buffer := newBufferedOutput(true)
 
-    unlockErr := unlockMigrations(context.Background(), unlocker, outputInstance, "app_migration_locks", "db:unlock", optionsUnlockTimeoutRule.Default)
+    unlockErr := unlockMigrations(context.Background(), unlocker, outputInstance, "app_migration_locks", "db:unlock", commandConfigUnlockTimeoutRule.Default)
 
-    if nil == unlockErr || "app_migration_locks" != exception.LogContext(unlockErr, exception.LogContextConfig{})["locksTable"] {
+    if nil == unlockErr || "app_migration_locks" != exception.LogContext(unlockErr, exception.LogContextOptions{})["locksTable"] {
         t.Fatalf("expected the failed release to name the configured table, got %v", unlockErr)
     }
 

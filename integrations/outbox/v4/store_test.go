@@ -334,8 +334,8 @@ func TestStore_ClaimDueMessagesRefusesANonPositiveLimitBeforeAnyQuery(t *testing
     if "outbox claim limit must be positive" != claimErr.Error() {
         t.Fatalf("expected the refusal by name, got %v", claimErr)
     }
-    if 0 != exception.LogContext(claimErr, exception.LogContextConfig{})["limit"] {
-        t.Fatalf("expected the refused limit in the context, got %v", exception.LogContext(claimErr, exception.LogContextConfig{}))
+    if 0 != exception.LogContext(claimErr, exception.LogContextOptions{})["limit"] {
+        t.Fatalf("expected the refused limit in the context, got %v", exception.LogContext(claimErr, exception.LogContextOptions{}))
     }
 }
 
@@ -701,7 +701,7 @@ func TestStore_RequeueDeadRefusesMoreIdsThanItsLimit(t *testing.T) {
         t.Fatalf("expected more ids than the limit refused, got %v", requeueErr)
     }
 
-    logContext := exception.LogContext(requeueErr, exception.LogContextConfig{})
+    logContext := exception.LogContext(requeueErr, exception.LogContextOptions{})
     if "RequeueDeadOptions.Ids" != logContext["field"] {
         t.Fatalf("expected the refusal to name RequeueDeadOptions.Ids, got %v", logContext)
     }

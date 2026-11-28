@@ -33,7 +33,7 @@ func registerStorageService(registrar serviceRegistrar, client *minio.Client, bu
         melodystorage.ServiceStorage,
         func(resolver containercontract.Resolver) (storagecontract.Storage, error) {
             if true == bucketCheck.Enabled {
-                if ensureErr := EnsureBucket(resolver.Runtime(), client, bucket, EnsureBucketConfig{Region: bucketCheck.Region}); nil != ensureErr {
+                if ensureErr := EnsureBucket(resolver.Runtime(), client, bucket, EnsureBucketOptions{Region: bucketCheck.Region}); nil != ensureErr {
                     return nil, ensureErr
                 }
             }

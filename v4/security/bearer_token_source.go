@@ -65,7 +65,7 @@ func (instance *BearerTokenSource) Resolve(
 
         logger := logging.LoggerFromRuntime(runtimeInstance)
         if nil != logger {
-            logger.Info("bearer token rejected", exception.LogContext(validateErr, exception.LogContextConfig{}))
+            logger.Info("bearer token rejected", exception.LogContext(validateErr, exception.LogContextOptions{}))
         }
 
         return NewAnonymousToken(), nil
@@ -80,7 +80,7 @@ func (instance *BearerTokenSource) Resolve(
 
             logger := logging.LoggerFromRuntime(runtimeInstance)
             if nil != logger {
-                logger.Info("bearer token enrichment failed", exception.LogContext(enrichErr, exception.LogContextConfig{}))
+                logger.Info("bearer token enrichment failed", exception.LogContext(enrichErr, exception.LogContextOptions{}))
             }
 
             return NewAnonymousToken(), nil

@@ -316,7 +316,7 @@ func TestDispatchCommand_ASecondDispatchOfAMemoizingCommandReadsFreshState(t *te
     runtimeInstance := newTestRuntime(t)
 
     for _, arguments := range [][]string{{"probe", "--n=5", "--s=x"}, {"probe"}, {"probe", "--n=6"}} {
-        if runErr := DispatchCommand(context.Background(), command, runtimeInstance, arguments, nil, DispatchConfig{}); nil != runErr {
+        if runErr := DispatchCommand(context.Background(), command, runtimeInstance, arguments, nil, DispatchOptions{}); nil != runErr {
             t.Fatalf("expected %v to dispatch, got %v", arguments, runErr)
         }
     }
@@ -356,7 +356,7 @@ func TestDispatchCommand_OverlappingDispatchesOfAMemoizingCommandDoNotShareState
             defer wait.Done()
 
             arguments := []string{"probe", "--n=" + strings.Repeat("1", index), "--s=" + strings.Repeat("x", index)}
-            if runErr := DispatchCommand(context.Background(), command, runtimeInstance, arguments, nil, DispatchConfig{}); nil != runErr {
+            if runErr := DispatchCommand(context.Background(), command, runtimeInstance, arguments, nil, DispatchOptions{}); nil != runErr {
                 t.Errorf("expected %v to dispatch, got %v", arguments, runErr)
             }
         }(index)
@@ -389,7 +389,7 @@ func TestDispatchCommand_RefusesADefaultTheDeclaredValidatorRefuses(t *testing.T
     }
 
     testhelper.AssertPanicsWithError(t, func() {
-        _ = DispatchCommand(context.Background(), command, newTestRuntime(t), []string{"probe"}, nil, DispatchConfig{})
+        _ = DispatchCommand(context.Background(), command, newTestRuntime(t), []string{"probe"}, nil, DispatchOptions{})
     }, "cli flag default value is refused by the flag's own validator")
 }
 
@@ -414,7 +414,7 @@ func TestDispatchCommand_RunsOnARefusedDefaultWithoutValidateDefaults(t *testing
         },
     }
 
-    dispatchErr := DispatchCommand(context.Background(), command, newTestRuntime(t), []string{"probe"}, nil, DispatchConfig{})
+    dispatchErr := DispatchCommand(context.Background(), command, newTestRuntime(t), []string{"probe"}, nil, DispatchOptions{})
     if nil != dispatchErr {
         t.Fatalf("expected the run without the flag to succeed, got %v", dispatchErr)
     }
@@ -423,7 +423,7 @@ func TestDispatchCommand_RunsOnARefusedDefaultWithoutValidateDefaults(t *testing
         t.Fatalf("expected the zero default read, got %d", readLimit)
     }
 
-    dispatchErr = DispatchCommand(context.Background(), command, newTestRuntime(t), []string{"probe", "--limit=0"}, nil, DispatchConfig{})
+    dispatchErr = DispatchCommand(context.Background(), command, newTestRuntime(t), []string{"probe", "--limit=0"}, nil, DispatchOptions{})
     if nil == dispatchErr {
         t.Fatalf("expected the given value the validator refuses to fail the run")
     }

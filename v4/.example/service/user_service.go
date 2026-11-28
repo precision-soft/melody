@@ -47,7 +47,7 @@ func (instance *UserService) List(runtimeInstance melodycontainercontract.Runtim
     users, rememberErr := melodycache.Remember(
         melodycache.For(runtimeInstance, instance.cache),
         CacheKeyUserList,
-        melodycache.RememberConfig{
+        melodycache.RememberOptions{
             Ttl: melodybound.Of(entityCacheTtl),
         },
         func(flightRuntime melodycontainercontract.Runtime, _ *melodycache.RememberItem) ([]*entity.UserProfile, error) {

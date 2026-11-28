@@ -10,7 +10,7 @@ import (
 /* MetaConfig is what an envelope's meta is built from beside the command; a field left out is empty, and an empty Melody or Go version is the running binary's. */
 type MetaConfig struct {
     Arguments []string
-    Option    Option
+    Option    Options
     StartedAt time.Time
     Duration  time.Duration
     Version   Version

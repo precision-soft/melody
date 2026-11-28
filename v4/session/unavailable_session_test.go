@@ -37,8 +37,8 @@ func TestNewUnavailableSession_RefusesANilCause(t *testing.T) {
                     t.Fatalf("expected the nil cause refused, got %v", recoveredErr)
                 }
 
-                if "cause" != exception.LogContext(recoveredErr, exception.LogContextConfig{})["argument"] {
-                    t.Fatalf("expected the refusal to name the argument, got %v", exception.LogContext(recoveredErr, exception.LogContextConfig{}))
+                if "cause" != exception.LogContext(recoveredErr, exception.LogContextOptions{})["argument"] {
+                    t.Fatalf("expected the refusal to name the argument, got %v", exception.LogContext(recoveredErr, exception.LogContextOptions{}))
                 }
             }()
 

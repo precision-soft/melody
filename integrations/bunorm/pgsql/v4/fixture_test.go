@@ -95,8 +95,8 @@ func expectErrorNamingField(t *testing.T, err error, field string) {
         t.Fatalf("expected a refusal naming %s, got none", field)
     }
 
-    if field != exception.LogContext(err, exception.LogContextConfig{})["field"] {
-        t.Fatalf("expected the refusal to name %s, got %v: %v", field, exception.LogContext(err, exception.LogContextConfig{}), err)
+    if field != exception.LogContext(err, exception.LogContextOptions{})["field"] {
+        t.Fatalf("expected the refusal to name %s, got %v: %v", field, exception.LogContext(err, exception.LogContextOptions{}), err)
     }
 }
 

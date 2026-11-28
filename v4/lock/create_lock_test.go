@@ -16,7 +16,7 @@ func TestCreateLock_ALockerAnsweringNoLockIsRefusedNamingTheLock(t *testing.T) {
         t.Fatalf("expected no lock and the no-lock refusal, got %v %v", createdLock, createErr)
     }
 
-    if "job:none" != exception.LogContext(createErr, exception.LogContextConfig{})["name"] {
-        t.Fatalf("expected the refusal to name the lock, got %v", exception.LogContext(createErr, exception.LogContextConfig{}))
+    if "job:none" != exception.LogContext(createErr, exception.LogContextOptions{})["name"] {
+        t.Fatalf("expected the refusal to name the lock, got %v", exception.LogContext(createErr, exception.LogContextOptions{}))
     }
 }

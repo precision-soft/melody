@@ -10,7 +10,7 @@ import (
 
 type ModuleConfig struct {
     Migrations *migrate.Migrations
-    Options    Options
+    Command    CommandConfig
 
     /* Contexts declares additional per-database command families (db:<name>:migrate, ...) for multi-context binaries; it composes with the single-set form above, which keeps its unprefixed commands. */
     Contexts []ContextConfig
@@ -55,11 +55,11 @@ func (instance *Module) RegisterCliCommands(kernelInstance kernelcontract.Kernel
     commands := make([]clicontract.Command, 0)
 
     if nil != instance.config.Migrations {
-        commands = append(commands, RegisterCommands(instance.config.Migrations, instance.config.Options)...)
+        commands = append(commands, RegisterCommands(instance.config.Migrations, instance.config.Command)...)
     }
 
     if 0 < len(instance.config.Contexts) {
-        commands = append(commands, RegisterContextCommands(instance.config.Contexts, instance.config.Options)...)
+        commands = append(commands, RegisterContextCommands(instance.config.Contexts, instance.config.Command)...)
     }
 
     return commands

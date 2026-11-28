@@ -215,7 +215,7 @@ func TestTranslate_ACustomCatalogsMalformedPatternIsAnError(t *testing.T) {
     manager := NewManager(ManagerConfig{Catalogs: []translationcontract.Catalog{unvalidatedCatalog{locale: "en", message: "{g, select, male {he} female other {they}}"}}, FallbackLocales: []string{"en"}})
 
     for _, gender := range []string{"male", "female"} {
-        rendered, translateErr := manager.Translate("pronoun", translationcontract.TranslateConfig{Parameters: map[string]any{"g": gender}, Locale: "en"})
+        rendered, translateErr := manager.Translate("pronoun", translationcontract.TranslateOptions{Parameters: map[string]any{"g": gender}, Locale: "en"})
         if "" != rendered || nil == translateErr {
             t.Fatalf("expected an empty message and an error for %q, got %q, %v", gender, rendered, translateErr)
         }

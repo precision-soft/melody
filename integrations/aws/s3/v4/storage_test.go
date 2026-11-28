@@ -51,7 +51,7 @@ func TestObjectStorage_PutGetExistsPresignDelete(t *testing.T) {
     }
 
     bucket := "melody-test"
-    if ensureErr := EnsureBucket(bucketTestRuntime(), client, bucket, EnsureBucketConfig{}); nil != ensureErr {
+    if ensureErr := EnsureBucket(bucketTestRuntime(), client, bucket, EnsureBucketOptions{}); nil != ensureErr {
         t.Fatalf("ensure bucket: %v", ensureErr)
     }
 
@@ -89,12 +89,12 @@ func TestObjectStorage_PutGetExistsPresignDelete(t *testing.T) {
         t.Fatalf("expected Stat to answer the info Get answered, %+v, got %+v (%v)", object.Info, objectInfo, statErr)
     }
 
-    presigned, presignErr := store.PresignedUrl(runtimeInstance, key, storagecontract.PresignConfig{Expiry: bound.Of(5 * time.Minute)})
+    presigned, presignErr := store.PresignedUrl(runtimeInstance, key, storagecontract.PresignOptions{Expiry: bound.Of(5 * time.Minute)})
     if nil != presignErr || false == strings.Contains(presigned, key) {
         t.Fatalf("unexpected presigned url: %q %v", presigned, presignErr)
     }
 
-    uploadUrl, uploadPresignErr := store.PresignedUrl(runtimeInstance, key, storagecontract.PresignConfig{Method: http.MethodPut})
+    uploadUrl, uploadPresignErr := store.PresignedUrl(runtimeInstance, key, storagecontract.PresignOptions{Method: http.MethodPut})
     if nil != uploadPresignErr {
         t.Fatalf("presign upload: %v", uploadPresignErr)
     }
@@ -693,7 +693,7 @@ func TestObjectStorage_RejectedPutPreservesTheStoredObject(t *testing.T) {
     }
 
     bucket := "melody-test"
-    if ensureErr := EnsureBucket(bucketTestRuntime(), client, bucket, EnsureBucketConfig{}); nil != ensureErr {
+    if ensureErr := EnsureBucket(bucketTestRuntime(), client, bucket, EnsureBucketOptions{}); nil != ensureErr {
         t.Fatalf("ensure bucket: %v", ensureErr)
     }
 
@@ -763,7 +763,7 @@ func TestObjectStorage_StreamedPutAboveTheSpoolLimitIsAllOrNothing(t *testing.T)
     }
 
     bucket := "melody-test"
-    if ensureErr := EnsureBucket(bucketTestRuntime(), client, bucket, EnsureBucketConfig{}); nil != ensureErr {
+    if ensureErr := EnsureBucket(bucketTestRuntime(), client, bucket, EnsureBucketOptions{}); nil != ensureErr {
         t.Fatalf("ensure bucket: %v", ensureErr)
     }
 
@@ -994,7 +994,7 @@ func TestObjectStorage_CancelledMultipartPutLeavesNoIncompleteUpload(t *testing.
     }
 
     bucket := "melody-test"
-    if ensureErr := EnsureBucket(bucketTestRuntime(), client, bucket, EnsureBucketConfig{}); nil != ensureErr {
+    if ensureErr := EnsureBucket(bucketTestRuntime(), client, bucket, EnsureBucketOptions{}); nil != ensureErr {
         t.Fatalf("ensure bucket: %v", ensureErr)
     }
 
@@ -1102,8 +1102,8 @@ func TestStorage_RefusesAParentSegmentAtEveryDoorBeforeTouchingTheBucket(t *test
     putErr := store.Put(runtimeInstance, key, strings.NewReader("B"), 1, storagecontract.PutOptions{})
     deleteErr := store.Delete(runtimeInstance, key, storagecontract.DeleteOptions{})
     _, existsErr := melodystorage.Exists(melodystorage.For(runtimeInstance, store), key)
-    _, presignErr := store.PresignedUrl(runtimeInstance, key, storagecontract.PresignConfig{Expiry: bound.Of(time.Minute)})
-    _, unsupportedPresignErr := store.PresignedUrl(runtimeInstance, key, storagecontract.PresignConfig{Method: http.MethodDelete, Expiry: bound.UnlimitedDuration()})
+    _, presignErr := store.PresignedUrl(runtimeInstance, key, storagecontract.PresignOptions{Expiry: bound.Of(time.Minute)})
+    _, unsupportedPresignErr := store.PresignedUrl(runtimeInstance, key, storagecontract.PresignOptions{Method: http.MethodDelete, Expiry: bound.UnlimitedDuration()})
 
     for door, doorErr := range map[string]error{"Get": getErr, "Stat": statErr, "Put": putErr, "Delete": deleteErr, "Exists": existsErr, "PresignedUrl": presignErr, "PresignedUrl of a refused config": unsupportedPresignErr} {
         if nil == doorErr || false == strings.Contains(doorErr.Error(), `".." segment`) {
@@ -1225,7 +1225,7 @@ func TestObjectStorage_AStreamedSingleShotPutThatOverReadsLeavesTheObjectUntouch
     }
 
     bucket := "melody-test"
-    if ensureErr := EnsureBucket(bucketTestRuntime(), client, bucket, EnsureBucketConfig{}); nil != ensureErr {
+    if ensureErr := EnsureBucket(bucketTestRuntime(), client, bucket, EnsureBucketOptions{}); nil != ensureErr {
         t.Fatalf("ensure bucket: %v", ensureErr)
     }
 
@@ -1633,7 +1633,7 @@ func TestStorage_PresignedUrlSignsTheExpiryAsked(t *testing.T) {
     recorder := newScriptedObjectServer(t, http.StatusOK, http.StatusOK, "")
     store := recorder.newStorage(t)
 
-    for expected, config := range map[string]storagecontract.PresignConfig{
+    for expected, config := range map[string]storagecontract.PresignOptions{
         "900": {},
         "60":  {Expiry: bound.Of(time.Minute)},
     } {
@@ -1653,8 +1653,8 @@ func TestStorage_PresignedUrlSignsTheMethodAsked(t *testing.T) {
     store := newScriptedObjectServer(t, http.StatusOK, http.StatusOK, "").newStorage(t)
 
     for attempt := 0; attempt < 3; attempt = attempt + 1 {
-        download, downloadErr := store.PresignedUrl(newRuntime(), "reports/report.pdf", storagecontract.PresignConfig{Method: http.MethodGet})
-        upload, uploadErr := store.PresignedUrl(newRuntime(), "reports/report.pdf", storagecontract.PresignConfig{Method: http.MethodPut})
+        download, downloadErr := store.PresignedUrl(newRuntime(), "reports/report.pdf", storagecontract.PresignOptions{Method: http.MethodGet})
+        upload, uploadErr := store.PresignedUrl(newRuntime(), "reports/report.pdf", storagecontract.PresignOptions{Method: http.MethodPut})
         if nil != downloadErr || nil != uploadErr {
             t.Fatalf("presign: %v %v", downloadErr, uploadErr)
         }
@@ -1685,19 +1685,19 @@ func TestStorage_PresignedUrlRefusesBeforeSigning(t *testing.T) {
     recorder := newScriptedObjectServer(t, http.StatusOK, http.StatusOK, "")
     store := recorder.newStorage(t)
 
-    presigned, methodErr := store.PresignedUrl(newRuntime(), "reports/report.pdf", storagecontract.PresignConfig{Method: http.MethodDelete})
+    presigned, methodErr := store.PresignedUrl(newRuntime(), "reports/report.pdf", storagecontract.PresignOptions{Method: http.MethodDelete})
     if "" != presigned || false == exception.ChainIs(methodErr, storagecontract.ErrPresignUnsupported) {
         t.Fatalf("expected the method refused as unsupported, got %q %v", presigned, methodErr)
     }
 
     for name, expiry := range map[string]bound.Duration{"unlimited": bound.UnlimitedDuration(), "eight days": bound.Of(8 * 24 * time.Hour)} {
-        presigned, expiryErr := store.PresignedUrl(newRuntime(), "reports/report.pdf", storagecontract.PresignConfig{Expiry: expiry})
+        presigned, expiryErr := store.PresignedUrl(newRuntime(), "reports/report.pdf", storagecontract.PresignOptions{Expiry: expiry})
         if "" != presigned || nil == expiryErr || true == exception.ChainIs(expiryErr, storagecontract.ErrPresignUnsupported) {
             t.Fatalf("%s: expected the expiry refused, got %q %v", name, presigned, expiryErr)
         }
 
-        if "PresignConfig.Expiry" != exception.FromError(expiryErr).Context()["field"] {
-            t.Fatalf("%s: expected the refusal to name PresignConfig.Expiry, got %v", name, exception.FromError(expiryErr).Context())
+        if "PresignOptions.Expiry" != exception.FromError(expiryErr).Context()["field"] {
+            t.Fatalf("%s: expected the refusal to name PresignOptions.Expiry, got %v", name, exception.FromError(expiryErr).Context())
         }
     }
 
@@ -1793,7 +1793,7 @@ func TestStorage_EveryDoorRefusesANilRuntimeFirst(t *testing.T) {
 
     _, getErr := store.Get(nil, "a.txt", storagecontract.GetOptions{})
     _, statErr := store.Stat(nil, "a.txt", storagecontract.StatOptions{})
-    _, presignErr := store.PresignedUrl(nil, "a.txt", storagecontract.PresignConfig{})
+    _, presignErr := store.PresignedUrl(nil, "a.txt", storagecontract.PresignOptions{})
     for door, doorErr := range map[string]error{
         "Put":          store.Put(nil, "a.txt", strings.NewReader("x"), 1, storagecontract.PutOptions{}),
         "Get":          getErr,

@@ -208,7 +208,7 @@ func TestNewAsyncStorage_RefusesAFieldOutsideItsRuleNamingIt(t *testing.T) {
                     t.Fatalf("%s: expected a refusal", testCase.field)
                 }
 
-                if testCase.field != exception.LogContext(recoveredErr, exception.LogContextConfig{})["field"] {
+                if testCase.field != exception.LogContext(recoveredErr, exception.LogContextOptions{})["field"] {
                     t.Fatalf("expected the refusal to name %s, got %v", testCase.field, recoveredErr)
                 }
             }()

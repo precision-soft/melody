@@ -1049,8 +1049,8 @@ func TestConfigurationContainerCreationWaitersRejectsAValueBelowTheMinimumNaming
             t.Fatalf("expected the creation waiters %q to fail the boot", value)
         }
 
-        if ContainerCreationWaitersKey != exception.LogContext(configurationErr, exception.LogContextConfig{})["environmentKey"] {
-            t.Fatalf("expected the refusal of %q to name the key, got %v", value, exception.LogContext(configurationErr, exception.LogContextConfig{}))
+        if ContainerCreationWaitersKey != exception.LogContext(configurationErr, exception.LogContextOptions{})["environmentKey"] {
+            t.Fatalf("expected the refusal of %q to name the key, got %v", value, exception.LogContext(configurationErr, exception.LogContextOptions{}))
         }
     }
 }
@@ -1087,8 +1087,8 @@ func TestConfigurationContainerTeardownSequentialRejectsAValueThatIsNoBooleanNam
         t.Fatalf("expected the value to fail the configuration")
     }
 
-    if ContainerTeardownSequentialKey != exception.LogContext(configurationErr, exception.LogContextConfig{})["environmentKey"] {
-        t.Fatalf("expected the refusal to name the key, got %v", exception.LogContext(configurationErr, exception.LogContextConfig{}))
+    if ContainerTeardownSequentialKey != exception.LogContext(configurationErr, exception.LogContextOptions{})["environmentKey"] {
+        t.Fatalf("expected the refusal to name the key, got %v", exception.LogContext(configurationErr, exception.LogContextOptions{}))
     }
 }
 
@@ -1123,12 +1123,12 @@ func TestConfigurationScopeTeardownTimeoutRejectsAValueOutsideItsRuleNamingTheKe
             t.Fatalf("expected the scope teardown timeout %q to fail the boot", value)
         }
 
-        if "soon" != value && false == strings.Contains(fmt.Sprint(exception.LogContext(configurationErr, exception.LogContextConfig{})), "ContainerConfig.ScopeTeardownTimeout") {
-            t.Fatalf("expected the refusal of %q to name its rule, got %v", value, exception.LogContext(configurationErr, exception.LogContextConfig{}))
+        if "soon" != value && false == strings.Contains(fmt.Sprint(exception.LogContext(configurationErr, exception.LogContextOptions{})), "ContainerConfig.ScopeTeardownTimeout") {
+            t.Fatalf("expected the refusal of %q to name its rule, got %v", value, exception.LogContext(configurationErr, exception.LogContextOptions{}))
         }
 
-        if ScopeTeardownTimeoutKey != exception.LogContext(configurationErr, exception.LogContextConfig{})["environmentKey"] {
-            t.Fatalf("expected the refusal of %q to name the key, got %v", value, exception.LogContext(configurationErr, exception.LogContextConfig{}))
+        if ScopeTeardownTimeoutKey != exception.LogContext(configurationErr, exception.LogContextOptions{})["environmentKey"] {
+            t.Fatalf("expected the refusal of %q to name the key, got %v", value, exception.LogContext(configurationErr, exception.LogContextOptions{}))
         }
     }
 }
@@ -1158,7 +1158,7 @@ func TestConfigurationSessionEmptyOnOutageIsASwitch(t *testing.T) {
     }
 
     _, configurationErr := NewConfiguration(environment, "/tmp/melody", ConfigurationConfig{})
-    if nil == configurationErr || HttpSessionEmptyOnOutageKey != exception.LogContext(configurationErr, exception.LogContextConfig{})["environmentKey"] {
+    if nil == configurationErr || HttpSessionEmptyOnOutageKey != exception.LogContext(configurationErr, exception.LogContextOptions{})["environmentKey"] {
         t.Fatalf("expected the value refused naming the key, got %v", configurationErr)
     }
 }
@@ -1172,7 +1172,7 @@ func TestConfigurationSessionEmptyOnOutage_RefusesTrueNamingTheKey(t *testing.T)
         }
 
         _, configurationErr := NewConfiguration(environment, "/tmp/melody", ConfigurationConfig{})
-        if nil == configurationErr || HttpSessionEmptyOnOutageKey != exception.LogContext(configurationErr, exception.LogContextConfig{})["environmentKey"] {
+        if nil == configurationErr || HttpSessionEmptyOnOutageKey != exception.LogContext(configurationErr, exception.LogContextOptions{})["environmentKey"] {
             t.Fatalf("%s: expected the value refused naming the key, got %v", value, configurationErr)
         }
     }
@@ -1197,7 +1197,7 @@ func TestConfigurationStaticCacheDisabledReadsAnEmptyLineAsUnset(t *testing.T) {
     }
 
     _, configurationErr := NewConfiguration(environment, "/tmp/melody", ConfigurationConfig{})
-    if nil == configurationErr || StaticCacheDisabledKey != exception.LogContext(configurationErr, exception.LogContextConfig{})["environmentKey"] {
+    if nil == configurationErr || StaticCacheDisabledKey != exception.LogContext(configurationErr, exception.LogContextOptions{})["environmentKey"] {
         t.Fatalf("expected the value refused naming the key, got %v", configurationErr)
     }
 }

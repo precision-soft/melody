@@ -91,12 +91,12 @@ type Manager struct {
     catalogsByLocale map[string][]translationcontract.Catalog
 }
 
-func (instance *Manager) Translate(messageId string, config translationcontract.TranslateConfig) (string, error) {
-    pattern, resolvedLocale, found := instance.lookup(messageId, config.Domain, config.Locale)
+func (instance *Manager) Translate(messageId string, options translationcontract.TranslateOptions) (string, error) {
+    pattern, resolvedLocale, found := instance.lookup(messageId, options.Domain, options.Locale)
     if false == found {
         return messageId, exception.NewError(
             "translation message not found",
-            exceptioncontract.Context{"messageId": messageId, "domain": domainOrDefault(config.Domain), "locale": config.Locale},
+            exceptioncontract.Context{"messageId": messageId, "domain": domainOrDefault(options.Domain), "locale": options.Locale},
             ErrMessageNotFound,
         )
     }
@@ -106,17 +106,17 @@ func (instance *Manager) Translate(messageId string, config translationcontract.
         if defect := findPatternDefect([]rune(pattern), 0); nil != defect {
             return "", exception.NewError(
                 "translation message pattern is malformed",
-                malformedPatternContext(resolvedLocale, domainOrDefault(config.Domain), messageId, defect),
+                malformedPatternContext(resolvedLocale, domainOrDefault(options.Domain), messageId, defect),
                 nil,
             )
         }
     }
 
-    return formatMessage(pattern, config.Parameters, resolvedLocale), nil
+    return formatMessage(pattern, options.Parameters, resolvedLocale), nil
 }
 
-func (instance *Manager) HasMessage(messageId string, config translationcontract.TranslateConfig) bool {
-    _, _, found := instance.lookup(messageId, config.Domain, config.Locale)
+func (instance *Manager) HasMessage(messageId string, options translationcontract.TranslateOptions) bool {
+    _, _, found := instance.lookup(messageId, options.Domain, options.Locale)
     return found
 }
 

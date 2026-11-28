@@ -81,7 +81,7 @@ type recordingTransport struct {
 
     mutex    sync.Mutex
     acks     int
-    nacks    []melodymessagebuscontract.NackConfig
+    nacks    []melodymessagebuscontract.NackOptions
     receives int
 
     receiveContext context.Context
@@ -120,16 +120,16 @@ func (instance *recordingTransport) Ack(runtimeInstance melodycontainercontract.
     return instance.InMemoryTransport.Ack(runtimeInstance, envelope)
 }
 
-func (instance *recordingTransport) Nack(runtimeInstance melodycontainercontract.Runtime, envelope melodymessagebuscontract.Envelope, config melodymessagebuscontract.NackConfig) error {
+func (instance *recordingTransport) Nack(runtimeInstance melodycontainercontract.Runtime, envelope melodymessagebuscontract.Envelope, options melodymessagebuscontract.NackOptions) error {
     instance.mutex.Lock()
-    instance.nacks = append(instance.nacks, config)
+    instance.nacks = append(instance.nacks, options)
     instance.mutex.Unlock()
 
     if nil != instance.nackErr {
         return instance.nackErr
     }
 
-    return instance.InMemoryTransport.Nack(runtimeInstance, envelope, config)
+    return instance.InMemoryTransport.Nack(runtimeInstance, envelope, options)
 }
 
 type closedSubscription struct {

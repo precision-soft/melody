@@ -448,7 +448,7 @@ func (instance *consumeSession) consume(
             retried = withReplacedStamp(retried, DelayStamp{Delay: delay})
         }
 
-        if nackErr := transport.Nack(runtimeInstance, retried, messagebuscontract.NackConfig{Requeue: true}); nil != nackErr {
+        if nackErr := transport.Nack(runtimeInstance, retried, messagebuscontract.NackOptions{Requeue: true}); nil != nackErr {
             instance.logError(runtimeInstance, "message requeue failed", nackErr)
         }
 
@@ -466,7 +466,7 @@ func (instance *consumeSession) consume(
             )
         }
 
-        if nackErr := transport.Nack(runtimeInstance, envelopeInstance, messagebuscontract.NackConfig{}); nil != nackErr {
+        if nackErr := transport.Nack(runtimeInstance, envelopeInstance, messagebuscontract.NackOptions{}); nil != nackErr {
             instance.logError(runtimeInstance, "message dead-letter failed", nackErr)
         }
 
@@ -481,7 +481,7 @@ func (instance *consumeSession) consume(
             if false == instance.retryPolicy.MaxDeadLetterAttemptsUnlimited && deadLetterAttempts+1 >= instance.retryPolicy.MaxDeadLetterAttempts {
                 instance.logError(runtimeInstance, "exhausted message dead-letter attempts; giving up requeue", sendErr)
 
-                if nackErr := transport.Nack(runtimeInstance, envelopeInstance, messagebuscontract.NackConfig{}); nil != nackErr {
+                if nackErr := transport.Nack(runtimeInstance, envelopeInstance, messagebuscontract.NackOptions{}); nil != nackErr {
                     instance.logError(runtimeInstance, "message dead-letter failed", nackErr)
                 }
 
@@ -492,7 +492,7 @@ func (instance *consumeSession) consume(
                 withReplacedStamp(envelopeInstance, DeadLetterAttemptStamp{Count: deadLetterAttempts + 1}),
                 DelayStamp{Delay: instance.failureRequeueDelay()},
             )
-            if nackErr := transport.Nack(runtimeInstance, requeued, messagebuscontract.NackConfig{Requeue: true}); nil != nackErr {
+            if nackErr := transport.Nack(runtimeInstance, requeued, messagebuscontract.NackOptions{Requeue: true}); nil != nackErr {
                 instance.logError(runtimeInstance, "message requeue failed after failure transport rejection", nackErr)
             }
 
@@ -513,7 +513,7 @@ func (instance *consumeSession) consume(
         )
     }
 
-    if nackErr := transport.Nack(runtimeInstance, envelopeInstance, messagebuscontract.NackConfig{}); nil != nackErr {
+    if nackErr := transport.Nack(runtimeInstance, envelopeInstance, messagebuscontract.NackOptions{}); nil != nackErr {
         instance.logError(runtimeInstance, "message dead-letter failed", nackErr)
     }
 }
@@ -555,7 +555,7 @@ func (instance *consumeSession) messageRuntime(
         if true == errors.Is(childErr, container.ErrScopeClosed) {
             logging.EmergencyLogger().Error(
                 "failed to open message scope",
-                exception.LogContext(childErr, exception.LogContextConfig{}),
+                exception.LogContext(childErr, exception.LogContextOptions{}),
             )
         }
 
@@ -571,7 +571,7 @@ func (instance *consumeSession) messageRuntime(
         if nil != scopeCloseErr && false == internal.IsNilInterface(baseLogger) {
             baseLogger.Error(
                 "failed to close message scope",
-                exception.LogContext(scopeCloseErr, exception.LogContextConfig{}),
+                exception.LogContext(scopeCloseErr, exception.LogContextOptions{}),
             )
         }
     }
@@ -588,7 +588,7 @@ func (instance *consumeSession) messageRuntime(
         if nil != overrideErr {
             baseLogger.Error(
                 "failed to override message logger",
-                exception.LogContext(overrideErr, exception.LogContextConfig{}),
+                exception.LogContext(overrideErr, exception.LogContextOptions{}),
             )
         }
     }
@@ -658,7 +658,7 @@ func (instance *consumeSession) logError(
         logger = logging.EmergencyLogger()
     }
 
-    logger.Error(message, exception.LogContext(err, exception.LogContextConfig{}))
+    logger.Error(message, exception.LogContext(err, exception.LogContextOptions{}))
 }
 
 var _ clicontract.Command = (*ConsumeCommand)(nil)

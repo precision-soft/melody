@@ -50,8 +50,8 @@ func expectModuleRefusalNaming(t *testing.T, field string, config ModuleConfig) 
             t.Fatalf("expected a refusal naming %s", field)
         }
 
-        if field != exception.LogContext(recoveredErr, exception.LogContextConfig{})["field"] {
-            t.Fatalf("expected the refusal to name %s, got %v", field, exception.LogContext(recoveredErr, exception.LogContextConfig{}))
+        if field != exception.LogContext(recoveredErr, exception.LogContextOptions{})["field"] {
+            t.Fatalf("expected the refusal to name %s, got %v", field, exception.LogContext(recoveredErr, exception.LogContextOptions{}))
         }
     }()
 

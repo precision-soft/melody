@@ -57,7 +57,7 @@ func TestResolveDatabase_UnknownManagerReturnsErrorInsteadOfPanic(t *testing.T) 
     )
 
     runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
-    base := &baseCommand{options: options}
+    base := &baseCommand{config: options}
 
     var resolveErr error
     didPanic := false
@@ -111,7 +111,7 @@ func pinTestRegistry(t *testing.T) *bunorm.ManagerRegistry {
     return registry
 }
 
-func resolveWithOptions(t *testing.T, options Options, flagValue string) string {
+func resolveWithOptions(t *testing.T, config CommandConfig, flagValue string) string {
     t.Helper()
 
     registry := pinTestRegistry(t)
@@ -119,7 +119,7 @@ func resolveWithOptions(t *testing.T, options Options, flagValue string) string 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     container.MustRegister[*bunorm.ManagerRegistry](
         serviceContainer,
-        options.ManagerRegistryServiceId,
+        config.ManagerRegistryServiceId,
         func(resolver containercontract.Resolver) (*bunorm.ManagerRegistry, error) {
             return registry, nil
         },
@@ -127,13 +127,13 @@ func resolveWithOptions(t *testing.T, options Options, flagValue string) string 
     )
 
     runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
-    base := &baseCommand{options: options}
+    base := &baseCommand{config: config}
 
     resolvedName := ""
 
     command := &probeCommand{
         nameValue:  "migrate",
-        flagsValue: []clicontract.Flag{&clicontract.StringFlag{Name: options.ManagerFlagName}},
+        flagsValue: []clicontract.Flag{&clicontract.StringFlag{Name: config.ManagerFlagName}},
         runCallback: func(dispatchedRuntime containercontract.Runtime, commandContext *clicontract.CommandContext) error {
             resolveOutput, _ := newBufferedOutput(true)
 
@@ -151,7 +151,7 @@ func resolveWithOptions(t *testing.T, options Options, flagValue string) string 
 
     arguments := []string{"migrate"}
     if "" != flagValue {
-        arguments = append(arguments, "--"+options.ManagerFlagName+"="+flagValue)
+        arguments = append(arguments, "--"+config.ManagerFlagName+"="+flagValue)
     }
 
     if runErr := dispatchProbeCommand(command, runtimeInstance, arguments); nil != runErr {
@@ -209,7 +209,7 @@ func TestUnlockMigrations_RunsOnACancelledCommandContext(t *testing.T) {
     unlocker := &recordingMigrationUnlocker{}
     outputInstance, _ := newBufferedOutput(true)
 
-    if unlockErr := unlockMigrations(cancelledContext, unlocker, outputInstance, DefaultLocksTable, "db:unlock", optionsUnlockTimeoutRule.Default); nil != unlockErr {
+    if unlockErr := unlockMigrations(cancelledContext, unlocker, outputInstance, DefaultLocksTable, "db:unlock", commandConfigUnlockTimeoutRule.Default); nil != unlockErr {
         t.Fatalf("expected no error from a successful unlock, got %v", unlockErr)
     }
 
@@ -249,7 +249,7 @@ func TestUnlockMigrations_ReportsAFailedUnlock(t *testing.T) {
     unlocker := &recordingMigrationUnlocker{unlockError: deleteRefused}
     outputInstance, buffer := newBufferedOutput(true)
 
-    unlockErr := unlockMigrations(context.Background(), unlocker, outputInstance, DefaultLocksTable, "db:unlock", optionsUnlockTimeoutRule.Default)
+    unlockErr := unlockMigrations(context.Background(), unlocker, outputInstance, DefaultLocksTable, "db:unlock", commandConfigUnlockTimeoutRule.Default)
 
     if false == strings.Contains(buffer.String(), "delete refused") {
         t.Fatalf("expected the unlock failure to be reported, got %q", buffer.String())
@@ -312,7 +312,7 @@ func TestResolveDatabase_PrefersTheDedicatedMigrationConnection(t *testing.T) {
     )
 
     runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
-    base := &baseCommand{options: options}
+    base := &baseCommand{config: options}
 
     resolvedDatabase := (*bun.DB)(nil)
     resolvedLabel := ""
@@ -373,7 +373,7 @@ func TestNewMigrator_SqlMigrationExecFailureReachesTheCaller(t *testing.T) {
         return nil
     }
 
-    base := &baseCommand{migrations: migrations, options: resolvedDefaultOptions}
+    base := &baseCommand{migrations: migrations, config: resolvedDefaultOptions}
 
     migrator, migratorErr := base.newMigrator(database, migrationTables{migrations: DefaultMigrationsTable, locks: DefaultLocksTable})
     if nil != migratorErr {
@@ -453,7 +453,7 @@ func TestResolveDatabase_TheReleaseEndsTheDedicatedMigrationConnection(t *testin
     )
 
     runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
-    base := &baseCommand{options: options}
+    base := &baseCommand{config: options}
 
     command := &probeCommand{
         nameValue:  "migrate",
@@ -529,10 +529,10 @@ func TestResolveDatabase_TheReleaseReportsAFailedClose(t *testing.T) {
     )
 
     runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
-    base := &baseCommand{options: options}
+    base := &baseCommand{config: options}
 
     documentBuffer := &bytes.Buffer{}
-    resolveOutput := newCommandOutput(documentBuffer, nil, output.Option{Format: output.FormatJson})
+    resolveOutput := newCommandOutput(documentBuffer, nil, output.Options{Format: output.FormatJson})
 
     command := &probeCommand{
         nameValue:  "migrate",
@@ -619,7 +619,7 @@ func TestResolveDatabase_TheSuccessfulReleaseIsSilent(t *testing.T) {
     )
 
     runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
-    base := &baseCommand{options: options}
+    base := &baseCommand{config: options}
 
     resolveOutput, resolveBuffer := newBufferedOutput(true)
 
@@ -655,7 +655,7 @@ func TestResolveDatabase_TheReleaseLeavesTheSharedPoolAlone(t *testing.T) {
     runtimeInstance := newRuntimeWithDatabase(t, database)
 
     options := resolvedDefaultOptions
-    base := &baseCommand{options: options}
+    base := &baseCommand{config: options}
 
     command := &probeCommand{
         nameValue:  "migrate",
@@ -703,9 +703,9 @@ func TestResolveDatabase_TheReleaseLeavesTheSharedPoolAlone(t *testing.T) {
 func TestUnlockMigrations_NamesTheSurvivingLockInTheJsonDocument(t *testing.T) {
     unlocker := &recordingMigrationUnlocker{unlockError: errors.New("context deadline exceeded")}
     buffer := &bytes.Buffer{}
-    outputInstance := newCommandOutput(buffer, nil, output.Option{Format: output.FormatJson})
+    outputInstance := newCommandOutput(buffer, nil, output.Options{Format: output.FormatJson})
 
-    unlockErr := unlockMigrations(context.Background(), unlocker, outputInstance, DefaultLocksTable, "db:unlock", optionsUnlockTimeoutRule.Default)
+    unlockErr := unlockMigrations(context.Background(), unlocker, outputInstance, DefaultLocksTable, "db:unlock", commandConfigUnlockTimeoutRule.Default)
     if nil == unlockErr {
         t.Fatal("expected the failed release to be returned")
     }
@@ -744,24 +744,24 @@ func TestUnlockMigrations_NamesTheSurvivingLockInTheJsonDocument(t *testing.T) {
 }
 
 func TestNewMigrateCommand_ResolvesTheUnlockTimeout(t *testing.T) {
-    if unlockTimeout := NewMigrateCommand(migrate.NewMigrations(), Options{}).base.unlockTimeout; 5*time.Second != unlockTimeout {
+    if unlockTimeout := NewMigrateCommand(migrate.NewMigrations(), CommandConfig{}).base.unlockTimeout; 5*time.Second != unlockTimeout {
         t.Fatalf("expected an absent unlock timeout to take 5s, got %s", unlockTimeout)
     }
 
-    if unlockTimeout := NewRollbackCommand(migrate.NewMigrations(), Options{UnlockTimeout: bound.Of(time.Millisecond)}).base.unlockTimeout; time.Millisecond != unlockTimeout {
+    if unlockTimeout := NewRollbackCommand(migrate.NewMigrations(), CommandConfig{UnlockTimeout: bound.Of(time.Millisecond)}).base.unlockTimeout; time.Millisecond != unlockTimeout {
         t.Fatalf("expected the 1ms minimum admitted, got %s", unlockTimeout)
     }
 }
 
 func TestNewMigrateCommand_LeftOutOptionsTakeTheDefaults(t *testing.T) {
-    command := NewMigrateCommand(migrate.NewMigrations(), Options{})
+    command := NewMigrateCommand(migrate.NewMigrations(), CommandConfig{})
 
     if "db:migrate" != command.Name() {
         t.Fatalf("expected the default prefix, got %q", command.Name())
     }
 
-    if DefaultManagerRegistryServiceId != command.base.options.ManagerRegistryServiceId || DefaultManagerFlagName != command.base.options.ManagerFlagName {
-        t.Fatalf("expected the default registry service id and manager flag, got %+v", command.base.options)
+    if DefaultManagerRegistryServiceId != command.base.config.ManagerRegistryServiceId || DefaultManagerFlagName != command.base.config.ManagerFlagName {
+        t.Fatalf("expected the default registry service id and manager flag, got %+v", command.base.config)
     }
 }
 
@@ -796,7 +796,7 @@ func TestResolveDatabase_ACancelledRunRefusesBeforeTheDial(t *testing.T) {
     cancelRun()
 
     runtimeInstance := runtime.NewRun(runContext, serviceContainer.NewScope())
-    base := &baseCommand{options: options}
+    base := &baseCommand{config: options}
 
     command := &probeCommand{
         nameValue:  "migrate",

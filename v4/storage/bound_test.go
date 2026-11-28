@@ -22,7 +22,7 @@ var _ interface {
     Get(key string, options storagecontract.GetOptions) (storagecontract.Object, error)
     Stat(key string, options storagecontract.StatOptions) (storagecontract.ObjectInfo, error)
     Delete(key string, options storagecontract.DeleteOptions) error
-    PresignedUrl(key string, config storagecontract.PresignConfig) (string, error)
+    PresignedUrl(key string, options storagecontract.PresignOptions) (string, error)
     Runtime() containercontract.Runtime
     Storage() storagecontract.Storage
 } = Bound{}
@@ -116,8 +116,8 @@ func (instance *boundRecordingStorage) Delete(runtimeInstance containercontract.
     return boundStorageRecordedErr
 }
 
-func (instance *boundRecordingStorage) PresignedUrl(runtimeInstance containercontract.Runtime, key string, config storagecontract.PresignConfig) (string, error) {
-    instance.record("PresignedUrl", runtimeInstance, key, config)
+func (instance *boundRecordingStorage) PresignedUrl(runtimeInstance containercontract.Runtime, key string, options storagecontract.PresignOptions) (string, error) {
+    instance.record("PresignedUrl", runtimeInstance, key, options)
 
     return "https://signed.example/" + key, boundStorageRecordedErr
 }
@@ -140,7 +140,7 @@ func TestBound_EveryMethodReachesItsDoorWithTheBoundRuntimeAndAnswersWhatItAnswe
 
     reader := strings.NewReader("payload")
     putOptions := storagecontract.PutOptions{ContentType: "application/pdf"}
-    presignConfig := storagecontract.PresignConfig{Expiry: bound.Of(90 * time.Second), Method: http.MethodPut}
+    presignConfig := storagecontract.PresignOptions{Expiry: bound.Of(90 * time.Second), Method: http.MethodPut}
 
     putErr := boundStorage.Put("put-key", reader, 7, putOptions)
     getOptions := storagecontract.GetOptions{Range: storagecontract.ByteRange{Offset: 3, Length: 4}}
@@ -204,7 +204,7 @@ func TestBound_AViewOverNoStorageRefusesEveryDoor(t *testing.T) {
         objectInfo, statErr := boundStorage.Stat("key", storagecontract.StatOptions{})
         deleteErr := boundStorage.Delete("key", storagecontract.DeleteOptions{})
         exists, existsErr := Exists(boundStorage, "key")
-        url, presignErr := boundStorage.PresignedUrl("key", storagecontract.PresignConfig{})
+        url, presignErr := boundStorage.PresignedUrl("key", storagecontract.PresignOptions{})
 
         for doorName, doorErr := range map[string]error{"Put": putErr, "Get": getErr, "Stat": statErr, "Delete": deleteErr, "Exists": existsErr, "PresignedUrl": presignErr} {
             if nil == doorErr || "storage instance is nil" != doorErr.Error() {

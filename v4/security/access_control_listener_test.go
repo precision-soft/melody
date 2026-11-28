@@ -1334,7 +1334,7 @@ func newUnavailableRouteFixtureOver(tokenSource securitycontract.TokenSource, re
         func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             reason := ""
             if deniedErr := eventValue.Payload().(*AuthorizationDeniedEvent).Err(); nil != deniedErr {
-                reason, _ = exception.LogContext(deniedErr, exception.LogContextConfig{})["reason"].(string)
+                reason, _ = exception.LogContext(deniedErr, exception.LogContextOptions{})["reason"].(string)
             }
             fixture.deniedReasons = append(fixture.deniedReasons, reason)
             fixture.deniedCauses = append(fixture.deniedCauses, eventValue.Payload().(*AuthorizationDeniedEvent).Err())
@@ -1559,7 +1559,7 @@ func newDecisionOutageFixture(decisionManager securitycontract.AccessDecisionMan
         securitycontract.EventSecurityAuthorizationDenied,
         func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             deniedErr := eventValue.Payload().(*AuthorizationDeniedEvent).Err()
-            reason, _ := exception.LogContext(deniedErr, exception.LogContextConfig{})["reason"].(string)
+            reason, _ := exception.LogContext(deniedErr, exception.LogContextOptions{})["reason"].(string)
             fixture.deniedReasons = append(fixture.deniedReasons, reason)
             fixture.deniedCauses = append(fixture.deniedCauses, deniedErr)
 

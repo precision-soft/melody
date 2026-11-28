@@ -355,7 +355,7 @@ func (instance *Transport) Ack(
 func (instance *Transport) Nack(
     runtimeInstance containercontract.Runtime,
     envelopeInstance messagebuscontract.Envelope,
-    config messagebuscontract.NackConfig,
+    options messagebuscontract.NackOptions,
 ) error {
     stamp, exists := melodymessagebus.LastStampOfType[DeliveryStamp](envelopeInstance)
     if false == exists {
@@ -372,7 +372,7 @@ func (instance *Transport) Nack(
         return nil
     }
 
-    if false == config.Requeue {
+    if false == options.Requeue {
         return instance.nackChannel(channel, stamp.Tag, false)
     }
 
@@ -2144,7 +2144,7 @@ func (instance *Transport) logError(runtimeInstance containercontract.Runtime, m
         return
     }
 
-    logger.Error(message, exception.LogContext(err, exception.LogContextConfig{}))
+    logger.Error(message, exception.LogContext(err, exception.LogContextOptions{}))
 }
 
 /* teardownStretchWithin answers the smaller of the remaining deadline and the stretch's bound, never a pre-divided share. */

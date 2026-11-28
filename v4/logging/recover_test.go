@@ -520,7 +520,7 @@ func TestLogOnRecoverAndExit_ShieldsTheHookAndTheRecord(t *testing.T) {
             &captureLogger{},
             exception.NewExitError(9, exception.NewError("boom", nil, nil)),
             1,
-            ExitConfig{
+            ExitOptions{
                 BeforeExit: func(_ context.Context) {
                     panic("teardown died")
                 },
@@ -535,7 +535,7 @@ func TestLogOnRecoverAndExit_ShieldsTheHookAndTheRecord(t *testing.T) {
             &panickingProbeLogger{},
             exception.NewExitError(9, exception.NewError("boom", nil, nil)),
             1,
-            ExitConfig{},
+            ExitOptions{},
         )
 
         return
@@ -584,7 +584,7 @@ func TestLogOnRecoverAndExit_AnAbsentBudgetDoesNotDisarmTheShield(t *testing.T) 
             &captureLogger{},
             exception.NewExitError(9, exception.NewError("boom", nil, nil)),
             1,
-            ExitConfig{
+            ExitOptions{
                 BeforeExit: blockForever,
             },
         )
@@ -599,7 +599,7 @@ func TestLogOnRecoverAndExit_AnAbsentBudgetDoesNotDisarmTheShield(t *testing.T) 
             &captureLogger{},
             exception.NewExitError(9, exception.NewError("boom", nil, nil)),
             1,
-            ExitConfig{
+            ExitOptions{
                 BeforeExit:       blockForever,
                 BeforeExitBudget: bound.Of(200 * time.Millisecond),
             },
@@ -662,7 +662,7 @@ func TestLogOnRecoverAndExit_TakesTheExitCodeOfTheRecoveredValue(t *testing.T) {
             &captureLogger{},
             exception.NewExitError(9, exception.NewError("boom", nil, nil)),
             1,
-            ExitConfig{},
+            ExitOptions{},
         )
 
         return
@@ -699,7 +699,7 @@ func TestLogOnRecoverAndExit_WithoutAPanic_DoesNothing(t *testing.T) {
         logger,
         nil,
         1,
-        ExitConfig{
+        ExitOptions{
             BeforeExit: func(_ context.Context) {
                 hookRan = true
             },
@@ -907,14 +907,14 @@ func TestLogOnRecoverAndExit_RefusesAnOutOfRangeExitCode(t *testing.T) {
             }()
 
             /* nil recovered: the refusal must fire on the healthy pass, so a caller wired with a bad code is caught on its first run rather than on its first panic */
-            LogOnRecoverAndExit(&captureLogger{}, nil, outOfRangeCode, ExitConfig{})
+            LogOnRecoverAndExit(&captureLogger{}, nil, outOfRangeCode, ExitOptions{})
         }()
     }
 }
 
 func TestLogOnRecoverAndExit_AcceptsTheRangeBoundsOnTheHealthyPass(t *testing.T) {
     for _, validCode := range []int{1, 255} {
-        LogOnRecoverAndExit(&captureLogger{}, nil, validCode, ExitConfig{})
+        LogOnRecoverAndExit(&captureLogger{}, nil, validCode, ExitOptions{})
     }
 }
 
@@ -927,7 +927,7 @@ func TestLogOnRecoverAndExit_ZeroValueExitErrorExitsWithTheCallersCode(t *testin
             &captureLogger{},
             &exception.ExitError{},
             1,
-            ExitConfig{},
+            ExitOptions{},
         )
 
         return
@@ -1087,7 +1087,7 @@ func TestLogOnRecoverAndExit_WritesTheCertificateForAnAlreadyLoggedError(t *test
         LogError(EmergencyLogger(), err)
         err.MarkAsLogged()
 
-        LogOnRecoverAndExit(EmergencyLogger(), err, 7, ExitConfig{})
+        LogOnRecoverAndExit(EmergencyLogger(), err, 7, ExitOptions{})
 
         return
     }
@@ -1154,7 +1154,7 @@ func (instance *panickingResolveError) Unwrap() error {
 
 /* RunShieldedStep answers whether the step finished, which is what lets the clean shutdown tell a teardown that completed from one it had to abandon: the budget exists so a process holding something it cannot release ends anyway, and a caller told nothing would have no reason to exit non-zero */
 func TestRunShieldedStep_AnswersWhetherTheStepFinished(t *testing.T) {
-    if false == RunShieldedStep("a step that returns", ShieldedStepConfig{}, func(_ context.Context) {}) {
+    if false == RunShieldedStep("a step that returns", ShieldedStepOptions{}, func(_ context.Context) {}) {
         t.Fatalf("expected a returning step to report completion")
     }
 
@@ -1169,7 +1169,7 @@ func TestRunShieldedStep_AnswersWhetherTheStepFinished(t *testing.T) {
 
     if true == RunShieldedStep(
         "a step that hangs",
-        ShieldedStepConfig{},
+        ShieldedStepOptions{},
         func(_ context.Context) {
             <-release
         },
@@ -1182,7 +1182,7 @@ func TestRunShieldedStep_AnswersWhetherTheStepFinished(t *testing.T) {
 func TestRunShieldedStep_AnswersFalseForAStepThatPanicked(t *testing.T) {
     if true == RunShieldedStep(
         "a step that panics",
-        ShieldedStepConfig{},
+        ShieldedStepOptions{},
         func(_ context.Context) {
             panic("the step exploded")
         },
@@ -1209,7 +1209,7 @@ func TestLogOnRecoverAndExit_AStalledStderrDoesNotHoldTheExit(t *testing.T) {
             &captureLogger{},
             exception.NewError("the process is dying", nil, nil),
             7,
-            ExitConfig{},
+            ExitOptions{},
         )
 
         return
@@ -1275,7 +1275,7 @@ func TestRunShieldedStep_AbandonsOnTheBudgetItWasGiven(t *testing.T) {
     go func() {
         answered <- RunShieldedStep(
             "a step that hangs",
-            ShieldedStepConfig{Budget: bound.Of(30 * time.Millisecond)},
+            ShieldedStepOptions{Budget: bound.Of(30 * time.Millisecond)},
             func(_ context.Context) {
                 <-hangingStep
             },
@@ -1305,7 +1305,7 @@ func TestRunShieldedStep_AnAbsentBudgetIsThePackageBudget(t *testing.T) {
 
     started := time.Now()
 
-    RunShieldedStep("a step that reads its deadline", ShieldedStepConfig{}, func(stepContext context.Context) {
+    RunShieldedStep("a step that reads its deadline", ShieldedStepOptions{}, func(stepContext context.Context) {
         stepDeadline, hasDeadline = stepContext.Deadline()
     })
 
@@ -1325,7 +1325,7 @@ func TestRunShieldedStep_AnUnlimitedBudgetWaitsWithoutADeadline(t *testing.T) {
 
     if false == RunShieldedStep(
         "a step that outlives the package budget",
-        ShieldedStepConfig{Budget: bound.UnlimitedDuration()},
+        ShieldedStepOptions{Budget: bound.UnlimitedDuration()},
         func(_ context.Context) {
             time.Sleep(300 * time.Millisecond)
         },
@@ -1354,7 +1354,7 @@ func TestRunShieldedStep_ARefusedBudgetIsEchoedAndRunsUnderThePackageBudget(t *t
 
         completed := RunShieldedStep(
             "a step that outlives the package budget",
-            ShieldedStepConfig{Budget: budget},
+            ShieldedStepOptions{Budget: budget},
             func(_ context.Context) {
                 time.Sleep(300 * time.Millisecond)
             },
@@ -1372,7 +1372,7 @@ func TestRunShieldedStep_ARefusedBudgetIsEchoedAndRunsUnderThePackageBudget(t *t
             t.Fatalf("expected the refused budget %v to run the step under the package budget and abandon it", budget)
         }
 
-        if false == strings.Contains(string(echoed), "ShieldedStepConfig.Budget") || false == strings.Contains(string(echoed), "runs under 30ms") {
+        if false == strings.Contains(string(echoed), "ShieldedStepOptions.Budget") || false == strings.Contains(string(echoed), "runs under 30ms") {
             t.Fatalf("expected the refusal echoed naming the field and the budget applied, got %q", string(echoed))
         }
     }
@@ -1409,7 +1409,7 @@ func TestRunShieldedStep_ARefusedBudgetOnAStalledStderrStillRunsTheStep(t *testi
     stepRan := false
     returned := make(chan bool, 1)
     go func() {
-        returned <- RunShieldedStep("a step behind a stalled stderr", ShieldedStepConfig{Budget: bound.Of(time.Duration(0))}, func(_ context.Context) {
+        returned <- RunShieldedStep("a step behind a stalled stderr", ShieldedStepOptions{Budget: bound.Of(time.Duration(0))}, func(_ context.Context) {
             stepRan = true
         })
     }()
@@ -1427,9 +1427,9 @@ func TestRunShieldedStep_ARefusedBudgetOnAStalledStderrStillRunsTheStep(t *testi
 func TestLogOnRecoverAndExit_RefusesABudgetOutsideItsRuleOnTheHealthyPass(t *testing.T) {
     for _, budget := range []bound.Duration{bound.Of(time.Duration(0)), bound.Of(time.Microsecond), bound.UnlimitedDuration()} {
         context := recoveredPanicContext(func() {
-            LogOnRecoverAndExit(&captureLogger{}, nil, 1, ExitConfig{BeforeExitBudget: budget})
+            LogOnRecoverAndExit(&captureLogger{}, nil, 1, ExitOptions{BeforeExitBudget: budget})
         })
-        if "ExitConfig.BeforeExitBudget" != context["field"] {
+        if "ExitOptions.BeforeExitBudget" != context["field"] {
             t.Fatalf("expected the budget %v refused naming the field, got %v", budget, context)
         }
     }
@@ -1446,7 +1446,7 @@ func TestRunShieldedStep_HandsTheStepADeadlineBelowItsOwn(t *testing.T) {
 
     if false == RunShieldedStep(
         "a step that reads its deadline",
-        ShieldedStepConfig{Budget: bound.Of(budget)},
+        ShieldedStepOptions{Budget: bound.Of(budget)},
         func(stepContext context.Context) {
             stepDeadline, hasDeadline = stepContext.Deadline()
         },
@@ -1471,7 +1471,7 @@ func TestRunShieldedStep_AStepThatHonoursItsDeadlineIsNotAbandoned(t *testing.T)
 
     if false == RunShieldedStep(
         "a step that honours its deadline",
-        ShieldedStepConfig{Budget: bound.Of(budget)},
+        ShieldedStepOptions{Budget: bound.Of(budget)},
         func(stepContext context.Context) {
             <-stepContext.Done()
         },
@@ -1486,7 +1486,7 @@ func TestRunShieldedStep_AnUnlimitedBudgetHandsTheStepNoDeadline(t *testing.T) {
 
     RunShieldedStep(
         "a step that reads its deadline",
-        ShieldedStepConfig{Budget: bound.UnlimitedDuration()},
+        ShieldedStepOptions{Budget: bound.UnlimitedDuration()},
         func(stepContext context.Context) {
             _, hasDeadline = stepContext.Deadline()
         },
@@ -1504,7 +1504,7 @@ func TestLogOnRecoverAndExit_RunsTheHookUnderTheDeclaredBudget(t *testing.T) {
             &captureLogger{},
             exception.NewExitError(9, exception.NewError("boom", nil, nil)),
             1,
-            ExitConfig{
+            ExitOptions{
                 BeforeExit: func(beforeExitContext context.Context) {
                     deadline, hasDeadline := beforeExitContext.Deadline()
                     if false == hasDeadline {
@@ -1636,7 +1636,7 @@ func TestRunShieldedStep_AnAbandonmentOnAStalledStderrStillReturns(t *testing.T)
 
     returned := make(chan bool, 1)
     go func() {
-        returned <- RunShieldedStep("a step that never returns", ShieldedStepConfig{Budget: bound.Of(20 * time.Millisecond)}, func(_ context.Context) {
+        returned <- RunShieldedStep("a step that never returns", ShieldedStepOptions{Budget: bound.Of(20 * time.Millisecond)}, func(_ context.Context) {
             <-release
         })
     }()
@@ -1713,7 +1713,7 @@ func TestLogOnRecoverAndExit_TheExitLineFollowsTheLoggersCauseChainDepth(t *test
             &depthReportingCaptureLogger{captureLogger: &captureLogger{}, depth: 1},
             exception.NewError("boom", nil, exception.NewError("first cause", nil, errors.New("second cause"))),
             1,
-            ExitConfig{},
+            ExitOptions{},
         )
 
         return

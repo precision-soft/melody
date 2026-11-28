@@ -106,7 +106,7 @@ func TestConnectionSource_TheZeroValueIsRefusedNamingBothDoors(t *testing.T) {
                     t.Fatal("expected the zero source refused")
                 }
 
-                context := exception.LogContext(recoveredErr, exception.LogContextConfig{})
+                context := exception.LogContext(recoveredErr, exception.LogContextOptions{})
                 if "source" != context["argument"] || "amqp.FromConnection, amqp.FromDialer" != context["doors"] {
                     t.Fatalf("expected the refusal to name the argument and both doors, got %v", context)
                 }
@@ -295,7 +295,7 @@ func TestProviderOpen_DoesNotLeakPasswordThroughDialErrorCause(t *testing.T) {
         t.Fatalf("the password leaked through the wrapped cause: %q", cause.Error())
     }
 
-    for key, value := range exception.LogContext(openErr, exception.LogContextConfig{}) {
+    for key, value := range exception.LogContext(openErr, exception.LogContextOptions{}) {
         if true == strings.Contains(fmt.Sprintf("%v", value), "secret") {
             t.Fatalf("the password leaked through log field %q: %v", key, value)
         }
@@ -400,7 +400,7 @@ func TestProvider_OpenRecordsNeitherTheDsnNorItsHeadOnAMisparsedPassword(t *test
             t.Fatalf("the password of %q leaked through the error: %q", dsn, openErr.Error())
         }
 
-        for key, value := range exception.LogContext(openErr, exception.LogContextConfig{}) {
+        for key, value := range exception.LogContext(openErr, exception.LogContextOptions{}) {
             if true == strings.Contains(fmt.Sprintf("%v", value), secret) {
                 t.Fatalf("the password of %q leaked through log field %q: %v", dsn, key, value)
             }
@@ -545,7 +545,7 @@ func TestNewConnection_RefusesANilConnectionAndACloseTimeoutItsRuleRefuses(t *te
 
 func TestProviderOpen_RefusesANilRuntimeNamingTheDoor(t *testing.T) {
     _, openErr := NewProvider("melody", ProviderConfig{}).Open(nil, "amqp://guest:guest@127.0.0.1:1/")
-    if nil == openErr || false == strings.Contains(fmt.Sprint(exception.LogContext(openErr, exception.LogContextConfig{})), "amqp.Provider.Open") {
+    if nil == openErr || false == strings.Contains(fmt.Sprint(exception.LogContext(openErr, exception.LogContextOptions{})), "amqp.Provider.Open") {
         t.Fatalf("expected the nil runtime refused naming the door, got %v", openErr)
     }
 }
@@ -714,7 +714,7 @@ func TestConnectionSource_ANilConnectionAndANilDialerAreRefusedAtTheDoor(t *test
         t.Run(door, func(t *testing.T) {
             defer func() {
                 recoveredErr, isError := recover().(error)
-                if false == isError || false == strings.HasPrefix(door, fmt.Sprint(exception.LogContext(recoveredErr, exception.LogContextConfig{})["door"])) {
+                if false == isError || false == strings.HasPrefix(door, fmt.Sprint(exception.LogContext(recoveredErr, exception.LogContextOptions{})["door"])) {
                     t.Fatalf("expected a refusal naming the door %s, got %v", door, recoveredErr)
                 }
             }()

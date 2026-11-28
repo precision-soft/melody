@@ -18,7 +18,7 @@ func TestGeneratePath_RouteNotFound(t *testing.T) {
     routeRegistry := NewRouteRegistry()
     urlGenerator := NewUrlGenerator(routeRegistry, UrlGeneratorConfig{})
 
-    _, err := urlGenerator.GeneratePath("missing", httpcontract.PathConfig{Parameters: map[string]string{}})
+    _, err := urlGenerator.GeneratePath("missing", httpcontract.PathOptions{Parameters: map[string]string{}})
     if nil == err {
         t.Fatalf("expected error")
     }
@@ -37,7 +37,7 @@ func TestGeneratePath_MissingRequiredParameter(t *testing.T) {
         RouteOptions{Name: "article", Methods: []string{nethttp.MethodGet}},
     )
 
-    _, err := urlGenerator.GeneratePath("article", httpcontract.PathConfig{Parameters: map[string]string{}})
+    _, err := urlGenerator.GeneratePath("article", httpcontract.PathOptions{Parameters: map[string]string{}})
     if nil == err {
         t.Fatalf("expected error")
     }
@@ -56,7 +56,7 @@ func TestGeneratePath_OptionalParameterIsSkippedWhenMissingAndNoDefault(t *testi
         RouteOptions{Name: "page", Methods: []string{nethttp.MethodGet}},
     )
 
-    pathValue, err := urlGenerator.GeneratePath("page", httpcontract.PathConfig{Parameters: map[string]string{}})
+    pathValue, err := urlGenerator.GeneratePath("page", httpcontract.PathOptions{Parameters: map[string]string{}})
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
@@ -83,7 +83,7 @@ func TestGeneratePath_DefaultIsUsedWhenParameterMissing(t *testing.T) {
         },
     )
 
-    pathValue, err := urlGenerator.GeneratePath("page", httpcontract.PathConfig{Parameters: map[string]string{}})
+    pathValue, err := urlGenerator.GeneratePath("page", httpcontract.PathOptions{Parameters: map[string]string{}})
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
@@ -110,7 +110,7 @@ func TestGeneratePath_RequirementFailure(t *testing.T) {
         },
     )
 
-    _, err := urlGenerator.GeneratePath("article", httpcontract.PathConfig{Parameters: map[string]string{"id": "abc"}})
+    _, err := urlGenerator.GeneratePath("article", httpcontract.PathOptions{Parameters: map[string]string{"id": "abc"}})
     if nil == err {
         t.Fatalf("expected error")
     }
@@ -129,7 +129,7 @@ func TestGeneratePath_WildcardNamed_MissingValue(t *testing.T) {
         RouteOptions{Name: "asset", Methods: []string{nethttp.MethodGet}},
     )
 
-    _, err := urlGenerator.GeneratePath("asset", httpcontract.PathConfig{Parameters: map[string]string{}})
+    _, err := urlGenerator.GeneratePath("asset", httpcontract.PathOptions{Parameters: map[string]string{}})
     if nil == err {
         t.Fatalf("expected error")
     }
@@ -148,7 +148,7 @@ func TestGeneratePath_WildcardNamed_RejectsSlashInValue(t *testing.T) {
         RouteOptions{Name: "asset", Methods: []string{nethttp.MethodGet}},
     )
 
-    _, err := urlGenerator.GeneratePath("asset", httpcontract.PathConfig{Parameters: map[string]string{"file": "a/b"}})
+    _, err := urlGenerator.GeneratePath("asset", httpcontract.PathOptions{Parameters: map[string]string{"file": "a/b"}})
     if nil == err {
         t.Fatalf("expected error")
     }
@@ -167,7 +167,7 @@ func TestGeneratePath_CatchAllSplitsSegmentsAndTrimsSlashes(t *testing.T) {
         RouteOptions{Name: "download", Methods: []string{nethttp.MethodGet}},
     )
 
-    pathValue, err := urlGenerator.GeneratePath("download", httpcontract.PathConfig{Parameters: map[string]string{"path": "/a//b/c/"}})
+    pathValue, err := urlGenerator.GeneratePath("download", httpcontract.PathOptions{Parameters: map[string]string{"path": "/a//b/c/"}})
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
@@ -190,7 +190,7 @@ func TestGeneratePath_EscapesParameterSpecialCharacters(t *testing.T) {
         RouteOptions{Name: "article", Methods: []string{nethttp.MethodGet}},
     )
 
-    pathValue, err := urlGenerator.GeneratePath("article", httpcontract.PathConfig{Parameters: map[string]string{"slug": "hello world"}})
+    pathValue, err := urlGenerator.GeneratePath("article", httpcontract.PathOptions{Parameters: map[string]string{"slug": "hello world"}})
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
@@ -214,7 +214,7 @@ func TestGeneratePath_RejectsSlashInParameter(t *testing.T) {
         RouteOptions{Name: "file", Methods: []string{nethttp.MethodGet}},
     )
 
-    generated, err := urlGenerator.GeneratePath("file", httpcontract.PathConfig{Parameters: map[string]string{"name": "a/b"}})
+    generated, err := urlGenerator.GeneratePath("file", httpcontract.PathOptions{Parameters: map[string]string{"name": "a/b"}})
     if nil == err {
         t.Fatalf("a single-segment param spanning a slash mints a %%2F url the router decodes to a different path; expected rejection, generated %q", generated)
     }
@@ -251,7 +251,7 @@ func TestGeneratePath_AnswersAStaticSegmentPercentEncoded(t *testing.T) {
         RouteOptions{Name: "over", Methods: []string{nethttp.MethodGet}},
     )
 
-    pathValue, err := urlGenerator.GeneratePath("over", httpcontract.PathConfig{Parameters: map[string]string{"id": "a;b"}})
+    pathValue, err := urlGenerator.GeneratePath("over", httpcontract.PathOptions{Parameters: map[string]string{"id": "a;b"}})
     if nil != err || "/%C3%BCber/a;b" != pathValue {
         t.Fatalf("expected the static segment percent-encoded and the parameter escaped by url.URL, got %q, %v", pathValue, err)
     }
@@ -262,7 +262,7 @@ func TestGeneratePath_AppendsTheQueryAndTheFragmentAndSkipsAnEmptyKey(t *testing
 
     urlValue, err := urlGenerator.GeneratePath(
         "hello",
-        httpcontract.PathConfig{
+        httpcontract.PathOptions{
             Query:    url.Values{"tab": []string{"a", "b"}, "": []string{"x"}, "page": []string{"2"}},
             Fragment: "top",
         },
@@ -279,12 +279,12 @@ func TestGeneratePath_AppendsTheQueryAndTheFragmentAndSkipsAnEmptyKey(t *testing
 func TestGeneratePath_TheZeroConfigIsTheBarePath(t *testing.T) {
     urlGenerator := newHelloUrlGenerator(t, UrlGeneratorConfig{PublicUrl: "https://app.example.com/app"})
 
-    urlValue, err := urlGenerator.GeneratePath("hello", httpcontract.PathConfig{})
+    urlValue, err := urlGenerator.GeneratePath("hello", httpcontract.PathOptions{})
     if nil != err || "/hello" != urlValue {
         t.Fatalf("expected the bare path without the public base's path, got %q, %v", urlValue, err)
     }
 
-    escaped, escapedErr := urlGenerator.GeneratePath("hello", httpcontract.PathConfig{Query: url.Values{"q": []string{"a b&c"}}, Fragment: "a b"})
+    escaped, escapedErr := urlGenerator.GeneratePath("hello", httpcontract.PathOptions{Query: url.Values{"q": []string{"a b&c"}}, Fragment: "a b"})
     if nil != escapedErr || "/hello?q=a+b%26c#a%20b" != escaped {
         t.Fatalf("expected the query and the fragment escaped, got %q, %v", escaped, escapedErr)
     }
@@ -293,12 +293,12 @@ func TestGeneratePath_TheZeroConfigIsTheBarePath(t *testing.T) {
 func TestGenerateUrl_AnswersAnAbsoluteUrlBehindThePublicBase(t *testing.T) {
     urlGenerator := newHelloUrlGenerator(t, UrlGeneratorConfig{PublicUrl: "https://app.example.com"})
 
-    urlValue, err := urlGenerator.GenerateUrl("user.reset", httpcontract.PathConfig{Parameters: map[string]string{"token": "t"}})
+    urlValue, err := urlGenerator.GenerateUrl("user.reset", httpcontract.PathOptions{Parameters: map[string]string{"token": "t"}})
     if nil != err || "https://app.example.com/reset/t" != urlValue {
         t.Fatalf("expected the absolute url, got %q, %v", urlValue, err)
     }
 
-    withQuery, withQueryErr := urlGenerator.GenerateUrl("hello", httpcontract.PathConfig{Query: url.Values{"a": []string{"b"}}, Fragment: "f"})
+    withQuery, withQueryErr := urlGenerator.GenerateUrl("hello", httpcontract.PathOptions{Query: url.Values{"a": []string{"b"}}, Fragment: "f"})
     if nil != withQueryErr || "https://app.example.com/hello?a=b#f" != withQuery {
         t.Fatalf("expected the query and the fragment behind the base, got %q, %v", withQuery, withQueryErr)
     }
@@ -315,25 +315,25 @@ func TestGenerateUrl_JoinsTheBasesPathWithOneSlash(t *testing.T) {
     }
 
     for publicUrl, expected := range cases {
-        urlValue, err := newHelloUrlGenerator(t, UrlGeneratorConfig{PublicUrl: publicUrl}).GenerateUrl("user.reset", httpcontract.PathConfig{Parameters: map[string]string{"token": "t"}})
+        urlValue, err := newHelloUrlGenerator(t, UrlGeneratorConfig{PublicUrl: publicUrl}).GenerateUrl("user.reset", httpcontract.PathOptions{Parameters: map[string]string{"token": "t"}})
         if nil != err || expected != urlValue {
             t.Fatalf("expected %q behind %q, got %q, %v", expected, publicUrl, urlValue, err)
         }
     }
 
-    escapedToken, escapedTokenErr := newHelloUrlGenerator(t, UrlGeneratorConfig{PublicUrl: "https://x.ro/my%20app"}).GenerateUrl("user.reset", httpcontract.PathConfig{Parameters: map[string]string{"token": "a b"}})
+    escapedToken, escapedTokenErr := newHelloUrlGenerator(t, UrlGeneratorConfig{PublicUrl: "https://x.ro/my%20app"}).GenerateUrl("user.reset", httpcontract.PathOptions{Parameters: map[string]string{"token": "a b"}})
     if nil != escapedTokenErr || "https://x.ro/my%20app/reset/a%20b" != escapedToken {
         t.Fatalf("expected the escaped token behind the escaped base, got %q, %v", escapedToken, escapedTokenErr)
     }
 
-    root, rootErr := newHelloUrlGenerator(t, UrlGeneratorConfig{PublicUrl: "https://x.ro/app"}).GenerateUrl("home", httpcontract.PathConfig{})
+    root, rootErr := newHelloUrlGenerator(t, UrlGeneratorConfig{PublicUrl: "https://x.ro/app"}).GenerateUrl("home", httpcontract.PathOptions{})
     if nil != rootErr || "https://x.ro/app/" != root {
         t.Fatalf("expected the root route behind the base's path, got %q, %v", root, rootErr)
     }
 }
 
 func TestGenerateUrl_IsAnErrorNamingTheKeyWhenNoPublicBaseIsSet(t *testing.T) {
-    urlValue, err := newHelloUrlGenerator(t, UrlGeneratorConfig{}).GenerateUrl("hello", httpcontract.PathConfig{})
+    urlValue, err := newHelloUrlGenerator(t, UrlGeneratorConfig{}).GenerateUrl("hello", httpcontract.PathOptions{})
     if "" != urlValue || nil == err {
         t.Fatalf("expected an empty url and an error, got %q, %v", urlValue, err)
     }
@@ -398,11 +398,11 @@ func TestGeneratePath_CatchAllRequirementFailure(t *testing.T) {
         },
     )
 
-    if _, err := urlGenerator.GeneratePath("files", httpcontract.PathConfig{Parameters: map[string]string{"path": "docs/readme"}}); nil != err {
+    if _, err := urlGenerator.GeneratePath("files", httpcontract.PathOptions{Parameters: map[string]string{"path": "docs/readme"}}); nil != err {
         t.Fatalf("a catch-all value the router accepts must generate: %v", err)
     }
 
-    generated, err := urlGenerator.GeneratePath("files", httpcontract.PathConfig{Parameters: map[string]string{"path": "../../etc/passwd"}})
+    generated, err := urlGenerator.GeneratePath("files", httpcontract.PathOptions{Parameters: map[string]string{"path": "../../etc/passwd"}})
     if nil == err {
         t.Fatalf("expected the catch-all requirement to reject the value, generated %q", generated)
     }
@@ -426,7 +426,7 @@ func TestGeneratePath_CatchAllRequirementMatchesEmittedRemainder(t *testing.T) {
         },
     )
 
-    pathValue, err := urlGenerator.GeneratePath("files", httpcontract.PathConfig{Parameters: map[string]string{"path": "a//b"}})
+    pathValue, err := urlGenerator.GeneratePath("files", httpcontract.PathOptions{Parameters: map[string]string{"path": "a//b"}})
     if nil != err {
         t.Fatalf("an interior double slash collapses to the remainder the router accepts; expected generation to succeed: %v", err)
     }
@@ -454,7 +454,7 @@ func TestGeneratePath_NonTerminalCatchAllDropsTrailingLiterals(t *testing.T) {
         },
     )
 
-    pathValue, err := urlGenerator.GeneratePath("mid", httpcontract.PathConfig{Parameters: map[string]string{"p": "1/2"}})
+    pathValue, err := urlGenerator.GeneratePath("mid", httpcontract.PathOptions{Parameters: map[string]string{"p": "1/2"}})
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
@@ -487,11 +487,11 @@ func TestGeneratePath_RejectsAnEmptyRequiredParameter(t *testing.T) {
         RouteOptions{Name: "users.profile", Methods: []string{nethttp.MethodGet}},
     )
 
-    if _, err := generator.GeneratePath("users.profile", httpcontract.PathConfig{Parameters: map[string]string{"id": ""}}); nil == err {
+    if _, err := generator.GeneratePath("users.profile", httpcontract.PathOptions{Parameters: map[string]string{"id": ""}}); nil == err {
         t.Fatalf("expected an empty required parameter to be refused")
     }
 
-    generatedPath, err := generator.GeneratePath("users.profile", httpcontract.PathConfig{Parameters: map[string]string{"id": "7"}})
+    generatedPath, err := generator.GeneratePath("users.profile", httpcontract.PathOptions{Parameters: map[string]string{"id": "7"}})
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
@@ -526,7 +526,7 @@ func TestGeneratePath_ASingleSegmentWildcardSuppliedEmptyTakesTheDefaultOrIsRefu
         RouteOptions{Name: "folder_edit", Methods: []string{nethttp.MethodGet}, Defaults: map[string]string{"name": "index"}},
     )
 
-    pathValue, err := urlGenerator.GeneratePath("file_edit", httpcontract.PathConfig{Parameters: map[string]string{"name": ""}})
+    pathValue, err := urlGenerator.GeneratePath("file_edit", httpcontract.PathOptions{Parameters: map[string]string{"name": ""}})
     if nil == err {
         t.Fatalf("expected an empty single-segment wildcard to be refused, got %q", pathValue)
     }
@@ -534,7 +534,7 @@ func TestGeneratePath_ASingleSegmentWildcardSuppliedEmptyTakesTheDefaultOrIsRefu
         t.Fatalf("unexpected error: %v", err)
     }
 
-    pathValue, err = urlGenerator.GeneratePath("folder_edit", httpcontract.PathConfig{Parameters: map[string]string{"name": ""}})
+    pathValue, err = urlGenerator.GeneratePath("folder_edit", httpcontract.PathOptions{Parameters: map[string]string{"name": ""}})
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
@@ -563,7 +563,7 @@ func TestGeneratePath_RefusesAPathTheKernelWouldRefuseAsNonCanonical(t *testing.
         {"file", map[string]string{"name": "report "}},
         {"tree", map[string]string{"rest": "a/../b"}},
     } {
-        generated, err := urlGenerator.GeneratePath(testCase.routeName, httpcontract.PathConfig{Parameters: testCase.parameters})
+        generated, err := urlGenerator.GeneratePath(testCase.routeName, httpcontract.PathOptions{Parameters: testCase.parameters})
         if nil == err || false == strings.Contains(err.Error(), "not one the router serves") {
             t.Fatalf("expected %v refused as a path the router does not serve, generated %q, error %v", testCase.parameters, generated, err)
         }
@@ -578,7 +578,7 @@ func TestGeneratePath_RefusesAPathTheKernelWouldRefuseAsNonCanonical(t *testing.
         {"file", map[string]string{"name": "..report"}, "/file/..report"},
         {"tree", map[string]string{"rest": "a/b"}, "/tree/a/b"},
     } {
-        generated, err := urlGenerator.GeneratePath(testCase.routeName, httpcontract.PathConfig{Parameters: testCase.parameters})
+        generated, err := urlGenerator.GeneratePath(testCase.routeName, httpcontract.PathOptions{Parameters: testCase.parameters})
         if nil != err || testCase.path != generated {
             t.Fatalf("expected %q, got %q, error %v", testCase.path, generated, err)
         }

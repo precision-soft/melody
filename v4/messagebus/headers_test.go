@@ -51,7 +51,7 @@ func TestValidateHeaders_Rules(t *testing.T) {
             t.Fatalf("%s: expected a refusal caused by ErrHeadersRefused, got %v", probe.name, validateErr)
         }
 
-        context := exception.LogContext(validateErr, exception.LogContextConfig{})
+        context := exception.LogContext(validateErr, exception.LogContextOptions{})
         if probe.field != context["field"] {
             t.Fatalf("%s: expected the refusal to name %s, got %v", probe.name, probe.field, context)
         }
@@ -126,7 +126,7 @@ func TestResolveHeaderLimits_RefusesUnlimitedAndValuesBelowTheMinimumNamingTheFi
         {config: HeaderLimitsConfig{MaxNameLength: bound.Of(HeaderNameMaximumLength + 1)}, field: "StoreConfig.Headers.MaxNameLength"},
     } {
         _, resolveErr := ResolveHeaderLimits(probe.config, "StoreConfig.Headers")
-        if nil == resolveErr || probe.field != exception.LogContext(resolveErr, exception.LogContextConfig{})["field"] {
+        if nil == resolveErr || probe.field != exception.LogContext(resolveErr, exception.LogContextOptions{})["field"] {
             t.Fatalf("expected a refusal naming %s, got %v", probe.field, resolveErr)
         }
     }
@@ -162,7 +162,7 @@ func TestValidateHeaders_TheNameLengthIsTheConfiguredLimit(t *testing.T) {
             continue
         }
 
-        if false == errors.Is(validateErr, ErrHeadersRefused) || "TransportConfig.Headers.MaxNameLength" != exception.LogContext(validateErr, exception.LogContextConfig{})["field"] {
+        if false == errors.Is(validateErr, ErrHeadersRefused) || "TransportConfig.Headers.MaxNameLength" != exception.LogContext(validateErr, exception.LogContextOptions{})["field"] {
             t.Fatalf("%+v: expected a %d-character name refused naming MaxNameLength, got %v", probe.config, probe.length, validateErr)
         }
     }

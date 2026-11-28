@@ -910,7 +910,7 @@ func TestClassifyRunError_NamesAnInterruptedRun(t *testing.T) {
         t.Fatalf("expected the interruption to name itself, got: %v", classified)
     }
 
-    logContext := exception.LogContext(classified, exception.LogContextConfig{})
+    logContext := exception.LogContext(classified, exception.LogContextOptions{})
     if 7 != logContext["processed"] {
         t.Fatalf("expected the interruption to carry how far the run got, got: %v", logContext["processed"])
     }
@@ -1125,7 +1125,7 @@ func TestEncryptMigrate_ACancellationDuringAPageIterationIsAnInterruption(t *tes
     }
 
     if "accounts" != interruption.Context()["table"] || 0 != interruption.Context()["processed"] || false == errors.Is(runErr, context.Canceled) {
-        t.Fatalf("expected the interruption to carry the table, nothing processed and the cancellation, got %v", exception.LogContext(runErr, exception.LogContextConfig{}))
+        t.Fatalf("expected the interruption to carry the table, nothing processed and the cancellation, got %v", exception.LogContext(runErr, exception.LogContextOptions{}))
     }
 }
 
@@ -1730,8 +1730,8 @@ func TestMigrator_StopsOnAnUnknownSealFormatInEveryMode(t *testing.T) {
                 t.Fatalf("expected the run stopped with ErrSealFormatUnknown, got %v", runErr)
             }
 
-            if "7" != exception.LogContext(runErr, exception.LogContextConfig{})["id"] {
-                t.Fatalf("expected the refusal to name the row, got %v", exception.LogContext(runErr, exception.LogContextConfig{}))
+            if "7" != exception.LogContext(runErr, exception.LogContextOptions{})["id"] {
+                t.Fatalf("expected the refusal to name the row, got %v", exception.LogContext(runErr, exception.LogContextOptions{}))
             }
 
             for _, recorded := range stub.recorded() {
@@ -1889,8 +1889,8 @@ func TestMigrateDecrypt_StopsOnARowWhoseDecryptedValueIsASeal(t *testing.T) {
         t.Fatalf("expected the refusal to say why, got: %v (cause %v)", runErr, refusal)
     }
 
-    if true == strings.Contains(fmt.Sprint(exception.LogContext(runErr, exception.LogContextConfig{})), "another account's iban") || true == strings.Contains(fmt.Sprint(exception.LogContext(runErr, exception.LogContextConfig{})), cases[0].applicationValue) {
-        t.Fatalf("expected the refusal to carry no value, got: %v", exception.LogContext(runErr, exception.LogContextConfig{}))
+    if true == strings.Contains(fmt.Sprint(exception.LogContext(runErr, exception.LogContextOptions{})), "another account's iban") || true == strings.Contains(fmt.Sprint(exception.LogContext(runErr, exception.LogContextOptions{})), cases[0].applicationValue) {
+        t.Fatalf("expected the refusal to carry no value, got: %v", exception.LogContext(runErr, exception.LogContextOptions{}))
     }
 
     contextProvider, carriesContext := runErr.(exceptioncontract.ContextProvider)
@@ -2024,7 +2024,7 @@ func TestMigrator_RefusesABatchSizeOutsideItsRuleBeforeAnyQuery(t *testing.T) {
                 "decrypt":   func() (int, error) { return migrator.MigrateDecrypt(testRuntime(), specification) },
             } {
                 _, runErr := run()
-                if nil == runErr || "TableSpecification.BatchSize" != exception.LogContext(runErr, exception.LogContextConfig{})["field"] {
+                if nil == runErr || "TableSpecification.BatchSize" != exception.LogContext(runErr, exception.LogContextOptions{})["field"] {
                     t.Fatalf("%s: expected the batch size refused naming the field, got %v", door, runErr)
                 }
             }
@@ -2306,8 +2306,8 @@ func TestMigrator_StopsOnASealOfAnotherBinding(t *testing.T) {
                 t.Fatal("expected the run stopped on another binding's seal")
             }
 
-            if "7" != exception.LogContext(runErr, exception.LogContextConfig{})["id"] {
-                t.Fatalf("expected the refusal to name the row, got %v", exception.LogContext(runErr, exception.LogContextConfig{}))
+            if "7" != exception.LogContext(runErr, exception.LogContextOptions{})["id"] {
+                t.Fatalf("expected the refusal to name the row, got %v", exception.LogContext(runErr, exception.LogContextOptions{}))
             }
 
             assertNoUpdate(t, stub)
@@ -2402,7 +2402,7 @@ func TestMigrator_RefusesASpecItCannotBind(t *testing.T) {
                 migrator.cipher = testCase.cipher
 
                 _, runErr := run(migrator, testCase.specification)
-                if nil == runErr || "TableSpecification.SealBindings" != exception.LogContext(runErr, exception.LogContextConfig{})["field"] {
+                if nil == runErr || "TableSpecification.SealBindings" != exception.LogContext(runErr, exception.LogContextOptions{})["field"] {
                     t.Fatalf("expected a refusal naming TableSpecification.SealBindings, got %v", runErr)
                 }
 
@@ -2492,7 +2492,7 @@ func TestMigrator_DecryptStopsOnABoundSealOfASeal(t *testing.T) {
     migrator.cipher = cipherInstance
 
     _, runErr := migrator.MigrateDecrypt(testRuntime(), boundNotesSpec(false, false))
-    if nil == runErr || "7" != exception.LogContext(runErr, exception.LogContextConfig{})["id"] {
+    if nil == runErr || "7" != exception.LogContext(runErr, exception.LogContextOptions{})["id"] {
         t.Fatalf("expected the run stopped at the row, got %v", runErr)
     }
 
@@ -2526,7 +2526,7 @@ func TestMigrator_DecryptRefusesARefusingBindingBeforeAnyQuery(t *testing.T) {
     migrator.cipher = cipherInstance
 
     _, runErr := migrator.MigrateDecrypt(testRuntime(), boundNotesSpec(true, false))
-    if nil == runErr || "TableSpecification.SealBindings" != exception.LogContext(runErr, exception.LogContextConfig{})["field"] {
+    if nil == runErr || "TableSpecification.SealBindings" != exception.LogContext(runErr, exception.LogContextOptions{})["field"] {
         t.Fatalf("expected a refusal naming TableSpecification.SealBindings, got %v", runErr)
     }
 

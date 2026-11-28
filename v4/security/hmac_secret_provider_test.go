@@ -129,7 +129,7 @@ func TestStaticHmacSecretProvider_RefusesANilRuntime(t *testing.T) {
     _, _, applicationErr := provider.ApplicationForKeyId(nil, "key-current")
 
     for door, doorErr := range map[string]error{"CurrentKeyId": keyIdErr, "Secret": secretErr, "ApplicationForKeyId": applicationErr} {
-        if "runtimeInstance" != exception.LogContext(doorErr, exception.LogContextConfig{})["argument"] {
+        if "runtimeInstance" != exception.LogContext(doorErr, exception.LogContextOptions{})["argument"] {
             t.Fatalf("expected %s to refuse a nil runtime naming the argument, got %v", door, doorErr)
         }
     }

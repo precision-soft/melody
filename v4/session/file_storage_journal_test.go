@@ -419,7 +419,7 @@ func TestNewFileStorage_JournalMaxBytesResolves(t *testing.T) {
     _ = storage.CloseWithContext(context.Background())
 
     for _, refused := range []bound.Count{bound.Of(64<<10 - 1), bound.UnlimitedCount()} {
-        if _, storageErr := NewFileStorage(path, FileStorageConfig{JournalMaxBytes: refused}); nil == storageErr || false == strings.Contains(fmt.Sprint(exception.LogContext(storageErr, exception.LogContextConfig{})), "FileStorageConfig.JournalMaxBytes") {
+        if _, storageErr := NewFileStorage(path, FileStorageConfig{JournalMaxBytes: refused}); nil == storageErr || false == strings.Contains(fmt.Sprint(exception.LogContext(storageErr, exception.LogContextOptions{})), "FileStorageConfig.JournalMaxBytes") {
             t.Fatalf("expected %v refused naming the field, got %v", refused, storageErr)
         }
     }

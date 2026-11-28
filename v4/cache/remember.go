@@ -19,8 +19,8 @@ import (
     "github.com/precision-soft/melody/v4/logging"
 )
 
-/* RememberConfig is what one Remember call declares beyond its bound cache, its key and its callback; the zero value is the default but for Ttl, which is required: stampede protection on, a 30s wait and a cancelable flight. */
-type RememberConfig struct {
+/* RememberOptions is what one Remember call declares beyond its bound cache, its key and its callback; the zero value is the default but for Ttl, which is required: stampede protection on, a 30s wait and a cancelable flight. */
+type RememberOptions struct {
     /* Ttl is the lifetime of the stored value unless the callback chooses its own through RememberItem.SetTtl, handed to the cache's Set: a value of at least 1s, or unlimited for an entry kept until it is deleted or evicted; absent is refused, also where every callback chooses, since the configuration is judged before the cache is read. */
     Ttl bound.Duration
 
@@ -35,7 +35,7 @@ type RememberConfig struct {
 }
 
 var rememberWaitTimeoutRule = bound.Rule[time.Duration]{
-    Name:              "RememberConfig.WaitTimeout",
+    Name:              "RememberOptions.WaitTimeout",
     Default:           30 * time.Second,
     Minimum:           0,
     UnlimitedAdmitted: true,
@@ -45,7 +45,7 @@ var rememberWaitTimeoutRule = bound.Rule[time.Duration]{
 func Remember[T any](
     boundCache Bound,
     key string,
-    config RememberConfig,
+    options RememberOptions,
     callback func(runtimeInstance containercontract.Runtime, item *RememberItem) (T, error),
 ) (T, error) {
     var zero T
@@ -71,12 +71,12 @@ func Remember[T any](
         )
     }
 
-    ttl, ttlErr := resolveRememberTtl(config.Ttl)
+    ttl, ttlErr := resolveRememberTtl(options.Ttl)
     if nil != ttlErr {
         return zero, ttlErr
     }
 
-    resolvedWaitTimeout, waitTimeoutErr := bound.Resolve(config.WaitTimeout, rememberWaitTimeoutRule)
+    resolvedWaitTimeout, waitTimeoutErr := bound.Resolve(options.WaitTimeout, rememberWaitTimeoutRule)
     if nil != waitTimeoutErr {
         return zero, waitTimeoutErr
     }
@@ -87,7 +87,7 @@ func Remember[T any](
         waitTimeout = -1
     }
 
-    isCancelable := false == config.Detached
+    isCancelable := false == options.Detached
 
     operations := newRememberOperations(cacheInstance, key, callback)
 
@@ -114,7 +114,7 @@ func Remember[T any](
 
     var answer any
     var answerErr error
-    if true == config.StampedeProtectionDisabled || false == identifiable {
+    if true == options.StampedeProtectionDisabled || false == identifiable {
         answer, answerErr = rememberWithoutStampedeProtection(
             key,
             ttl,
@@ -223,7 +223,7 @@ func newRememberFlightTypeError[T any](key string) error {
 /* the ttl is judged before the cache is read, under the configuration's field name, so a miss never computes a value it cannot store */
 func resolveRememberTtl(ttl bound.Duration) (bound.Duration, error) {
     rule := cachecontract.TtlRule()
-    rule.Name = "RememberConfig.Ttl"
+    rule.Name = "RememberOptions.Ttl"
 
     if true == ttl.IsAbsent() {
         return bound.Duration{}, exception.NewError(
@@ -333,7 +333,7 @@ func openRememberFlightRuntime(
         if nil != closeErr {
             logging.EmergencyLogger().Error(
                 "failed to close the cache remember flight scope",
-                exception.LogContext(closeErr, exception.LogContextConfig{}),
+                exception.LogContext(closeErr, exception.LogContextOptions{}),
             )
         }
     }, nil

@@ -74,7 +74,7 @@ type RunnerCommand struct {
 
 type runReporting struct {
     commandContext *clicontract.CommandContext
-    option         output.Option
+    option         output.Options
     reportIdle     bool
 }
 
@@ -427,7 +427,7 @@ func (instance *RunnerCommand) declareSchedule(runtimeInstance containercontract
 /* renderRunReport writes one evaluated minute as the envelope every melody command writes: meta, data, warnings, error. Under json each minute is one closed document on its own line, a stream a consumer follows at constant memory; under text it is one line. The writer is guarded because two minutes' documents may complete in any order and must not interleave. */
 func (instance *RunnerCommand) renderRunReport(
     commandContext *clicontract.CommandContext,
-    option output.Option,
+    option output.Options,
     startedAt time.Time,
     report dueReport,
     runErr error,
@@ -1178,7 +1178,7 @@ func (instance *RunnerCommand) reportRunOutcome(
     /* the record carries the run's cronRunId, so a failure record ties to the run whose own records it explains */
     recordContext := exception.LogContext(
         invokeErr,
-        exception.LogContextConfig{
+        exception.LogContextOptions{
             Extra: exceptioncontract.Context{
                 "commandName": entry.commandName,
                 "cronRunId":   runId,
@@ -1337,7 +1337,7 @@ func runScheduledCommand(
         childRuntime,
         append([]string{entry.commandName}, entry.arguments...),
         capturedOutput,
-        melodycli.DispatchConfig{ApplicationVersion: applicationVersion},
+        melodycli.DispatchOptions{ApplicationVersion: applicationVersion},
     )
 }
 

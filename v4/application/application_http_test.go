@@ -2603,8 +2603,8 @@ func TestApplicationHttpHandler_CliMode_Refused(t *testing.T) {
         t.Fatalf("expected the cli mode refused, got %v %v", handler, handlerErr)
     }
 
-    if config.ModeCli != exception.LogContext(handlerErr, exception.LogContextConfig{})["mode"] {
-        t.Fatalf("expected the refusal to name the mode, got %v", exception.LogContext(handlerErr, exception.LogContextConfig{}))
+    if config.ModeCli != exception.LogContext(handlerErr, exception.LogContextOptions{})["mode"] {
+        t.Fatalf("expected the refusal to name the mode, got %v", exception.LogContext(handlerErr, exception.LogContextOptions{}))
     }
 }
 
@@ -2668,8 +2668,8 @@ func TestApplicationBeginHttpShutdown_NilContext_Refused(t *testing.T) {
         t.Fatalf("expected the nil context refused, got %v", beginErr)
     }
 
-    if "Application.BeginHttpShutdown" != exception.LogContext(beginErr, exception.LogContextConfig{})["door"] {
-        t.Fatalf("expected the refusal to name the door, got %v", exception.LogContext(beginErr, exception.LogContextConfig{}))
+    if "Application.BeginHttpShutdown" != exception.LogContext(beginErr, exception.LogContextOptions{})["door"] {
+        t.Fatalf("expected the refusal to name the door, got %v", exception.LogContext(beginErr, exception.LogContextOptions{}))
     }
 }
 
@@ -3199,8 +3199,8 @@ func TestApplicationHttpHandler_ADecoratorAnsweringNil_Refused(t *testing.T) {
                 t.Fatalf("expected the nil answer refused, got %v %v", handler, handlerErr)
             }
 
-            if 1 != exception.LogContext(handlerErr, exception.LogContextConfig{})["index"] {
-                t.Fatalf("expected the refusal to name the decorator's index 1, got %v", exception.LogContext(handlerErr, exception.LogContextConfig{}))
+            if 1 != exception.LogContext(handlerErr, exception.LogContextOptions{})["index"] {
+                t.Fatalf("expected the refusal to name the decorator's index 1, got %v", exception.LogContext(handlerErr, exception.LogContextOptions{}))
             }
 
             if true == outerRan.Load() {
@@ -3227,8 +3227,8 @@ func TestRunHttp_ADecoratorAnsweringNil_Refused(t *testing.T) {
         t.Fatalf("expected the run refused before serving, got %v", runErr)
     }
 
-    if 0 != exception.LogContext(runErr, exception.LogContextConfig{})["index"] {
-        t.Fatalf("expected the refusal to name the decorator's index 0, got %v", exception.LogContext(runErr, exception.LogContextConfig{}))
+    if 0 != exception.LogContext(runErr, exception.LogContextOptions{})["index"] {
+        t.Fatalf("expected the refusal to name the decorator's index 0, got %v", exception.LogContext(runErr, exception.LogContextOptions{}))
     }
 }
 

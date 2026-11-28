@@ -36,7 +36,7 @@ func TestResolveUnavailableRetryAfter_DecidesTheDelayAgainstItsRule(t *testing.T
             t.Fatalf("%s: expected a refusal", name)
         }
 
-        if "Field" != exception.LogContext(resolveErr, exception.LogContextConfig{})["field"] {
+        if "Field" != exception.LogContext(resolveErr, exception.LogContextOptions{})["field"] {
             t.Fatalf("%s: expected the refusal to name the field, got %v", name, resolveErr)
         }
     }

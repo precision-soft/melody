@@ -148,7 +148,7 @@ type containerServiceDescriptionItem struct {
 /* describeServiceList is the default listing and runs no provider; a container without the descriptions door is listed by name with a warning. */
 func (instance *ContainerCommand) describeServiceList(
     serviceContainer containercontract.Container,
-    option output.Option,
+    option output.Options,
     envelope *output.Envelope,
 ) {
     items := ([]containerServiceDescriptionItem)(nil)
@@ -512,7 +512,7 @@ type containerServiceDetails struct {
 /* errorCauseChainDepth bounds the links the report walks, for the cause chain and its context alike: a cycle guard for an Unwrap of the application's own that never ends, on a development command whose reader wants the first causes, so no deployment tunes it. */
 const errorCauseChainDepth = 9
 
-func resolveErrorContextJson(resolveErr error, option output.Option) string {
+func resolveErrorContextJson(resolveErr error, option output.Options) string {
     if nil == resolveErr {
         return emptyErrorContextJsonForFormat(option)
     }
@@ -562,7 +562,7 @@ func firstErrorContextInChain(resolveErr error) map[string]any {
 }
 
 /* emptyErrorContextJsonForFormat answers the absence of a context in the format's grammar: "{}" in json, so the field always parses, and an empty cell in the table. */
-func emptyErrorContextJsonForFormat(option output.Option) string {
+func emptyErrorContextJsonForFormat(option output.Options) string {
     if output.FormatTable == option.Format {
         return ""
     }
@@ -571,7 +571,7 @@ func emptyErrorContextJsonForFormat(option output.Option) string {
 }
 
 /* unrepresentableErrorContextForFormat answers a context json.Marshal refuses in the format's grammar: in json an object carrying the rendering under a key, so the field always parses; in the table the bare rendering. */
-func unrepresentableErrorContextForFormat(contextValue any, option output.Option) string {
+func unrepresentableErrorContextForFormat(contextValue any, option output.Options) string {
     rendered := fmt.Sprintf("%v", contextValue)
 
     if output.FormatTable == option.Format {
@@ -600,7 +600,7 @@ func normalizeErrorCauseChain(causeChain []string) []string {
 }
 
 /* truncateErrorContextForFormat truncates the table cell only: a cut json fragment would not parse. */
-func truncateErrorContextForFormat(value string, option output.Option) string {
+func truncateErrorContextForFormat(value string, option output.Options) string {
     if output.FormatTable != option.Format {
         return value
     }
@@ -634,7 +634,7 @@ func (instance *ContainerCommand) populateServiceList(
     ctx context.Context,
     serviceContainer containercontract.Container,
     runScope containercontract.Scope,
-    option output.Option,
+    option output.Options,
     envelope *output.Envelope,
 ) {
     registrations := ([]sweepRegistration)(nil)
@@ -1078,7 +1078,7 @@ func truncateTableCellValueByVerbosity(value string, verbosityLevel int) string 
 
 func buildContainerServiceTableRows(
     item containerServiceListItem,
-    option output.Option,
+    option output.Options,
 ) [][]string {
     typeValue := item.TypeName
     if "" != item.ErrorString {
@@ -1264,7 +1264,7 @@ func (instance *ContainerCommand) populateSingleService(
     serviceContainer containercontract.Container,
     runScope containercontract.Scope,
     serviceName string,
-    option output.Option,
+    option output.Options,
     envelope *output.Envelope,
 ) {
     /* a name a scoped registration answers to resolves as scoped, even where a container service shares it */

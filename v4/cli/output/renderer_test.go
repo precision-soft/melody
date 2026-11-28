@@ -36,7 +36,7 @@ func TestRender_ReturnsAnExitErrorWhenTheEnvelopeCarriesAnError(t *testing.T) {
         },
     )
 
-    renderErr := Render(buffer, envelope, Option{Format: FormatJson})
+    renderErr := Render(buffer, envelope, Options{Format: FormatJson})
     if nil == renderErr {
         t.Fatalf("expected an error for an envelope carrying an error")
     }
@@ -59,7 +59,7 @@ func TestRender_ReturnsNilWhenTheEnvelopeCarriesNoError(t *testing.T) {
 
     envelope := newRendererTestEnvelope()
 
-    renderErr := Render(buffer, envelope, Option{Format: FormatJson})
+    renderErr := Render(buffer, envelope, Options{Format: FormatJson})
     if nil != renderErr {
         t.Fatalf("expected no error, got %v", renderErr)
     }
@@ -79,7 +79,7 @@ func TestRender_ReturnsNilForAnEnvelopeCarryingOnlyWarnings(t *testing.T) {
         nil,
     )
 
-    renderErr := Render(buffer, envelope, Option{Format: FormatJson})
+    renderErr := Render(buffer, envelope, Options{Format: FormatJson})
     if nil != renderErr {
         t.Fatalf("a warning must not fail the command, got %v", renderErr)
     }
@@ -89,7 +89,7 @@ func TestRender_ReturnsTheEnvelopeFailureUnmarked(t *testing.T) {
     envelope := NewEnvelope(NewMeta("cmd", MetaConfig{StartedAt: time.Now()}))
     envelope.SetError("cmd.failed", "the command failed", ErrorConfig{})
 
-    renderErr := Render(&bytes.Buffer{}, envelope, Option{})
+    renderErr := Render(&bytes.Buffer{}, envelope, Options{})
     if nil == renderErr {
         t.Fatalf("expected the exit-coded error")
     }
@@ -121,7 +121,7 @@ func TestRender_LeavesTheUnnamedAndReservedDetailsOutOfTheReportedContext(t *tes
         },
     )
 
-    renderErr := Render(&bytes.Buffer{}, envelope, Option{})
+    renderErr := Render(&bytes.Buffer{}, envelope, Options{})
 
     var exitError *exception.ExitError
     if false == errors.As(renderErr, &exitError) {
@@ -155,7 +155,7 @@ func TestRender_KeepsTheEnvelopeFailureWhenThePrintingFails(t *testing.T) {
     envelope := NewEnvelope(NewMeta("cmd", MetaConfig{StartedAt: time.Now()}))
     envelope.SetError("cmd.failed", "the business failure", ErrorConfig{})
 
-    renderErr := Render(&failingRenderWriter{}, envelope, Option{})
+    renderErr := Render(&failingRenderWriter{}, envelope, Options{})
     if nil == renderErr {
         t.Fatalf("expected an error")
     }
@@ -179,7 +179,7 @@ func TestRender_KeepsTheEnvelopeFailureWhenThePrintingFails(t *testing.T) {
 func TestRender_ReturnsThePrintFailureAloneWhenTheEnvelopeCarriesNoError(t *testing.T) {
     envelope := NewEnvelope(NewMeta("cmd", MetaConfig{StartedAt: time.Now()}))
 
-    renderErr := Render(&failingRenderWriter{}, envelope, Option{Format: FormatJson})
+    renderErr := Render(&failingRenderWriter{}, envelope, Options{Format: FormatJson})
     if nil == renderErr {
         t.Fatalf("expected the print failure")
     }

@@ -3187,7 +3187,7 @@ func TestGenerateCommand_TheTextBranchNamesWhatItProducedBeforeFailing(t *testin
 
     runErr := newGenerateCommandForTest(NewConfiguration()).reportWrites(
         commandContext,
-        output.Option{Format: output.FormatTable},
+        output.Options{Format: output.FormatTable},
         time.Now(),
         []destinationWrite{{Destination: "/etc/cron.d/app", Entries: 3}},
         []string{"/etc/cron.d/app-retired", "/etc/cron.d/app-moved"},

@@ -371,7 +371,7 @@ func TestRunnerCommand_AScheduledJobReadsTheApplicationVersionTheRunnerRunsUnder
         newRunnerTestRuntime(context.Background()),
         []string{runner.Name(), "--once"},
         io.Discard,
-        melodycli.DispatchConfig{ApplicationVersion: "4.0.0-runner"},
+        melodycli.DispatchOptions{ApplicationVersion: "4.0.0-runner"},
     )
     if nil != runErr {
         t.Fatalf("unexpected error running --once: %v", runErr)
@@ -720,8 +720,8 @@ func TestRunnerCommand_InvokeReportsChildScopeCloseError(t *testing.T) {
     }
 
     /* the child scope reports its service's close failure in its context, not as a wrapped cause */
-    if false == strings.Contains(fmt.Sprintf("%v", exception.LogContext(invokeErr, exception.LogContextConfig{})), scopeCloseErr.Error()) {
-        t.Fatalf("expected the invoke error to carry the scope close error, got %v", exception.LogContext(invokeErr, exception.LogContextConfig{}))
+    if false == strings.Contains(fmt.Sprintf("%v", exception.LogContext(invokeErr, exception.LogContextOptions{})), scopeCloseErr.Error()) {
+        t.Fatalf("expected the invoke error to carry the scope close error, got %v", exception.LogContext(invokeErr, exception.LogContextOptions{}))
     }
 
     if 1 != job.runCount {
@@ -2978,7 +2978,7 @@ func TestTimeoutError_CarriesTheCommandFailureDownOneChain(t *testing.T) {
         t.Fatalf("expected the command's own failure to stay reachable, got %v", timeoutErr)
     }
 
-    logContext := exception.LogContext(timeoutErr, exception.LogContextConfig{})
+    logContext := exception.LogContext(timeoutErr, exception.LogContextOptions{})
 
     causeChain, isChain := logContext["causeChain"].([]string)
     if false == isChain || 3 > len(causeChain) {
@@ -3045,7 +3045,7 @@ func TestInvoke_ACommandFailureAndAScopeCloseFailureBothSurvive(t *testing.T) {
         t.Fatalf("expected the command's own failure to stay reachable, got %v", invokeErr)
     }
 
-    logContext := exception.LogContext(invokeErr, exception.LogContextConfig{})
+    logContext := exception.LogContext(invokeErr, exception.LogContextOptions{})
 
     causeChain, isChain := logContext["causeChain"].([]string)
     if false == isChain || 2 > len(causeChain) {
@@ -3137,7 +3137,7 @@ func driveOneIdleLoopMinute(t *testing.T, reportIdle bool) (*bytes.Buffer, chan 
         return idleMinute
     }
 
-    option, normalizeOptionErr := output.NormalizeOption(output.Option{Format: output.FormatJson})
+    option, normalizeOptionErr := output.NormalizeOption(output.Options{Format: output.FormatJson})
     if nil != normalizeOptionErr {
         t.Fatalf("expected the json option admitted, got %v", normalizeOptionErr)
     }
@@ -4504,8 +4504,8 @@ func TestInvoke_AClosedRunScopeFailsTheRunBeforeTheCommand(t *testing.T) {
         t.Fatalf("expected the run refused on its closed scope, got %v", invokeErr)
     }
 
-    if "job:top" != exception.LogContext(invokeErr, exception.LogContextConfig{})["commandName"] {
-        t.Fatalf("expected the refusal to name the command, got %v", exception.LogContext(invokeErr, exception.LogContextConfig{}))
+    if "job:top" != exception.LogContext(invokeErr, exception.LogContextOptions{})["commandName"] {
+        t.Fatalf("expected the refusal to name the command, got %v", exception.LogContext(invokeErr, exception.LogContextOptions{}))
     }
 
     if 0 != job.runCount {

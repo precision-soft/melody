@@ -515,7 +515,7 @@ func TestMigrateCommand_TheRunnersOwnProgressStaysOutOfTheMachineDocument(t *tes
                 database,
                 "up",
                 "20240101000000",
-                []Query{{Name: "create-users", Sql: "CREATE TABLE users (id BIGINT)"}}, RunnerOption{},
+                []Query{{Name: "create-users", Sql: "CREATE TABLE users (id BIGINT)"}}, RunnerOptions{},
             )
         },
     })
@@ -553,7 +553,7 @@ func TestMigrateCommand_HandsItsPostureToTheMigrationsThroughTheContext(t *testi
         Up: func(ctx context.Context, migrator *migrate.Migrator, migration *migrate.Migration) error {
             _, carriedByTheContext = runnerOptionFromContext(ctx)
 
-            return RunQueries(ctx, database, "up", "20240101000000", []Query{{Name: "create-users", Sql: "CREATE TABLE users (id BIGINT)"}}, RunnerOption{})
+            return RunQueries(ctx, database, "up", "20240101000000", []Query{{Name: "create-users", Sql: "CREATE TABLE users (id BIGINT)"}}, RunnerOptions{})
         },
     })
 
@@ -596,7 +596,7 @@ func TestMigrateCommand_AReportCutShortIsRefusedInsteadOfExitingZero(t *testing.
         Name:    "20240101000000",
         Comment: "create_users",
         Up: func(ctx context.Context, migrator *migrate.Migrator, migration *migrate.Migration) error {
-            return RunQueries(ctx, database, "up", "20240101000000", []Query{{Name: "create-users", Sql: "CREATE TABLE users (id BIGINT)"}}, RunnerOption{})
+            return RunQueries(ctx, database, "up", "20240101000000", []Query{{Name: "create-users", Sql: "CREATE TABLE users (id BIGINT)"}}, RunnerOptions{})
         },
     })
 
@@ -672,7 +672,7 @@ func TestMigrationCommands_APanicKeepsPrecedenceOverAFailedUnlock(t *testing.T) 
             func() {
                 defer func() { recovered = recover() }()
 
-                if dispatchErr := melodycli.DispatchCommand(context.Background(), command, runtimeInstance, []string{command.Name(), "--format=json"}, buffer, melodycli.DispatchConfig{}); nil != dispatchErr {
+                if dispatchErr := melodycli.DispatchCommand(context.Background(), command, runtimeInstance, []string{command.Name(), "--format=json"}, buffer, melodycli.DispatchOptions{}); nil != dispatchErr {
                     t.Errorf("expected the command to panic before it returned, got %v", dispatchErr)
                 }
             }()
@@ -796,7 +796,7 @@ func TestMigrateCommand_AnEmptyMigrationIsWarnedInTheJsonDocument(t *testing.T) 
             Name:    "20240101000000",
             Comment: "built_nothing",
             Up: func(ctx context.Context, migrator *migrate.Migrator, migration *migrate.Migration) error {
-                return RunQueries(ctx, migrator.DB(), "up", migration.Name, nil, RunnerOption{})
+                return RunQueries(ctx, migrator.DB(), "up", migration.Name, nil, RunnerOptions{})
             },
         })
 
@@ -968,7 +968,7 @@ func TestWriteRanNotRecordedMarker_WritesOnACancelledCommandContext(t *testing.T
     cancel()
 
     outputInstance, buffer := newBufferedOutput(true)
-    writeRanNotRecordedMarker(cancelledContext, database, migrationTables{migrations: "bun_migrations", locks: DefaultLocksTable}, "20240103000000", outputInstance, optionsUnlockTimeoutRule.Default)
+    writeRanNotRecordedMarker(cancelledContext, database, migrationTables{migrations: "bun_migrations", locks: DefaultLocksTable}, "20240103000000", outputInstance, commandConfigUnlockTimeoutRule.Default)
 
     if nil != markerContextErr || false == markerHasDeadline {
         t.Fatalf("expected the marker written on a live context with a deadline, got %v, deadline=%v; output %q", markerContextErr, markerHasDeadline, buffer.String())

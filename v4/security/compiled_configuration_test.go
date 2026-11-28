@@ -286,7 +286,7 @@ func TestCompiledFirewall_Logout_ADispatchFailureNamesTheBrokenListener(t *testi
         t.Fatalf("expected the listener's own failure to be reachable, got: %v", logoutErr)
     }
 
-    rendered := fmt.Sprintf("%v", exception.LogContext(logoutErr, exception.LogContextConfig{}))
+    rendered := fmt.Sprintf("%v", exception.LogContext(logoutErr, exception.LogContextOptions{}))
 
     if false == strings.Contains(rendered, "the session store refused the logout") {
         t.Fatalf("expected the logout failure to stay in the record, got %s", rendered)
@@ -385,7 +385,7 @@ func TestNewCompiledFirewall_RefusesAnUnavailableRetryAfterOutsideItsRule(t *tes
             func() {
                 defer func() {
                     recoveredErr, _ := recover().(error)
-                    if "main" != exception.LogContext(recoveredErr, exception.LogContextConfig{})["firewallName"] {
+                    if "main" != exception.LogContext(recoveredErr, exception.LogContextOptions{})["firewallName"] {
                         t.Fatalf("expected the refusal to name the firewall, got %v", recoveredErr)
                     }
                 }()

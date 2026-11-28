@@ -838,7 +838,7 @@ func TestTickDedup_TheDocumentCarriesTheSkippedEntries(t *testing.T) {
     }
 
     var text bytes.Buffer
-    _ = second.renderRunReport(parsedContextValues{WriterValue: &text}.parse(), output.Option{}, tickDedupMinute, skippedReport, nil)
+    _ = second.renderRunReport(parsedContextValues{WriterValue: &text}.parse(), output.Options{}, tickDedupMinute, skippedReport, nil)
     if false == strings.Contains(text.String(), "dispatched 0 of 1 configured entries, skipped 1") {
         t.Fatalf("expected the text form to count the skips, got %q", text.String())
     }

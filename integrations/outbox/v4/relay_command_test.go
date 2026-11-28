@@ -51,7 +51,7 @@ func runRelayCommandWith(t *testing.T, runtimeInstance containercontract.Runtime
 
     capturing := &capturingCommand{Command: relayCommand, runtimeInstance: runtimeInstance}
 
-    if commandErr := melodycli.DispatchCommand(context.Background(), capturing, runtimeInstance, append([]string{relayCommand.Name()}, arguments...), io.Discard, melodycli.DispatchConfig{}); nil != commandErr {
+    if commandErr := melodycli.DispatchCommand(context.Background(), capturing, runtimeInstance, append([]string{relayCommand.Name()}, arguments...), io.Discard, melodycli.DispatchOptions{}); nil != commandErr {
         t.Fatalf("unexpected command run error: %v", commandErr)
     }
 
@@ -175,7 +175,7 @@ func TestRelayCommand_RetriesRelayResolutionWithBackoff(t *testing.T) {
 
     capturing := &capturingCommand{Command: relayCommand, runtimeInstance: runtimeInstance}
 
-    if commandErr := melodycli.DispatchCommand(context.Background(), capturing, runtimeInstance, []string{relayCommand.Name(), "--limit", "3", "--interval", "1ms"}, io.Discard, melodycli.DispatchConfig{}); nil != commandErr {
+    if commandErr := melodycli.DispatchCommand(context.Background(), capturing, runtimeInstance, []string{relayCommand.Name(), "--limit", "3", "--interval", "1ms"}, io.Discard, melodycli.DispatchOptions{}); nil != commandErr {
         t.Fatalf("unexpected command run error: %v", commandErr)
     }
 
@@ -231,7 +231,7 @@ func TestRelayCommand_RefusesADurationFlagThatIsNotAPositiveDurationAtTheParse(t
             relayCommand := NewRelayCommand(RelayCommandConfig{})
             capturing := &capturingCommand{Command: relayCommand, runtimeInstance: relayTestRuntime()}
 
-            commandErr := melodycli.DispatchCommand(context.Background(), capturing, capturing.runtimeInstance, []string{relayCommand.Name(), "--" + flagName, value, "--limit", "1"}, io.Discard, melodycli.DispatchConfig{})
+            commandErr := melodycli.DispatchCommand(context.Background(), capturing, capturing.runtimeInstance, []string{relayCommand.Name(), "--" + flagName, value, "--limit", "1"}, io.Discard, melodycli.DispatchOptions{})
             if nil == commandErr || false == strings.Contains(commandErr.Error(), expected) || false == strings.Contains(commandErr.Error(), "-"+flagName) {
                 t.Fatalf("expected --%s %q refused at the parse with %q, got %v", flagName, value, expected, commandErr)
             }
@@ -307,7 +307,7 @@ func TestRelayCommand_RefusesADurationFlagWithNothingAfterTheSign(t *testing.T) 
         relayCommand := NewRelayCommand(RelayCommandConfig{})
         capturing := &capturingCommand{Command: relayCommand, runtimeInstance: relayTestRuntime()}
 
-        commandErr := melodycli.DispatchCommand(context.Background(), capturing, capturing.runtimeInstance, []string{relayCommand.Name(), "--" + flagName + "=", "--" + RelayLimitFlagName, "1"}, io.Discard, melodycli.DispatchConfig{})
+        commandErr := melodycli.DispatchCommand(context.Background(), capturing, capturing.runtimeInstance, []string{relayCommand.Name(), "--" + flagName + "=", "--" + RelayLimitFlagName, "1"}, io.Discard, melodycli.DispatchOptions{})
         if nil == commandErr || false == strings.Contains(commandErr.Error(), "flag needs an argument: --"+flagName+"=") {
             t.Fatalf("expected --%s= refused at the parse naming the flag, got %v", flagName, commandErr)
         }
@@ -584,7 +584,7 @@ func TestRelayCommand_ResolvesTheLazyRelayUnderTheRelayRuntime(t *testing.T) {
     relayCommand := NewRelayCommand(RelayCommandConfig{})
     capturing := &capturingCommand{Command: relayCommand, runtimeInstance: runtimeInstance}
 
-    if commandErr := melodycli.DispatchCommand(context.Background(), capturing, runtimeInstance, []string{relayCommand.Name(), "--limit", "1", "--interval", "1ms"}, io.Discard, melodycli.DispatchConfig{}); nil != commandErr {
+    if commandErr := melodycli.DispatchCommand(context.Background(), capturing, runtimeInstance, []string{relayCommand.Name(), "--limit", "1", "--interval", "1ms"}, io.Discard, melodycli.DispatchOptions{}); nil != commandErr {
         t.Fatalf("unexpected command run error: %v", commandErr)
     }
 

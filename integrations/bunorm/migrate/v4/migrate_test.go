@@ -21,7 +21,7 @@ func TestUp_ExecutesAllQueriesInOrder(t *testing.T) {
         {Name: "create index", Sql: "CREATE INDEX users_id ON users (id)"},
     }
 
-    runErr := Up(context.Background(), database, "add_users", queries, RunnerOption{Writer: buffer, NoColor: true})
+    runErr := Up(context.Background(), database, "add_users", queries, RunnerOptions{Writer: buffer, NoColor: true})
     if nil != runErr {
         t.Fatalf("unexpected error: %s", runErr.Error())
     }
@@ -60,7 +60,7 @@ func TestDown_UsesDownDirection(t *testing.T) {
 
     queries := []Query{{Name: "drop table", Sql: "DROP TABLE users"}}
 
-    runErr := Down(context.Background(), database, "add_users", queries, RunnerOption{Writer: buffer, NoColor: true})
+    runErr := Down(context.Background(), database, "add_users", queries, RunnerOptions{Writer: buffer, NoColor: true})
     if nil != runErr {
         t.Fatalf("unexpected error: %s", runErr.Error())
     }
@@ -87,7 +87,7 @@ func TestRunQueries_StopsOnFailureAndReportsQuery(t *testing.T) {
         {Name: "seed data", Sql: "INSERT INTO users VALUES (1)"},
     }
 
-    runErr := RunQueries(context.Background(), database, "up", "add_users", queries, RunnerOption{Writer: buffer, NoColor: true})
+    runErr := RunQueries(context.Background(), database, "up", "add_users", queries, RunnerOptions{Writer: buffer, NoColor: true})
     if nil == runErr {
         t.Fatal("expected an error when a query fails")
     }
@@ -136,7 +136,7 @@ func TestRunQueries_NilWriterFallsBackToStdout(t *testing.T) {
         "up",
         "add_users",
         []Query{{Name: "create table", Sql: "CREATE TABLE users (id INTEGER)"}},
-        RunnerOption{Writer: nil, NoColor: true},
+        RunnerOptions{Writer: nil, NoColor: true},
     )
 
     os.Stdout = originalStdout
@@ -207,7 +207,7 @@ func TestRunQueries_EmptySetWarnsInsteadOfReportingSuccess(t *testing.T) {
         "up",
         "20240101000000_create_users",
         nil,
-        RunnerOption{Writer: buffer, NoColor: true},
+        RunnerOptions{Writer: buffer, NoColor: true},
     )
     if nil != runErr {
         t.Fatalf("expected an empty set to still succeed, got %v", runErr)
@@ -285,9 +285,9 @@ func TestMigrationPrinter_EscapesTheMigrationNameOnTheEmptyAndSuccessLines(t *te
 
 func TestRunQueries_ReadsTheOptionCarriedByTheContext(t *testing.T) {
     var carried bytes.Buffer
-    ctx := withRunnerOption(context.Background(), RunnerOption{Writer: &carried, NoColor: true})
+    ctx := withRunnerOption(context.Background(), RunnerOptions{Writer: &carried, NoColor: true})
 
-    if runErr := RunQueries(ctx, nil, "up", "20240101000000_probe", nil, RunnerOption{}); nil != runErr {
+    if runErr := RunQueries(ctx, nil, "up", "20240101000000_probe", nil, RunnerOptions{}); nil != runErr {
         t.Fatalf("run: %v", runErr)
     }
 
@@ -314,7 +314,7 @@ func TestRunQueries_EscapesTheMigrationNameInsideThePrefixOfEveryPerQueryLine(t 
             {Name: "create index", Sql: "CREATE INDEX users_id ON users (id)"},
         }
 
-        runErr := RunQueries(context.Background(), database, "up", "m\x1b[31mred", queries, RunnerOption{Writer: buffer, NoColor: noColor})
+        runErr := RunQueries(context.Background(), database, "up", "m\x1b[31mred", queries, RunnerOptions{Writer: buffer, NoColor: noColor})
         if nil == runErr {
             t.Fatalf("noColor=%v: expected the second query to fail", noColor)
         }
@@ -342,12 +342,12 @@ func TestRunQueries_EscapesTheDirectionOnEveryLine(t *testing.T) {
     buffer := &bytes.Buffer{}
     queries := []Query{{Name: "create table", Sql: "CREATE TABLE users (id INTEGER)"}}
 
-    runErr := RunQueries(context.Background(), database, "up\rinjected", "add_users", queries, RunnerOption{Writer: buffer, NoColor: true})
+    runErr := RunQueries(context.Background(), database, "up\rinjected", "add_users", queries, RunnerOptions{Writer: buffer, NoColor: true})
     if nil != runErr {
         t.Fatalf("expected the run to succeed, got %v", runErr)
     }
 
-    emptyErr := RunQueries(context.Background(), database, "up\rinjected", "empty", nil, RunnerOption{Writer: buffer, NoColor: true})
+    emptyErr := RunQueries(context.Background(), database, "up\rinjected", "empty", nil, RunnerOptions{Writer: buffer, NoColor: true})
     if nil != emptyErr {
         t.Fatalf("expected the empty run to succeed, got %v", emptyErr)
     }
@@ -365,9 +365,9 @@ func TestRunQueries_EscapesTheDirectionOnEveryLine(t *testing.T) {
 /* an explicit option that names no writer prints under the command's posture, so a migration that passes one to set the colour alone does not print past the writer its command chose */
 func TestUp_AnOptionWithoutAWriterPrintsUnderTheCommandsPosture(t *testing.T) {
     var commandWriter bytes.Buffer
-    ctx := withRunnerOption(context.Background(), RunnerOption{Writer: &commandWriter, NoColor: true})
+    ctx := withRunnerOption(context.Background(), RunnerOptions{Writer: &commandWriter, NoColor: true})
 
-    if upErr := Up(ctx, nil, "probe", nil, RunnerOption{NoColor: true}); nil != upErr {
+    if upErr := Up(ctx, nil, "probe", nil, RunnerOptions{NoColor: true}); nil != upErr {
         t.Fatalf("expected the empty set to succeed, got %v", upErr)
     }
 
@@ -379,9 +379,9 @@ func TestUp_AnOptionWithoutAWriterPrintsUnderTheCommandsPosture(t *testing.T) {
 func TestRunQueries_AZeroOptionFollowsTheCommandsColourPosture(t *testing.T) {
     for _, commandNoColor := range []bool{true, false} {
         var commandWriter bytes.Buffer
-        ctx := withRunnerOption(context.Background(), RunnerOption{Writer: &commandWriter, NoColor: commandNoColor})
+        ctx := withRunnerOption(context.Background(), RunnerOptions{Writer: &commandWriter, NoColor: commandNoColor})
 
-        if runErr := RunQueries(ctx, nil, "up", "probe", nil, RunnerOption{}); nil != runErr {
+        if runErr := RunQueries(ctx, nil, "up", "probe", nil, RunnerOptions{}); nil != runErr {
             t.Fatalf("expected the empty set to succeed, got %v", runErr)
         }
 
@@ -393,9 +393,9 @@ func TestRunQueries_AZeroOptionFollowsTheCommandsColourPosture(t *testing.T) {
 
 func TestRunQueries_AnOptionTurningColourOffWinsOverAColourPosture(t *testing.T) {
     var commandWriter bytes.Buffer
-    ctx := withRunnerOption(context.Background(), RunnerOption{Writer: &commandWriter})
+    ctx := withRunnerOption(context.Background(), RunnerOptions{Writer: &commandWriter})
 
-    if runErr := RunQueries(ctx, nil, "up", "probe", nil, RunnerOption{NoColor: true}); nil != runErr {
+    if runErr := RunQueries(ctx, nil, "up", "probe", nil, RunnerOptions{NoColor: true}); nil != runErr {
         t.Fatalf("expected the empty set to succeed, got %v", runErr)
     }
 

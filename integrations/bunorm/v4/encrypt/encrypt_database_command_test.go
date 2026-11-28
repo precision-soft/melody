@@ -90,7 +90,7 @@ func runEncryptDatabaseCommand(t *testing.T, command *EncryptDatabaseCommand, ex
         fakeRuntime{},
         append([]string{command.Name()}, extraArgs...),
         io.Discard,
-        melodycli.DispatchConfig{},
+        melodycli.DispatchOptions{},
     )
 }
 
@@ -107,7 +107,7 @@ func TestEncryptDatabaseCommand_RefusesANegativeBatch(t *testing.T) {
         t.Fatalf("expected the refusal to name the flag, got: %v", runErr)
     }
 
-    if "TableSpecification.BatchSize" != exception.LogContext(runErr, exception.LogContextConfig{})["field"] {
+    if "TableSpecification.BatchSize" != exception.LogContext(runErr, exception.LogContextOptions{})["field"] {
         t.Fatalf("expected the refusal to name TableSpecification.BatchSize, got: %v", runErr)
     }
 }
@@ -149,7 +149,7 @@ func TestEncryptDatabaseCommand_CarriesTheProcessedCountOnFailure(t *testing.T) 
         t.Fatalf("expected the failure wrap, got: %v", runErr)
     }
 
-    logContext := exception.LogContext(runErr, exception.LogContextConfig{})
+    logContext := exception.LogContext(runErr, exception.LogContextOptions{})
     if _, hasProcessed := logContext["processedRows"]; false == hasProcessed {
         t.Fatalf("expected the failure to carry the processed count, got context: %v", logContext)
     }
@@ -274,7 +274,7 @@ func TestNewEncryptDatabaseCommand_RefusesNeitherOrBothDatabaseFields(t *testing
                     t.Fatalf("expected the exclusive pair refused, got %v", recoveredErr)
                 }
 
-                fields := exception.LogContext(recoveredErr, exception.LogContextConfig{})["fields"]
+                fields := exception.LogContext(recoveredErr, exception.LogContextOptions{})["fields"]
                 if "[EncryptDatabaseCommandConfig.Database EncryptDatabaseCommandConfig.DatabaseResolver]" != fmt.Sprintf("%v", fields) {
                     t.Fatalf("expected the two fields named, got %v", fields)
                 }
@@ -358,7 +358,7 @@ func TestEncryptDatabaseCommand_RefusesANegativeBatchBeforeResolvingTheDatabase(
         t.Fatalf("expected the flag refusal, got %v", runErr)
     }
 
-    if "TableSpecification.BatchSize" != exception.LogContext(runErr, exception.LogContextConfig{})["field"] {
+    if "TableSpecification.BatchSize" != exception.LogContext(runErr, exception.LogContextOptions{})["field"] {
         t.Fatalf("expected the field named, got %v", runErr)
     }
 

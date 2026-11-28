@@ -7,7 +7,7 @@ import (
     "github.com/precision-soft/melody/v4/exception"
 )
 
-/* The defaults an Options field takes when left out. */
+/* The defaults a CommandConfig field takes when left out. */
 const (
     DefaultManagerRegistryServiceId = "service.bunorm.manager_registry"
     DefaultManagerFlagName          = "manager"
@@ -19,7 +19,7 @@ const MigrateForceFlagName = "force"
 
 const ranNotRecordedMarkerNamePrefix = "ranNotRecorded:"
 
-type Options struct {
+type CommandConfig struct {
     ManagerRegistryServiceId string
     ManagerFlagName          string
     CommandPrefix            string
@@ -31,14 +31,14 @@ type Options struct {
     UnlockTimeout bound.Duration
 }
 
-var optionsUnlockTimeoutRule = bound.Rule[time.Duration]{
-    Name:    "Options.UnlockTimeout",
+var commandConfigUnlockTimeoutRule = bound.Rule[time.Duration]{
+    Name:    "CommandConfig.UnlockTimeout",
     Default: 5 * time.Second,
     Minimum: bound.TimeoutMinimum,
 }
 
-func mustResolveUnlockTimeout(options Options) time.Duration {
-    unlockTimeout, unlockTimeoutErr := bound.Resolve(options.UnlockTimeout, optionsUnlockTimeoutRule)
+func mustResolveUnlockTimeout(config CommandConfig) time.Duration {
+    unlockTimeout, unlockTimeoutErr := bound.Resolve(config.UnlockTimeout, commandConfigUnlockTimeoutRule)
     if nil != unlockTimeoutErr {
         exception.Panic(exception.FromError(unlockTimeoutErr))
     }

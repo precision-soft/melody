@@ -58,7 +58,7 @@ func TestStaticHmacApplicationRegistry_OwnsItsRoles(t *testing.T) {
 }
 
 func TestStaticHmacApplicationRegistry_RefusesANilRuntime(t *testing.T) {
-    if _, _, rolesErr := hmacTestApplications().RolesForApplication(nil, "wms-service"); "runtimeInstance" != exception.LogContext(rolesErr, exception.LogContextConfig{})["argument"] {
+    if _, _, rolesErr := hmacTestApplications().RolesForApplication(nil, "wms-service"); "runtimeInstance" != exception.LogContext(rolesErr, exception.LogContextOptions{})["argument"] {
         t.Fatalf("expected a nil runtime refused naming the argument, got %v", rolesErr)
     }
 }

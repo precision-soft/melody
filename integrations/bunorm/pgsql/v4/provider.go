@@ -146,7 +146,7 @@ func (instance *Provider) openWithRetry(runtimeInstance containercontract.Runtim
                 "database open cancelled by the caller's context",
                 exception.LogContext(
                     cancelledErr,
-                    exception.LogContextConfig{Extra: map[string]any{"attempt": attempt}},
+                    exception.LogContextOptions{Extra: map[string]any{"attempt": attempt}},
                 ),
             )
 
@@ -160,7 +160,7 @@ func (instance *Provider) openWithRetry(runtimeInstance containercontract.Runtim
                 "database connection failed with non-transient error",
                 exception.LogContext(
                     terminalErr,
-                    exception.LogContextConfig{Extra: map[string]any{"attempt": attempt}},
+                    exception.LogContextOptions{Extra: map[string]any{"attempt": attempt}},
                 ),
             )
 
@@ -173,7 +173,7 @@ func (instance *Provider) openWithRetry(runtimeInstance containercontract.Runtim
                 "database connection failed after max retry attempts",
                 exception.LogContext(
                     terminalErr,
-                    exception.LogContextConfig{Extra: map[string]any{"attempt": attempt, "maxAttempts": maxAttempts}},
+                    exception.LogContextOptions{Extra: map[string]any{"attempt": attempt, "maxAttempts": maxAttempts}},
                 ),
             )
 
@@ -189,7 +189,7 @@ func (instance *Provider) openWithRetry(runtimeInstance containercontract.Runtim
             "database connection failed and retrying",
             exception.LogContext(
                 retryErr,
-                exception.LogContextConfig{
+                exception.LogContextOptions{
                     Extra: map[string]any{
                         "attempt":     attempt,
                         "maxAttempts": maxAttempts,
@@ -210,14 +210,14 @@ func (instance *Provider) openWithRetry(runtimeInstance containercontract.Runtim
                 "database connection retry cancelled by the caller's context",
                 exception.LogContext(
                     exception.FromError(openErr),
-                    exception.LogContextConfig{Extra: map[string]any{"attempt": attempt}},
+                    exception.LogContextOptions{Extra: map[string]any{"attempt": attempt}},
                 ),
                 cancellationOf(ctx),
             )
 
             logger.Warning(
                 "database connection retry cancelled by the caller's context",
-                exception.LogContext(cancelledErr, exception.LogContextConfig{}),
+                exception.LogContext(cancelledErr, exception.LogContextOptions{}),
             )
 
             return nil, exception.MarkLogged(cancelledErr)

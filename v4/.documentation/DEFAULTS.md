@@ -47,15 +47,15 @@ A failure the tree still carries is held by a line of `.dev/validate/defaults.ba
 | `v4/cache.InMemoryBackendConfig.CleanupInterval` | limit | a loop that spins or never runs | 1m min 1ms | `value:v4/cache.InMemoryBackendConfig.CleanupInterval` | class T: an interval; unlimited is a sweep that never runs, so the table only grows | [CACHE.md](package/CACHE.md) |
 | `v4/cache.InMemoryBackendConfig.MaxKeyLength` | limit | unbounded memory or work | 1024 min 1 | `value:v4/cache.InMemoryBackendConfig.MaxKeyLength` | class T: a size; unlimited is a key of any length kept in the table, as the rueidis backend refuses it | [CACHE.md](package/CACHE.md) |
 | `v4/cache.InMemoryBackendConfig.MaxItems` | limit | unbounded memory or work | 10_000 min 1 unlimited admitted | `value:v4/cache.InMemoryBackendConfig.MaxItems` | — | [CACHE.md](package/CACHE.md) |
-| `v4/cache.RememberConfig.WaitTimeout` | limit | a call or a wait that never returns | 30s min 0s unlimited admitted | `value:v4/cache.RememberConfig.WaitTimeout` | — | [CACHE.md](package/CACHE.md) |
-| `v4/cache.RememberConfig.StampedeProtectionDisabled` | protection | one cache miss computed by every concurrent caller at once (a stampede on the backing store) | one flight per key, the callers after the first join it | `off:v4/cache.RememberConfig.StampedeProtectionDisabled` | — | [CACHE.md](package/CACHE.md) |
-| `v4/cache.RememberConfig.Detached` | protection | a callback that never returns pinning its key for the life of the process | the last waiter leaving cancels the flight, the next caller leads a fresh one | `off:v4/cache.RememberConfig.Detached` | — | [CACHE.md](package/CACHE.md) |
+| `v4/cache.RememberOptions.WaitTimeout` | limit | a call or a wait that never returns | 30s min 0s unlimited admitted | `value:v4/cache.RememberOptions.WaitTimeout` | — | [CACHE.md](package/CACHE.md) |
+| `v4/cache.RememberOptions.StampedeProtectionDisabled` | protection | one cache miss computed by every concurrent caller at once (a stampede on the backing store) | one flight per key, the callers after the first join it | `off:v4/cache.RememberOptions.StampedeProtectionDisabled` | — | [CACHE.md](package/CACHE.md) |
+| `v4/cache.RememberOptions.Detached` | protection | a callback that never returns pinning its key for the life of the process | the last waiter leaving cancels the flight, the next caller leads a fresh one | `off:v4/cache.RememberOptions.Detached` | — | [CACHE.md](package/CACHE.md) |
 
 ## `v4/cache/contract`
 
 | key | kind | protects against | default | door | reason | documented |
 |---|---|---|---|---|---|---|
-| `v4/cache/contract.ttl` | limit | state held, or a decision kept, forever | no default: an absent ttl refused, min 1s unlimited admitted | `value:v4/cache/contract.Cache.Set`, `value:v4/cache/contract.Cache.SetMultiple`, `value:v4/cache.RememberConfig.Ttl`, `value:v4/cache/contract.CounterOptions.Ttl` | — | [CACHE.md](package/CACHE.md) |
+| `v4/cache/contract.ttl` | limit | state held, or a decision kept, forever | no default: an absent ttl refused, min 1s unlimited admitted | `value:v4/cache/contract.Cache.Set`, `value:v4/cache/contract.Cache.SetMultiple`, `value:v4/cache.RememberOptions.Ttl`, `value:v4/cache/contract.CounterOptions.Ttl` | — | [CACHE.md](package/CACHE.md) |
 
 ## `v4/cli`
 
@@ -67,16 +67,16 @@ A failure the tree still carries is held by a line of `.dev/validate/defaults.ba
 
 | key | kind | protects against | default | door | reason | documented |
 |---|---|---|---|---|---|---|
-| `v4/cli/output.Option.Limit` | limit | unbounded memory or work | unlimited min 0 | `value:v4/cli/output.Option.Limit`, `value:v4/cli/output.ListPayloadConfig.Limit` | — | [CLI.md](package/CLI.md) |
-| `v4/cli/output.Option.Offset` | limit | a negative or runaway offset | 0 min 0 | `value:v4/cli/output.Option.Offset`, `value:v4/cli/output.ListPayloadConfig.Offset` | class T: a position, not a size: an offset has no unlimited | [CLI.md](package/CLI.md) |
-| `v4/cli/output.Option.TableMaxWidth` | limit | unbounded memory or work | 120 min 1 unlimited admitted | `value:v4/cli/output.Option.TableMaxWidth` | — | [CLI.md](package/CLI.md) |
+| `v4/cli/output.Options.Limit` | limit | unbounded memory or work | unlimited min 0 | `value:v4/cli/output.Options.Limit`, `value:v4/cli/output.ListPayloadConfig.Limit` | — | [CLI.md](package/CLI.md) |
+| `v4/cli/output.Options.Offset` | limit | a negative or runaway offset | 0 min 0 | `value:v4/cli/output.Options.Offset`, `value:v4/cli/output.ListPayloadConfig.Offset` | class T: a position, not a size: an offset has no unlimited | [CLI.md](package/CLI.md) |
+| `v4/cli/output.Options.TableMaxWidth` | limit | unbounded memory or work | 120 min 1 unlimited admitted | `value:v4/cli/output.Options.TableMaxWidth` | — | [CLI.md](package/CLI.md) |
 | `v4/cli/output.TablePrinterConfig.MaxWidth` | limit | unbounded memory or work | 120 min 1 unlimited admitted | `value:v4/cli/output.TablePrinterConfig.MaxWidth` | — | [CLI.md](package/CLI.md) |
 
 ## `v4/config`
 
 | key | kind | protects against | default | door | reason | documented |
 |---|---|---|---|---|---|---|
-| `v4/config.ApplicationConfig.HttpKernel.UnavailableRetryAfter` | limit | a client retrying at once, or never | 5s min 1s max 1h | `value:v4/application.ApplicationConfig.HttpKernel.UnavailableRetryAfter`, `env:MELODY_HTTP_UNAVAILABLE_RETRY_AFTER`, `value:v4/http.ExceptionRenderConfig.UnavailableRetryAfter`, `value:v4/http.KernelExceptionEventConfig.UnavailableRetryAfter`, `value:v4/security.CompiledFirewallConfig.UnavailableRetryAfter`, `value:v4/security/config.GlobalConfig.UnavailableRetryAfter`, `value:v4/security/config.FirewallOverride.UnavailableRetryAfter` | 1s to 1h in whole seconds: Retry-After is whole seconds, and a hint past an hour tells a client to stay away from an outage the instance recovers from in seconds; unlimited is a client told never to retry | [APPLICATION.md](package/APPLICATION.md) |
+| `v4/config.ApplicationConfig.HttpKernel.UnavailableRetryAfter` | limit | a client retrying at once, or never | 5s min 1s max 1h | `value:v4/application.ApplicationConfig.HttpKernel.UnavailableRetryAfter`, `env:MELODY_HTTP_UNAVAILABLE_RETRY_AFTER`, `value:v4/http.ExceptionRenderOptions.UnavailableRetryAfter`, `value:v4/http.KernelExceptionEventConfig.UnavailableRetryAfter`, `value:v4/security.CompiledFirewallConfig.UnavailableRetryAfter`, `value:v4/security/config.GlobalConfig.UnavailableRetryAfter`, `value:v4/security/config.FirewallOverride.UnavailableRetryAfter` | 1s to 1h in whole seconds: Retry-After is whole seconds, and a hint past an hour tells a client to stay away from an outage the instance recovers from in seconds; unlimited is a client told never to retry | [APPLICATION.md](package/APPLICATION.md) |
 | `v4/config.ApplicationConfig.HttpServer.IdleTimeout` | limit | a call or a wait that never returns | 1m min 1ms | `value:v4/application.ApplicationConfig.HttpServer.IdleTimeout`, `env:MELODY_HTTP_IDLE_TIMEOUT` | class T: a timeout; unlimited holds every idle keep-alive connection forever | [APPLICATION.md](package/APPLICATION.md) |
 | `v4/config.ApplicationConfig.HttpServer.MaxHeaderBytes` | limit | unbounded memory or work | 1 MiB min 4 << 10 | `value:v4/application.ApplicationConfig.HttpServer.MaxHeaderBytes`, `env:MELODY_HTTP_MAX_HEADER_BYTES` | class T: a size; unlimited is memory or work that only grows | [APPLICATION.md](package/APPLICATION.md) |
 | `v4/config.ApplicationConfig.HttpServer.ReadHeaderTimeout` | limit | a call or a wait that never returns | 5s min 1ms | `value:v4/application.ApplicationConfig.HttpServer.ReadHeaderTimeout`, `env:MELODY_HTTP_READ_HEADER_TIMEOUT` | class T: a timeout; unlimited is the wait that never returns | [APPLICATION.md](package/APPLICATION.md) |
@@ -147,7 +147,7 @@ A failure the tree still carries is held by a line of `.dev/validate/defaults.ba
 | `v4/http.resolveSessionCookieSameSite` | protection | the session cookie riding a cross-site request | SameSite=Lax; SameSite=None forces Secure | `value:v4/http/contract.SessionCookiePolicy.SameSite` | — | [HTTP.md](package/HTTP.md) |
 | `v4/http.NewKernel` | refusal | a session cookie every browser drops | SameSite=None beside SessionCookieSecureNever refused at construction, naming SessionCookiePolicy.Secure | none | the pair works in no browser; either half alone is the door | [SECURITY.md](package/SECURITY.md) |
 | `v4/http.RedirectResponse` | refusal | an open redirect minted from client input | an absolute, scheme-relative or backslash-carrying location refused by panic | `use:v4/http.RedirectExternalResponse` | the sibling's name is the caller's assertion that the target is trusted | [HTTP.md](package/HTTP.md) |
-| `v4/http.exceptionListenerDebugMode` | redaction | an error's context and cause, or a plain error's text, served to a client | shown in the dev environment only | `use:v4/http.ExceptionRenderConfig.DebugMode` | class R: the environment name is the one switch, the status is the same in every environment and only the debug payload differs; DebugMode is for a caller rendering by hand | [EXCEPTION.md](package/EXCEPTION.md) |
+| `v4/http.exceptionListenerDebugMode` | redaction | an error's context and cause, or a plain error's text, served to a client | shown in the dev environment only | `use:v4/http.ExceptionRenderOptions.DebugMode` | class R: the environment name is the one switch, the status is the same in every environment and only the debug payload differs; DebugMode is for a caller rendering by hand | [EXCEPTION.md](package/EXCEPTION.md) |
 | `v4/http.requestSession.load` | protection | a session storage outage read as nobody signed in | the read fails, answered 503 with Retry-After | `off:v4/http/contract.SessionPolicy.EmptyOnOutage`, `env:MELODY_HTTP_SESSION_EMPTY_ON_OUTAGE` | the Go field is the door; the key only hardens it: false is the one value it admits, forcing the 503 over a field that serves the empty session, and true refuses the boot naming the key | [SESSION.md](package/SESSION.md) |
 | `v4/http.afterFailureDoor.admitAfterFailureWrite` | protection | a listener running after a failure overwriting the failure's answer | the write refused with a warning, the standing response served | `off:v4/event/contract.ListenerFailureConfig.ReplacesResponseAfterFailure` | — | [HTTP.md](package/HTTP.md) |
 
@@ -240,15 +240,15 @@ A failure the tree still carries is held by a line of `.dev/validate/defaults.ba
 | key | kind | protects against | default | door | reason | documented |
 |---|---|---|---|---|---|---|
 | `v4/lock.ExclusiveCommandConfig.Ttl` | limit | state held, or a decision kept, forever | 30s min 2ms unlimited admitted | `value:v4/lock.ExclusiveCommandConfig.Ttl` | — | [LOCK.md](package/LOCK.md) |
-| `v4/lock.ExclusiveConfig.Ttl` | limit | state held, or a decision kept, forever | 30s min 2ms unlimited admitted | `value:v4/lock.ExclusiveConfig.Ttl` | — | [LOCK.md](package/LOCK.md) |
+| `v4/lock.ExclusiveOptions.Ttl` | limit | state held, or a decision kept, forever | 30s min 2ms unlimited admitted | `value:v4/lock.ExclusiveOptions.Ttl` | — | [LOCK.md](package/LOCK.md) |
 | `v4/lock.InMemoryLockerConfig.PurgeInterval` | limit | a loop that spins or never runs | 512 min 1 unlimited admitted | `value:v4/lock.InMemoryLockerConfig.PurgeInterval` | — | [LOCK.md](package/LOCK.md) |
 | `v4/lock.LeaderGateConfig.MaxCampaignBackoff` | limit | a campaign that spins or never comes back | 1m min 1ms | `value:v4/lock.LeaderGateConfig.MaxCampaignBackoff` | class T: a backoff ceiling; unlimited is a candidate that never campaigns again | [LOCK.md](package/LOCK.md) |
 | `v4/lock.LeaderGateConfig.MaxConsecutiveRefreshFailures` | limit | unbounded memory or work | 3 min 1 unlimited admitted | `value:v4/lock.LeaderGateConfig.MaxConsecutiveRefreshFailures` | — | [LOCK.md](package/LOCK.md) |
 | `v4/lock.LeaderGateConfig.RefreshInterval` | limit | a loop that spins or never runs | derived: max(Ttl/2, 1ms), 15s under an unlimited Ttl; min 1ms | `value:v4/lock.LeaderGateConfig.RefreshInterval` | class T: an interval; unlimited never refreshes the lease, so the leadership lapses under a leader that still runs | [LOCK.md](package/LOCK.md) |
 | `v4/lock.LeaderGateConfig.RetryInterval` | limit | a loop that spins or never runs | derived: max(Ttl/2, 1s), 1s under an unlimited Ttl; min 1ms | `value:v4/lock.LeaderGateConfig.RetryInterval` | class T: an interval; unlimited never campaigns again after a lost lease | [LOCK.md](package/LOCK.md) |
 | `v4/lock.LeaderGateConfig.Ttl` | limit | state held, or a decision kept, forever | 30s min 2ms unlimited admitted | `value:v4/lock.LeaderGateConfig.Ttl` | — | [LOCK.md](package/LOCK.md) |
-| `v4/lock.sessionProbeIntervalRule#1` | limit | a session lock whose loss goes unnoticed | 15s min 1ms | `value:v4/lock.ExclusiveConfig.ProbeInterval`, `value:v4/lock.ExclusiveCommandConfig.ProbeInterval` | class T: an interval; unlimited never probes the session, so a lock lost with its connection goes unnoticed | [LOCK.md](package/LOCK.md) |
-| `v4/lock.stopRenewalLimitRule#1` | limit | unbounded memory or work | 30s min 1ms unlimited admitted | `value:v4/lock.ExclusiveCommandConfig.StopRenewalLimit`, `value:v4/lock.ExclusiveConfig.StopRenewalLimit`, `value:v4/lock.LeaderGateConfig.StopRenewalLimit` | — | [LOCK.md](package/LOCK.md) |
+| `v4/lock.sessionProbeIntervalRule#1` | limit | a session lock whose loss goes unnoticed | 15s min 1ms | `value:v4/lock.ExclusiveOptions.ProbeInterval`, `value:v4/lock.ExclusiveCommandConfig.ProbeInterval` | class T: an interval; unlimited never probes the session, so a lock lost with its connection goes unnoticed | [LOCK.md](package/LOCK.md) |
+| `v4/lock.stopRenewalLimitRule#1` | limit | unbounded memory or work | 30s min 1ms unlimited admitted | `value:v4/lock.ExclusiveCommandConfig.StopRenewalLimit`, `value:v4/lock.ExclusiveOptions.StopRenewalLimit`, `value:v4/lock.LeaderGateConfig.StopRenewalLimit` | — | [LOCK.md](package/LOCK.md) |
 
 ## `v4/lock/contract`
 
@@ -260,9 +260,9 @@ A failure the tree still carries is held by a line of `.dev/validate/defaults.ba
 
 | key | kind | protects against | default | door | reason | documented |
 |---|---|---|---|---|---|---|
-| `v4/logging.ExitConfig.BeforeExitBudget` | limit | a call or a wait that never returns | 10s min 1ms | `value:v4/logging.ExitConfig.BeforeExitBudget` | class T: a timeout; an unlimited step before exit is a process that never exits | [LOGGING.md](package/LOGGING.md) |
+| `v4/logging.ExitOptions.BeforeExitBudget` | limit | a call or a wait that never returns | 10s min 1ms | `value:v4/logging.ExitOptions.BeforeExitBudget` | class T: a timeout; an unlimited step before exit is a process that never exits | [LOGGING.md](package/LOGGING.md) |
 | `v4/logging.JsonLoggerConfig.ContextNormalizationDepth` | limit | a descent without end: the stack, or a payload that nests forever | 10_000 min 1 max 10_000 | `value:v4/logging.JsonLoggerConfig.ContextNormalizationDepth` | at most 10000, the nesting encoding/json decodes: each level is a frame of the goroutine stack, so a deeper walk can overflow it; unlimited is the overflow | [LOGGING.md](package/LOGGING.md) |
-| `v4/logging.ShieldedStepConfig.Budget` | limit | a call or a wait that never returns | 10s min 1ms unlimited admitted | `value:v4/logging.ShieldedStepConfig.Budget` | — | [LOGGING.md](package/LOGGING.md) |
+| `v4/logging.ShieldedStepOptions.Budget` | limit | a call or a wait that never returns | 10s min 1ms unlimited admitted | `value:v4/logging.ShieldedStepOptions.Budget` | — | [LOGGING.md](package/LOGGING.md) |
 | `v4/logging.causeChainDepthRule#1` | limit | a descent without end: the stack, or a payload that nests forever | 8 min 1 | `value:v4/logging.DefaultLoggerConfig.CauseChainDepth`, `value:v4/logging.JsonLoggerConfig.CauseChainDepth` | class T: a depth; a chain can be cyclic, so unlimited is a walk without end | [LOGGING.md](package/LOGGING.md) |
 | `v4/logging.DefaultLogDirectoryMode` | mode | a journal directory readable by every local user | 0750 | `value:v4/logging.ReopenableFileWriterConfig.DirectoryMode`, `env:MELODY_LOG_DIRECTORY_MODE` | — | [LOGGING.md](package/LOGGING.md) |
 | `v4/logging.DefaultLogFileMode` | mode | a journal readable by every local user | 0640 | `value:v4/logging.ReopenableFileWriterConfig.FileMode`, `env:MELODY_LOG_FILE_MODE` | — | [LOGGING.md](package/LOGGING.md) |
@@ -355,9 +355,9 @@ A failure the tree still carries is held by a line of `.dev/validate/defaults.ba
 
 | key | kind | protects against | default | door | reason | documented |
 |---|---|---|---|---|---|---|
-| `v4/security/totp.totp.Config.Digits` | limit | a code short enough to guess | 6 min 6 max 8 | `value:v4/security/totp.Config.Digits` | 6 to 8: RFC 4226 asks at least six digits and authenticator apps show at most eight; a code outside the range is one no app generates | [SECURITY.md](package/SECURITY.md) |
-| `v4/security/totp.totp.Config.Period` | limit | a loop that spins or never runs | 30s min 1s max 24h | `value:v4/security/totp.Config.Period` | 1s to 24h in whole seconds: a step longer than a day makes one code a day-long credential; unlimited is a code that never changes | [SECURITY.md](package/SECURITY.md) |
-| `v4/security/totp.totp.Config.Skew` | limit | a clock difference widening what a credential admits | 1 min 0 max 10 | `value:v4/security/totp.Config.Skew` | at most 10: each step of skew widens by two periods the window a guessed code is accepted in, ten already five minutes either side at 30s; unlimited accepts every code ever issued | [SECURITY.md](package/SECURITY.md) |
+| `v4/security/totp.totp.Options.Digits` | limit | a code short enough to guess | 6 min 6 max 8 | `value:v4/security/totp.Options.Digits` | 6 to 8: RFC 4226 asks at least six digits and authenticator apps show at most eight; a code outside the range is one no app generates | [SECURITY.md](package/SECURITY.md) |
+| `v4/security/totp.totp.Options.Period` | limit | a loop that spins or never runs | 30s min 1s max 24h | `value:v4/security/totp.Options.Period` | 1s to 24h in whole seconds: a step longer than a day makes one code a day-long credential; unlimited is a code that never changes | [SECURITY.md](package/SECURITY.md) |
+| `v4/security/totp.totp.Options.Skew` | limit | a clock difference widening what a credential admits | 1 min 0 max 10 | `value:v4/security/totp.Options.Skew` | at most 10: each step of skew widens by two periods the window a guessed code is accepted in, ten already five minutes either side at 30s; unlimited accepts every code ever issued | [SECURITY.md](package/SECURITY.md) |
 
 ## `v4/serializer`
 
@@ -409,7 +409,7 @@ A failure the tree still carries is held by a line of `.dev/validate/defaults.ba
 
 | key | kind | protects against | default | door | reason | documented |
 |---|---|---|---|---|---|---|
-| `v4/storage/contract.PresignConfig.Expiry` | limit | state held, or a decision kept, forever | 15m min 1s max 168h | `value:v4/storage/contract.PresignConfig.Expiry` | at most 7 days, the longest a SigV4 presigned url is signed for: the url is a bearer credential to the object, so unlimited is a credential that never expires | [STORAGE.md](package/STORAGE.md) |
+| `v4/storage/contract.PresignOptions.Expiry` | limit | state held, or a decision kept, forever | 15m min 1s max 168h | `value:v4/storage/contract.PresignOptions.Expiry` | at most 7 days, the longest a SigV4 presigned url is signed for: the url is a bearer credential to the object, so unlimited is a credential that never expires | [STORAGE.md](package/STORAGE.md) |
 
 ## `v4/translation`
 
@@ -462,7 +462,7 @@ A failure the tree still carries is held by a line of `.dev/validate/defaults.ba
 
 | key | kind | protects against | default | door | reason | documented |
 |---|---|---|---|---|---|---|
-| `integrations/bunorm/migrate/v4.Options.UnlockTimeout` | limit | a call or a wait that never returns | 5s min 1ms | `value:integrations/bunorm/migrate/v4.Options.UnlockTimeout` | class T: a timeout; unlimited is the wait that never returns | [integrations/bunorm/migrate/v4/README.md](../../integrations/bunorm/migrate/v4/README.md) |
+| `integrations/bunorm/migrate/v4.CommandConfig.UnlockTimeout` | limit | a call or a wait that never returns | 5s min 1ms | `value:integrations/bunorm/migrate/v4.CommandConfig.UnlockTimeout` | class T: a timeout; unlimited is the wait that never returns | [integrations/bunorm/migrate/v4/README.md](../../integrations/bunorm/migrate/v4/README.md) |
 | `integrations/bunorm/migrate/v4.migrationFileMode` | mode | a generated migration readable beyond the repository's own files | 0644 | none | a migration file is source the repository commits: its mode is the repository's, like any file the developer writes | — |
 | `integrations/bunorm/migrate/v4.clearRanNotRecordedMarkers` | protection | a migration that ran but was not recorded, run again | the next db:migrate refused while its marker stands | `off:integrations/bunorm/migrate/v4.MigrateForceFlagName` | — | [integrations/bunorm/migrate/v4/README.md](../../integrations/bunorm/migrate/v4/README.md) |
 

@@ -224,7 +224,7 @@ func (instance *Relay) releaseClaims(runtimeInstance containercontract.Runtime, 
     _ = runContained(func() {
         logger.Error(
             "outbox relay claim release failed - the claimed rows re-surface after the visibility timeout",
-            exception.LogContext(releaseErr, exception.LogContextConfig{}),
+            exception.LogContext(releaseErr, exception.LogContextOptions{}),
         )
     })
 }
@@ -285,7 +285,7 @@ func (instance *Relay) reportContainedPanic(runtimeInstance containercontract.Ru
             "outbox delivery panicked",
             exception.LogContext(
                 panicErr,
-                exception.LogContextConfig{
+                exception.LogContextOptions{
                     Extra: exceptioncontract.Context{
                         "id":         id,
                         "phase":      phase,
@@ -360,7 +360,7 @@ func (instance *Relay) reportFailedSend(runtimeInstance containercontract.Runtim
     logContext["maxAttempts"] = instance.config.MaxAttempts
 
     _ = runContained(func() {
-        logger.Error("outbox message send failed", exception.LogContext(sendErr, exception.LogContextConfig{Extra: logContext}))
+        logger.Error("outbox message send failed", exception.LogContext(sendErr, exception.LogContextOptions{Extra: logContext}))
     })
 }
 
@@ -749,7 +749,7 @@ func (instance *Relay) releaseLease(runtimeInstance containercontract.Runtime, l
         "outbox relay lease release failed",
         exception.LogContext(
             releaseErr,
-            exception.LogContextConfig{
+            exception.LogContextOptions{
                 Extra: exceptioncontract.Context{
                     "lock": instance.lockName(runtimeInstance),
                 },

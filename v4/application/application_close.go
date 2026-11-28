@@ -123,7 +123,7 @@ func (instance *Application) performTeardown(closeContext context.Context) error
     /* a container already closed before this close reached it answers for a teardown somebody else performed: neither its failure nor its deadline record is this close's to report */
     if false == alreadyClosed {
         if nil != serviceContainerCloseErr {
-            emergencyLogger.Emergency("failed to close service container", exception.LogContext(serviceContainerCloseErr, exception.LogContextConfig{}))
+            emergencyLogger.Emergency("failed to close service container", exception.LogContext(serviceContainerCloseErr, exception.LogContextOptions{}))
 
             logging.CloseEmergencyLogger()
 

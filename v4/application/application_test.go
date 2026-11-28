@@ -1290,7 +1290,7 @@ func TestCloseAndExitOnFailure_AnAbandonedTeardownExitsNonZero(t *testing.T) {
     }()
 
     stepRan := false
-    shieldedCloseStep = func(stepName string, config logging.ShieldedStepConfig, step func(stepContext context.Context)) bool {
+    shieldedCloseStep = func(stepName string, options logging.ShieldedStepOptions, step func(stepContext context.Context)) bool {
         stepRan = true
 
         return false
@@ -1322,7 +1322,7 @@ func TestCloseAndExitOnFailure_ACompletedTeardownExitsZero(t *testing.T) {
         applicationExit = originalExit
     }()
 
-    shieldedCloseStep = func(stepName string, config logging.ShieldedStepConfig, step func(stepContext context.Context)) bool {
+    shieldedCloseStep = func(stepName string, options logging.ShieldedStepOptions, step func(stepContext context.Context)) bool {
         step(context.Background())
 
         return true
@@ -1351,8 +1351,8 @@ func TestCloseAndExitOnFailure_HandsTheShieldTheDeclaredTeardownBudget(t *testin
     }()
 
     receivedBudget := bound.Duration{}
-    shieldedCloseStep = func(stepName string, config logging.ShieldedStepConfig, step func(stepContext context.Context)) bool {
-        receivedBudget = config.Budget
+    shieldedCloseStep = func(stepName string, options logging.ShieldedStepOptions, step func(stepContext context.Context)) bool {
+        receivedBudget = options.Budget
 
         return true
     }
@@ -1377,8 +1377,8 @@ func TestCloseAndExitOnFailure_WithoutAConfigurationTheShieldGetsTheDefaultBudge
     }()
 
     receivedBudget := bound.Duration{}
-    shieldedCloseStep = func(stepName string, config logging.ShieldedStepConfig, step func(stepContext context.Context)) bool {
-        receivedBudget = config.Budget
+    shieldedCloseStep = func(stepName string, options logging.ShieldedStepOptions, step func(stepContext context.Context)) bool {
+        receivedBudget = options.Budget
 
         return true
     }
@@ -1404,9 +1404,9 @@ func TestCloseAndExitOnFailure_AnUnlimitedBudgetReachesTheShieldAsNoDeadline(t *
 
     shieldRan := false
     receivedBudget := bound.Duration{}
-    shieldedCloseStep = func(stepName string, config logging.ShieldedStepConfig, step func(stepContext context.Context)) bool {
+    shieldedCloseStep = func(stepName string, options logging.ShieldedStepOptions, step func(stepContext context.Context)) bool {
         shieldRan = true
-        receivedBudget = config.Budget
+        receivedBudget = options.Budget
 
         return true
     }
@@ -1460,7 +1460,7 @@ func TestCloseAndExitOnFailure_AnOverrunAloneExitsZero(t *testing.T) {
         applicationExit = originalExit
     }()
 
-    shieldedCloseStep = func(stepName string, config logging.ShieldedStepConfig, step func(stepContext context.Context)) bool {
+    shieldedCloseStep = func(stepName string, options logging.ShieldedStepOptions, step func(stepContext context.Context)) bool {
         stepContext, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
         defer cancel()
 

@@ -736,8 +736,8 @@ func TestInMemoryStorage_MaxSessionsRefusesANewIdAtTheCeilingAndKeepsTheStoredOn
         t.Fatalf("expected the new id refused, got %v", saveErr)
     }
 
-    if "InMemoryStorageConfig.MaxSessions" != exception.LogContext(saveErr, exception.LogContextConfig{})["field"] {
-        t.Fatalf("expected the refusal to name the field, got %v", exception.LogContext(saveErr, exception.LogContextConfig{}))
+    if "InMemoryStorageConfig.MaxSessions" != exception.LogContext(saveErr, exception.LogContextOptions{})["field"] {
+        t.Fatalf("expected the refusal to name the field, got %v", exception.LogContext(saveErr, exception.LogContextOptions{}))
     }
 
     if _, found, _ := storage.Load(sessionRuntime(), "third"); true == found {
@@ -808,7 +808,7 @@ func TestInMemoryStorage_MaxSessionsResolves(t *testing.T) {
 
     defer func() {
         recoveredErr, isError := recover().(error)
-        if false == isError || false == strings.Contains(fmt.Sprint(exception.LogContext(recoveredErr, exception.LogContextConfig{})), "InMemoryStorageConfig.MaxSessions") {
+        if false == isError || false == strings.Contains(fmt.Sprint(exception.LogContext(recoveredErr, exception.LogContextOptions{})), "InMemoryStorageConfig.MaxSessions") {
             t.Fatalf("expected a zero ceiling refused naming the field, got %v", recoveredErr)
         }
     }()

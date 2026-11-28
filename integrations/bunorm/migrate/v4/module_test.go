@@ -47,7 +47,7 @@ func TestModule_RegisterCliCommandsExposesMigrationCommands(t *testing.T) {
 func TestModule_RegisterCliCommandsHonorsConfiguredOptions(t *testing.T) {
     module := NewModule(ModuleConfig{
         Migrations: migrate.NewMigrations(),
-        Options:    Options{CommandPrefix: "orm"},
+        Command:    CommandConfig{CommandPrefix: "orm"},
     })
 
     commands := module.RegisterCliCommands(nil)

@@ -178,7 +178,7 @@ func TestModule_ARelayCommandConfigurationWithNoRelayIsRefusedNamingIt(t *testin
 
     defer func() {
         recoveredErr, isError := recover().(error)
-        if false == isError || "ModuleConfig.Relay" != exception.LogContext(recoveredErr, exception.LogContextConfig{})["requires"] {
+        if false == isError || "ModuleConfig.Relay" != exception.LogContext(recoveredErr, exception.LogContextOptions{})["requires"] {
             t.Fatalf("expected the refusal to require ModuleConfig.Relay, got %v", recoveredErr)
         }
     }()
@@ -208,7 +208,7 @@ func TestModule_ABootModeWithoutAStoreBuiltAtBootIsRefused(t *testing.T) {
                     t.Fatal("expected the boot mode refused")
                 }
 
-                context := exception.LogContext(recoveredErr, exception.LogContextConfig{})
+                context := exception.LogContext(recoveredErr, exception.LogContextOptions{})
                 if testCase.field != context["field"] || testCase.requires != context["requires"] || false == strings.Contains(recoveredErr.Error(), "has no store built at boot") {
                     t.Fatalf("expected the refusal to name %s and %s, got %v: %v", testCase.field, testCase.requires, context, recoveredErr)
                 }

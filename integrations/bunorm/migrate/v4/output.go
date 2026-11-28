@@ -22,7 +22,7 @@ import (
 type commandOutput struct {
     writer    *errorTrackingWriter
     arguments []string
-    option    output.Option
+    option    output.Options
 
     /* under --format=json every print records instead of writing, and finish renders the one machine-readable document */
     messages   []string
@@ -61,13 +61,13 @@ func (instance *commandOutput) lostReport(command string, lostWrite error) error
         lost = exception.NewError("the report could not be written in full", map[string]any{"command": command, "path": instance.resultPath}, lostWrite)
     }
 
-    instance.lostReportJournal.Warning("the report could not be written in full; the command's result is in place", exception.LogContext(lost, exception.LogContextConfig{}))
+    instance.lostReportJournal.Warning("the report could not be written in full; the command's result is in place", exception.LogContext(lost, exception.LogContextOptions{}))
 
     return nil
 }
 
 /* newCommandOutput takes the command's positional arguments beside its writer and flags, since the machine document carries them. */
-func newCommandOutput(writer io.Writer, arguments []string, option output.Option) *commandOutput {
+func newCommandOutput(writer io.Writer, arguments []string, option output.Options) *commandOutput {
     return &commandOutput{
         writer:    &errorTrackingWriter{writer: writer},
         arguments: append([]string{}, arguments...),
@@ -107,12 +107,12 @@ func (instance *errorTrackingWriter) lostWrite() error {
 }
 
 /* runnerOptionForCommand derives the per-query printer posture from the command's parsed flags: the command's writer and colour choice in text mode, a discarded writer under json — the document is the only byte the command may emit there. */
-func runnerOptionForCommand(writer io.Writer, option output.Option) RunnerOption {
+func runnerOptionForCommand(writer io.Writer, option output.Options) RunnerOptions {
     if true == output.IsJsonFormat(option.Format) {
-        return RunnerOption{Writer: io.Discard, NoColor: true}
+        return RunnerOptions{Writer: io.Discard, NoColor: true}
     }
 
-    return RunnerOption{Writer: writer, NoColor: option.NoColor}
+    return RunnerOptions{Writer: writer, NoColor: option.NoColor}
 }
 
 func (instance *commandOutput) isJson() bool {
@@ -381,7 +381,7 @@ func (instance *commandOutput) printDetailsBlock(fields map[string]string) {
     instance.printKeyValueBlock("DETAILS", rows)
 }
 
-/* printKeyValueBlock prints a two-column block whose value column follows the longest value, in runes, bounded by Option.TableMaxWidth with the borders, the padding and the key column counted, and never narrower than its header; a longer value wraps onto continuation rows under an empty key, so a value is printed whole as the MIGRATIONS block prints a name, and an empty value keeps its row */
+/* printKeyValueBlock prints a two-column block whose value column follows the longest value, in runes, bounded by Options.TableMaxWidth with the borders, the padding and the key column counted, and never narrower than its header; a longer value wraps onto continuation rows under an empty key, so a value is printed whole as the MIGRATIONS block prints a name, and an empty value keeps its row */
 func (instance *commandOutput) printKeyValueBlock(title string, rows [][2]string) {
     keyWidth := len("key")
     valueWidth := len("value")
@@ -432,7 +432,7 @@ func (instance *commandOutput) printMigrationsBlock(key string, title string, na
         width = max(width, utf8.RuneCountInString(cell))
     }
 
-    /* the column follows the longest name, in runes, bounded by Option.TableMaxWidth with the border and the padding counted; a longer name wraps onto continuation rows, so no two names print alike */
+    /* the column follows the longest name, in runes, bounded by Options.TableMaxWidth with the border and the padding counted; a longer name wraps onto continuation rows, so no two names print alike */
     if maximum := instance.tableMaxWidth(); 0 < maximum {
         width = min(width, max(maximum-4, len("name")))
     }

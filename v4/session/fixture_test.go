@@ -30,8 +30,8 @@ func assertSessionFieldPanic(t *testing.T, expectedMessage string, expectedField
             t.Fatalf("expected %q to be refused, got %v", expectedMessage, recoveredErr)
         }
 
-        if expectedField != exception.LogContext(recoveredErr, exception.LogContextConfig{})["field"] {
-            t.Fatalf("expected the refusal to name %s, got %v", expectedField, exception.LogContext(recoveredErr, exception.LogContextConfig{}))
+        if expectedField != exception.LogContext(recoveredErr, exception.LogContextOptions{})["field"] {
+            t.Fatalf("expected the refusal to name %s, got %v", expectedField, exception.LogContext(recoveredErr, exception.LogContextOptions{}))
         }
     }()
 
@@ -365,7 +365,7 @@ func assertStorageRefusesATtlBelowASecond(t *testing.T, factory storageFactory) 
     defer storage.CloseWithContext(context.Background())
 
     saveErr := storage.Save(sessionRuntime(), contractTestSessionId, map[string]any{"a": 1}, bound.Of(time.Millisecond))
-    if nil == saveErr || "ttl" != exception.LogContext(saveErr, exception.LogContextConfig{})["field"] {
+    if nil == saveErr || "ttl" != exception.LogContext(saveErr, exception.LogContextOptions{})["field"] {
         t.Fatalf("expected a ttl under a second to be refused naming the ttl, got %v", saveErr)
     }
 }

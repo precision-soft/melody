@@ -124,14 +124,14 @@ func TestRule_EveryFrameworkRuleCarriesItsDocumentedValues(t *testing.T) {
         UnlimitedAdmitted: true,
     })
     expectRule(t, "output.OptionLimitRule", output.OptionLimitRule(), bound.Rule[int]{
-        Name: "Option.Limit",
+        Name: "Options.Limit",
         DefaultUnlimited: true,
     })
     expectRule(t, "output.OptionOffsetRule", output.OptionOffsetRule(), bound.Rule[int]{
-        Name: "Option.Offset",
+        Name: "Options.Offset",
     })
     expectRule(t, "output.OptionTableMaxWidthRule", output.OptionTableMaxWidthRule(), bound.Rule[int]{
-        Name: "Option.TableMaxWidth",
+        Name: "Options.TableMaxWidth",
         Default: 120,
         Minimum: 1,
         UnlimitedAdmitted: true,
@@ -157,7 +157,7 @@ func TestRule_EveryFrameworkRuleCarriesItsDocumentedValues(t *testing.T) {
         UnlimitedAdmitted: true,
     })
     expectRule(t, "storagecontract.PresignExpiryRule", storagecontract.PresignExpiryRule(), bound.Rule[time.Duration]{
-        Name: "PresignConfig.Expiry",
+        Name: "PresignOptions.Expiry",
         Default: 15 * time.Minute,
         Minimum: time.Second,
         Maximum: 168 * time.Hour,

@@ -79,7 +79,7 @@ func NewTracingMiddleware(tracer trace.Tracer, config TracingMiddlewareConfig) (
             message := ""
             if nil != handlerErr {
                 /* the message is read through the exception package, under the recover its readers carry, because the error is the handler's own value and a typed nil of a pointer type answers Error() with a panic this middleware would then charge to itself */
-                renderedMessage, isRendered := exception.LogContext(handlerErr, exception.LogContextConfig{})["error"].(string)
+                renderedMessage, isRendered := exception.LogContext(handlerErr, exception.LogContextOptions{})["error"].(string)
                 message = renderedMessage
                 if false == isRendered {
                     message = "the handler error could not be rendered"

@@ -35,7 +35,7 @@ func (instance *sessionLogoutHandler) Logout(
     if releaseErr := ReleaseSession(runtimeInstance, instance.sessionIndex, sessionInstance.Id()); nil != releaseErr {
         examplejournal.LoggerOr(runtimeInstance, melodylogging.EmergencyLogger()).Warning(
             "the signed-out session stays in the session index",
-            melodyexception.LogContext(releaseErr, melodyexception.LogContextConfig{}),
+            melodyexception.LogContext(releaseErr, melodyexception.LogContextOptions{}),
         )
     }
 

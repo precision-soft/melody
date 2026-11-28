@@ -63,7 +63,7 @@ func (instance *ProductService) List(runtimeInstance melodycontainercontract.Run
     products, rememberErr := cache.Remember(
         cache.For(runtimeInstance, instance.cache),
         CacheKeyProductList,
-        cache.RememberConfig{
+        cache.RememberOptions{
             Ttl: bound.Of(entityCacheTtl),
         },
         func(flightRuntime melodycontainercontract.Runtime, _ *cache.RememberItem) ([]*entity.Product, error) {

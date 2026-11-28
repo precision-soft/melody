@@ -328,7 +328,7 @@ func TestRouter_AddRoute_AcceptsANonTrailingOptionalSegmentThatHasADefault(t *te
 
     urlGenerator := NewUrlGenerator(routeRegistry, UrlGeneratorConfig{})
 
-    generatedPath, generateErr := urlGenerator.GeneratePath("list", httpcontract.PathConfig{Parameters: map[string]string{"page": "2"}})
+    generatedPath, generateErr := urlGenerator.GeneratePath("list", httpcontract.PathOptions{Parameters: map[string]string{"page": "2"}})
     if nil != generateErr {
         t.Fatalf("unexpected generate error: %v", generateErr)
     }
@@ -379,7 +379,7 @@ func TestRouter_AddRoute_NonTrailingOptionalWithADefaultSurvivesASuppliedEmptyVa
 
     urlGenerator := NewUrlGenerator(routeRegistry, UrlGeneratorConfig{})
 
-    generatedPath, generateErr := urlGenerator.GeneratePath("list", httpcontract.PathConfig{Parameters: map[string]string{
+    generatedPath, generateErr := urlGenerator.GeneratePath("list", httpcontract.PathOptions{Parameters: map[string]string{
             "locale": "",
             "page":   "2",
         }})
@@ -432,7 +432,7 @@ func TestRouter_AddRoute_NonTrailingOptionalWithAGroupSuppliedDefaultSurvivesASu
         {"page": "2"},
         {"locale": "", "page": "2"},
     } {
-        generatedPath, generateErr := urlGenerator.GeneratePath("shop.list", httpcontract.PathConfig{Parameters: parameters})
+        generatedPath, generateErr := urlGenerator.GeneratePath("shop.list", httpcontract.PathOptions{Parameters: parameters})
         if nil != generateErr {
             t.Fatalf("unexpected generate error: %v", generateErr)
         }
@@ -487,7 +487,7 @@ func TestRouter_AddRoute_ServesATrailingOptionalReachedThroughTheRoot(t *testing
 
     urlGenerator := NewUrlGenerator(routeRegistry, UrlGeneratorConfig{})
 
-    generatedPath, generateErr := urlGenerator.GeneratePath("home", httpcontract.PathConfig{})
+    generatedPath, generateErr := urlGenerator.GeneratePath("home", httpcontract.PathOptions{})
     if nil != generateErr {
         t.Fatalf("unexpected generate error: %v", generateErr)
     }
@@ -1066,8 +1066,8 @@ func TestRouter_RefusesAReservedAttributeKeyAtRegistration(t *testing.T) {
                     t.Fatalf("%s: expected the key refused, got %v", key, recoveredErr)
                 }
 
-                if key != exception.LogContext(recoveredErr, exception.LogContextConfig{})["key"] {
-                    t.Fatalf("%s: expected the refusal to name the key, got %v", key, exception.LogContext(recoveredErr, exception.LogContextConfig{}))
+                if key != exception.LogContext(recoveredErr, exception.LogContextOptions{})["key"] {
+                    t.Fatalf("%s: expected the refusal to name the key, got %v", key, exception.LogContext(recoveredErr, exception.LogContextOptions{}))
                 }
             }()
 

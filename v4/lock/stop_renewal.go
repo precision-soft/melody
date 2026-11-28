@@ -134,7 +134,7 @@ func (instance *stopRenewalWatch) expiredError(runtimeInstance containercontract
         logger = logging.EmergencyLogger()
     }
 
-    logger.Warning("lock lease no longer renewed: the work is still running past the stop renewal limit, a peer may acquire the lock", exception.LogContext(expiredErr, exception.LogContextConfig{}))
+    logger.Warning("lock lease no longer renewed: the work is still running past the stop renewal limit, a peer may acquire the lock", exception.LogContext(expiredErr, exception.LogContextOptions{}))
 
     return expiredErr
 }

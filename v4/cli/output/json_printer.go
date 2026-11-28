@@ -15,7 +15,7 @@ type JsonPrinter struct {
 func (instance *JsonPrinter) Print(
     writer io.Writer,
     envelope Envelope,
-    option Option,
+    option Options,
 ) error {
     document := &bytes.Buffer{}
     encoder := json.NewEncoder(document)

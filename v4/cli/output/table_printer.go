@@ -80,7 +80,7 @@ func (instance *errorTrackingWriter) Write(payload []byte) (int, error) {
 func (instance *TablePrinter) Print(
     writer io.Writer,
     envelope Envelope,
-    option Option,
+    option Options,
 ) error {
     tracking := &errorTrackingWriter{writer: writer}
     writer = tracking

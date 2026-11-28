@@ -168,9 +168,9 @@ A runnable end-to-end demonstration lives in the example application: [`messageb
 - [`type StackNext`](../../messagebus/contract/middleware.go)
 - [`type Middleware`](../../messagebus/contract/middleware.go)
 - [`type Bus`](../../messagebus/contract/bus.go)
-- [`type Transport`](../../messagebus/contract/transport.go) — `Receive(runtime)` answers a `Subscription`, `Nack(runtime, envelope, NackConfig)`
+- [`type Transport`](../../messagebus/contract/transport.go) — `Receive(runtime)` answers a `Subscription`, `Nack(runtime, envelope, NackOptions)`
 - [`type Subscription`](../../messagebus/contract/transport.go) — `Envelopes()` closed when the stream ends, `Err()` then why, nil for an end through the runtime's context or the transport's close
-- [`type NackConfig`](../../messagebus/contract/transport.go) — `Requeue`, the zero value refusing without a requeue
+- [`type NackOptions`](../../messagebus/contract/transport.go) — `Requeue`, the zero value refusing without a requeue
 
 ### Implementations (`messagebus`)
 

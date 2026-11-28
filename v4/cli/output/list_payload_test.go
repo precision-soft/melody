@@ -78,10 +78,10 @@ func TestWindowItems_HandlesAnEmptyInput(t *testing.T) {
 
 func TestWindowItems_RefusesANegativeLimitOrOffsetByName(t *testing.T) {
     _, limitErr := WindowItems([]int{1}, bound.Of(-1), bound.Count{})
-    assertRefusedOptionField(t, limitErr, "Option.Limit")
+    assertRefusedOptionField(t, limitErr, "Options.Limit")
 
     _, offsetErr := WindowItems([]int{1}, bound.Count{}, bound.Of(-5))
-    assertRefusedOptionField(t, offsetErr, "Option.Offset")
+    assertRefusedOptionField(t, offsetErr, "Options.Offset")
 }
 
 func TestReverseItems_ReversesInPlace(t *testing.T) {

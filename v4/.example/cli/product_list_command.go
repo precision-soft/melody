@@ -170,7 +170,7 @@ func journalLostNomenclature(runtimeInstance melodycontainercontract.Runtime, no
 
     examplejournal.LoggerOr(runtimeInstance, melodylogging.EmergencyLogger()).Warning(
         "product listing rendered a nomenclature it could not read as dashes",
-        melodyexception.LogContext(listErr, melodyexception.LogContextConfig{Extra: melodyloggingcontract.Context{"nomenclature": nomenclature}}),
+        melodyexception.LogContext(listErr, melodyexception.LogContextOptions{Extra: melodyloggingcontract.Context{"nomenclature": nomenclature}}),
     )
 }
 
@@ -178,7 +178,7 @@ func journalLostNomenclature(runtimeInstance melodycontainercontract.Runtime, no
 func journalLostViews(runtimeInstance melodycontainercontract.Runtime, productId string, viewsErr error) {
     examplejournal.LoggerOr(runtimeInstance, melodylogging.EmergencyLogger()).Warning(
         "product listing rendered view counters it could not read as dashes",
-        melodyexception.LogContext(viewsErr, melodyexception.LogContextConfig{Extra: melodyloggingcontract.Context{"productId": productId}}),
+        melodyexception.LogContext(viewsErr, melodyexception.LogContextOptions{Extra: melodyloggingcontract.Context{"productId": productId}}),
     )
 }
 

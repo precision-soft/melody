@@ -98,7 +98,7 @@ func TestNewCronModule_TheGeneratorRendersTheAnsibleCronDialectTheModuleInstalls
             "--user", "deploy",
         },
         &output,
-        melodycli.DispatchConfig{},
+        melodycli.DispatchOptions{},
     )
     if nil != runErr {
         t.Fatalf("the generation failed: %v (%s)", runErr, output.String())

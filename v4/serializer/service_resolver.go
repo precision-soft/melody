@@ -28,7 +28,7 @@ func SerializerManagerFromRuntime(runtimeInstance containercontract.Runtime) *Se
             if false == internal.IsNilInterface(logger) {
                 logger.Error(
                     "failed to resolve the serializer manager",
-                    exception.LogContext(err, exception.LogContextConfig{}),
+                    exception.LogContext(err, exception.LogContextOptions{}),
                 )
             }
         }
@@ -52,7 +52,7 @@ func SerializerFromRuntime(runtimeInstance containercontract.Runtime) serializer
             if false == internal.IsNilInterface(logger) {
                 logger.Error(
                     "failed to resolve the serializer",
-                    exception.LogContext(err, exception.LogContextConfig{}),
+                    exception.LogContext(err, exception.LogContextOptions{}),
                 )
             }
         }

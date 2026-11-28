@@ -603,7 +603,7 @@ func (instance connectionLogger) error(message string, err error, context except
         logger = logging.EmergencyLogger()
     }
 
-    logger.Error(message, exception.LogContext(err, exception.LogContextConfig{Extra: context}))
+    logger.Error(message, exception.LogContext(err, exception.LogContextOptions{Extra: context}))
 }
 
 func (instance connectionLogger) debug(message string, err error) {
@@ -611,5 +611,5 @@ func (instance connectionLogger) debug(message string, err error) {
         return
     }
 
-    instance.logger.Debug(message, exception.LogContext(err, exception.LogContextConfig{}))
+    instance.logger.Debug(message, exception.LogContext(err, exception.LogContextOptions{}))
 }

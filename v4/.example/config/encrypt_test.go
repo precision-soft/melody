@@ -49,7 +49,7 @@ func TestEncryptKeys_RefusesACommittedKeyOutsideDevelopment(t *testing.T) {
             t.Fatalf("%q: expected the committed key refused outside development, got %v", rawKeyList, refusal)
         }
 
-        logged := fmt.Sprintf("%v", melodyexception.LogContext(refusal, melodyexception.LogContextConfig{}))
+        logged := fmt.Sprintf("%v", melodyexception.LogContext(refusal, melodyexception.LogContextOptions{}))
         if true == strings.Contains(refusal.Error(), "cipher-key") || true == strings.Contains(logged, "cipher-key") {
             t.Fatalf("%q: the refusal names the key: %v %v", rawKeyList, refusal, logged)
         }
@@ -76,14 +76,14 @@ func TestEncryptKeys_AnEntryWithoutTheSeparatorIsRefusedWithoutItsText(t *testin
             t.Fatalf("%q: expected the list refused", rawKeyList)
         }
 
-        logged := fmt.Sprintf("%v", melodyexception.LogContext(refusal, melodyexception.LogContextConfig{}))
+        logged := fmt.Sprintf("%v", melodyexception.LogContext(refusal, melodyexception.LogContextOptions{}))
         if true == strings.Contains(logged, encryptDevelopmentKey) || true == strings.Contains(logged, "keyId") {
             t.Fatalf("%q: expected the refusal to carry the position alone, got %v", rawKeyList, logged)
         }
     }
 
     refusal := recoveredRefusal(t, func() { encryptKeys("example-2026:", "example-2026", true) })
-    if nil == refusal || false == strings.Contains(fmt.Sprintf("%v", melodyexception.LogContext(refusal, melodyexception.LogContextConfig{})), "keyId:example-2026") {
+    if nil == refusal || false == strings.Contains(fmt.Sprintf("%v", melodyexception.LogContext(refusal, melodyexception.LogContextOptions{})), "keyId:example-2026") {
         t.Fatalf("expected an entry with its separator to name its id, got %v", refusal)
     }
 }
@@ -102,7 +102,7 @@ func TestEncryptKeys_RefusesAMalformedListNamingTheEntryAndNeverTheKey(t *testin
                     t.Fatalf("%q: expected an error, got %v", rawKeyList, recovered)
                 }
 
-                logged := fmt.Sprintf("%v", melodyexception.LogContext(refusal, melodyexception.LogContextConfig{}))
+                logged := fmt.Sprintf("%v", melodyexception.LogContext(refusal, melodyexception.LogContextOptions{}))
                 if true == strings.Contains(refusal.Error(), "cipher-key") || true == strings.Contains(logged, "cipher-key") {
                     t.Fatalf("%q: the refusal names the key: %v %v", rawKeyList, refusal, logged)
                 }

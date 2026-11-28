@@ -98,7 +98,7 @@ func TestVerifyHandlerChecksTheTokensEnrollmentWhateverTheRequestNames(t *testin
         t.Fatalf("generating the fixture secret failed: %v", secretErr)
     }
 
-    code, codeErr := totp.GenerateCodeAt(secret, time.Now(), totp.Config{})
+    code, codeErr := totp.GenerateCodeAt(secret, time.Now(), totp.Options{})
     if nil != codeErr {
         t.Fatalf("generating the fixture code failed: %v", codeErr)
     }
@@ -197,7 +197,7 @@ func TestVerifyHandlerAnswersAStoreRefusalWith503AndVerifiesOnceItHeals(t *testi
         t.Fatalf("generating the fixture secret failed: %v", secretErr)
     }
 
-    code, codeErr := totp.GenerateCodeAt(secret, time.Now(), totp.Config{})
+    code, codeErr := totp.GenerateCodeAt(secret, time.Now(), totp.Options{})
     if nil != codeErr {
         t.Fatalf("generating the fixture code failed: %v", codeErr)
     }
@@ -228,7 +228,7 @@ func TestVerifyHandlerRefusesACodeTheSignInAlreadyBurnedInTheSharedGuard(t *test
         t.Fatalf("generating the fixture secret failed: %v", secretErr)
     }
 
-    code, codeErr := totp.GenerateCodeAt(secret, time.Now(), totp.Config{})
+    code, codeErr := totp.GenerateCodeAt(secret, time.Now(), totp.Options{})
     if nil != codeErr {
         t.Fatalf("generating the fixture code failed: %v", codeErr)
     }
@@ -292,7 +292,7 @@ func TestEnrollHandlerReplacesWithACurrentCodeAndBurnsItAcrossTheDoors(t *testin
         t.Fatalf("generating the fixture secret failed: %v", secretErr)
     }
 
-    code, codeErr := totp.GenerateCodeAt(secret, time.Now(), totp.Config{})
+    code, codeErr := totp.GenerateCodeAt(secret, time.Now(), totp.Options{})
     if nil != codeErr {
         t.Fatalf("generating the fixture code failed: %v", codeErr)
     }
@@ -363,7 +363,7 @@ func TestVerifyHandler_BurnsTheCodeForTheWholeValidityWindow(t *testing.T) {
         t.Fatalf("generating the fixture secret failed: %v", secretErr)
     }
 
-    code, codeErr := totp.GenerateCodeAt(secret, time.Now(), totp.Config{})
+    code, codeErr := totp.GenerateCodeAt(secret, time.Now(), totp.Options{})
     if nil != codeErr {
         t.Fatalf("generating the fixture code failed: %v", codeErr)
     }
@@ -498,7 +498,7 @@ func TestEnrollHandlerWritesThePendingEnrollmentOnly(t *testing.T) {
 func TestConfirmHandlerMovesThePendingEnrollmentOnItsCode(t *testing.T) {
     store, connector, secret := pendingFixture(t)
 
-    code, codeErr := totp.GenerateCodeAt(secret, time.Now(), totp.Config{})
+    code, codeErr := totp.GenerateCodeAt(secret, time.Now(), totp.Options{})
     if nil != codeErr {
         t.Fatalf("code: %v", codeErr)
     }
@@ -544,7 +544,7 @@ func TestConfirmHandlerRefusesAWrongCodeWritingNothing(t *testing.T) {
 /* a code is spent once: the same code presented twice is refused the second time, as at the sign-in */
 func TestConfirmHandlerRefusesAReplayedCode(t *testing.T) {
     store, _, secret := pendingFixture(t)
-    code, _ := totp.GenerateCodeAt(secret, time.Now(), totp.Config{})
+    code, _ := totp.GenerateCodeAt(secret, time.Now(), totp.Options{})
     guard := melodysecurity.NewMemoryNonceGuard(melodysecurity.MemoryNonceGuardConfig{})
     handler := ConfirmHandler(fixedStore(store), guard, nil)
 
@@ -644,7 +644,7 @@ func TestConfirmHandlerKeepsAFactorThatBecameActiveSinceAnUngrantedSetUp(t *test
     connector.enrolledIdentifier = "alice"
     connector.sealedSecret = connector.pendingSealedSecret
 
-    code, _ := totp.GenerateCodeAt(secret, time.Now(), totp.Config{})
+    code, _ := totp.GenerateCodeAt(secret, time.Now(), totp.Options{})
     response := confirmWith(t, ConfirmHandler(fixedStore(store), nil, nil), map[string]string{melodysecurity.DefaultTotpCodeHeaderName: code})
     if nethttp.StatusConflict != response.StatusCode() {
         t.Fatalf("expected 409, got %d", response.StatusCode())
@@ -663,7 +663,7 @@ func TestConfirmHandlerReplacesTheFactorAGrantedSetUpPresented(t *testing.T) {
     connector.enrolledIdentifier = "alice"
     connector.pendingReplaces = true
 
-    code, _ := totp.GenerateCodeAt(secret, time.Now(), totp.Config{})
+    code, _ := totp.GenerateCodeAt(secret, time.Now(), totp.Options{})
     if response := confirmWith(t, ConfirmHandler(fixedStore(store), nil, nil), map[string]string{melodysecurity.DefaultTotpCodeHeaderName: code}); nethttp.StatusOK != response.StatusCode() {
         t.Fatalf("expected 200, got %d", response.StatusCode())
     }
@@ -673,7 +673,7 @@ func TestConfirmHandlerReplacesTheFactorAGrantedSetUpPresented(t *testing.T) {
 func TestConfirmHandlerAnswersConflictForASetUpReplacedSince(t *testing.T) {
     store, _, secret := pendingFixture(t)
 
-    code, _ := totp.GenerateCodeAt(secret, time.Now(), totp.Config{})
+    code, _ := totp.GenerateCodeAt(secret, time.Now(), totp.Options{})
     response := confirmWith(t, ConfirmHandler(fixedStore(store), nil, nil), map[string]string{melodysecurity.DefaultTotpCodeHeaderName: code, PendingHeaderName: "0000000000000000"})
     if nethttp.StatusConflict != response.StatusCode() {
         t.Fatalf("expected 409, got %d", response.StatusCode())

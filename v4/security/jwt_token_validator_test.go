@@ -367,7 +367,7 @@ func TestJwtTokenValidator_ARefusedAlgorithmIsBoundedInTheRefusal(t *testing.T) 
         t.Fatal("expected the algorithm refused")
     }
 
-    algorithm, _ := exception.LogContext(validateErr, exception.LogContextConfig{})["algorithm"].(string)
+    algorithm, _ := exception.LogContext(validateErr, exception.LogContextOptions{})["algorithm"].(string)
     if 1024 < len(algorithm) || false == strings.Contains(algorithm, "truncated") {
         t.Fatalf("expected the algorithm bounded in the refusal, got %d bytes", len(algorithm))
     }
@@ -387,7 +387,7 @@ func TestJwtTokenValidator_ARefusedTypeIsBoundedInTheRefusal(t *testing.T) {
         t.Fatal("expected the type refused")
     }
 
-    typeValue, _ := exception.LogContext(validateErr, exception.LogContextConfig{})["type"].(string)
+    typeValue, _ := exception.LogContext(validateErr, exception.LogContextOptions{})["type"].(string)
     if 1024 < len(typeValue) || false == strings.Contains(typeValue, "truncated") {
         t.Fatalf("expected the type bounded in the refusal, got %d bytes", len(typeValue))
     }
@@ -1142,7 +1142,7 @@ func TestJwtTokenValidator_UnknownKey_RefusedNotAnInfrastructureFailure(t *testi
         t.Fatalf("expected an unknown key refused as the caller's, not marked, got %v", validateErr)
     }
 
-    if context := exception.LogContext(validateErr, exception.LogContextConfig{}); "key-gone" != context["keyId"] {
+    if context := exception.LogContext(validateErr, exception.LogContextOptions{}); "key-gone" != context["keyId"] {
         t.Fatalf("expected the key id named, got %v", context)
     }
 
@@ -1185,7 +1185,7 @@ func TestJwtTokenValidator_NineKeysRefused_EightAdmitted(t *testing.T) {
         t.Fatalf("expected nine keys refused as a failure of the set, got %v", nineErr)
     }
 
-    if context := exception.LogContext(nineErr, exception.LogContextConfig{}); 9 != context["keys"] || 8 != context["maximum"] {
+    if context := exception.LogContext(nineErr, exception.LogContextOptions{}); 9 != context["keys"] || 8 != context["maximum"] {
         t.Fatalf("expected the count and the cap named, got %v", context)
     }
 
@@ -1247,7 +1247,7 @@ func TestJwtTokenValidator_AShortKeyOfACustomSetVerifiesNothing(t *testing.T) {
             t.Fatalf("secret %q: expected the short key refused as a failure of the set, got %v", secret, validateErr)
         }
 
-        context := exception.LogContext(validateErr, exception.LogContextConfig{})
+        context := exception.LogContext(validateErr, exception.LogContextOptions{})
         if "keySet" != context["argument"] || "key-custom" != context["keyId"] || len(secret) != context["secretLength"] || 32 != context["minimumLength"] {
             t.Fatalf("secret %q: expected the short key named by argument, key id and length, got %v", secret, context)
         }

@@ -842,7 +842,7 @@ func TestAuthenticatorTokenSource_LockedSecondFactor_Answers429OnEveryRoute(t *t
     }
 
     refusal := exception.AsHttpException(err)
-    if nil == refusal || nethttp.StatusTooManyRequests != refusal.StatusCode() || 9*time.Second != refusal.RetryAfter() || "authenticatorManager" != exception.LogContext(err, exception.LogContextConfig{})["tokenSourceName"] {
+    if nil == refusal || nethttp.StatusTooManyRequests != refusal.StatusCode() || 9*time.Second != refusal.RetryAfter() || "authenticatorManager" != exception.LogContext(err, exception.LogContextOptions{})["tokenSourceName"] {
         t.Fatalf("expected 429 with the lockout's remainder naming the source, got %v", err)
     }
 

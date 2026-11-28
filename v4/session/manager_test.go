@@ -2208,8 +2208,8 @@ func TestManager_AStripeHeldByAHungStorageCutsTheSecondCallerAtItsContext(t *tes
     requireContextEnded(t, cutErr, context.Canceled)
     requireErrorMessage(t, cutErr, "the session operation was cut by its context")
 
-    if "DeleteSession" != exception.LogContext(cutErr, exception.LogContextConfig{})["door"] {
-        t.Fatalf("expected the cut to name its door, got %v", exception.LogContext(cutErr, exception.LogContextConfig{}))
+    if "DeleteSession" != exception.LogContext(cutErr, exception.LogContextOptions{})["door"] {
+        t.Fatalf("expected the cut to name its door, got %v", exception.LogContext(cutErr, exception.LogContextOptions{}))
     }
 
     release()
@@ -2545,7 +2545,7 @@ func TestManager_AnUnlimitedStorageTimeoutGivesTheBurialReadNoDeadline(t *testin
 func TestNewManager_PanicsOnAStorageTimeoutBelowTheMinimum(t *testing.T) {
     defer func() {
         recoveredErr, isError := recover().(error)
-        if false == isError || "ManagerConfig.StorageTimeout" != exception.LogContext(recoveredErr, exception.LogContextConfig{})["field"] {
+        if false == isError || "ManagerConfig.StorageTimeout" != exception.LogContext(recoveredErr, exception.LogContextOptions{})["field"] {
             t.Fatalf("expected the refusal to name ManagerConfig.StorageTimeout, got %v", recoveredErr)
         }
     }()
@@ -2590,7 +2590,7 @@ func TestResolveStorageTimeout_JudgesEveryManagerByTheRule(t *testing.T) {
     }
 
     below := &declaredBoundManager{Manager: own, declared: bound.Of(time.Microsecond)}
-    if _, err := ResolveStorageTimeout(below); nil == err || "ManagerConfig.StorageTimeout" != exception.LogContext(err, exception.LogContextConfig{})["field"] {
+    if _, err := ResolveStorageTimeout(below); nil == err || "ManagerConfig.StorageTimeout" != exception.LogContext(err, exception.LogContextOptions{})["field"] {
         t.Fatalf("expected a bound below the minimum refused naming the field, got %v", err)
     }
 

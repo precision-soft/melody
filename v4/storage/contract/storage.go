@@ -44,8 +44,8 @@ type Object struct {
     Info ObjectInfo
 }
 
-/* PresignConfig declares a presigned url; the zero value is a download link of the default expiry. */
-type PresignConfig struct {
+/* PresignOptions declares a presigned url; the zero value is a download link of the default expiry. */
+type PresignOptions struct {
     /* Expiry is how long the url is honoured, read against PresignExpiryRule: 15m when left out, at least 1s, at most 7 days, the longest a SigV4 presigned url is signed for, unlimited refused, since the url is a bearer credential to the object. A value is applied in whole seconds. */
     Expiry bound.Duration
 
@@ -67,5 +67,5 @@ type Storage interface {
     Delete(runtimeInstance containercontract.Runtime, key string, options DeleteOptions) error
 
     /* PresignedUrl answers a url that carries its own authorization, for a client that reads or writes the object straight at the backend. A backend that cannot sign, or cannot sign the method asked, answers an error whose chain carries ErrPresignUnsupported. Whether the object exists is not asked. */
-    PresignedUrl(runtimeInstance containercontract.Runtime, key string, config PresignConfig) (string, error)
+    PresignedUrl(runtimeInstance containercontract.Runtime, key string, options PresignOptions) (string, error)
 }

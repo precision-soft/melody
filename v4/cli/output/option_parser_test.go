@@ -8,7 +8,7 @@ import (
 
 func TestNormalizeOption_ImpliesNoColorForTheJsonFormat(t *testing.T) {
     normalized, normalizeErr := NormalizeOption(
-        Option{
+        Options{
             Format:  FormatJson,
             NoColor: false,
         },
@@ -24,7 +24,7 @@ func TestNormalizeOption_ImpliesNoColorForTheJsonFormat(t *testing.T) {
 
 func TestNormalizeOption_KeepsColorForTheTableFormat(t *testing.T) {
     normalized, normalizeErr := NormalizeOption(
-        Option{
+        Options{
             Format:  FormatTable,
             NoColor: false,
         },
@@ -39,7 +39,7 @@ func TestNormalizeOption_KeepsColorForTheTableFormat(t *testing.T) {
 }
 
 func TestNormalizeOption_DefaultsAnEmptyFormatAndOrder(t *testing.T) {
-    normalized, normalizeErr := NormalizeOption(Option{})
+    normalized, normalizeErr := NormalizeOption(Options{})
     if nil != normalizeErr {
         t.Fatalf("expected the zero option admitted, got %v", normalizeErr)
     }
@@ -55,13 +55,13 @@ func TestNormalizeOption_DefaultsAnEmptyFormatAndOrder(t *testing.T) {
 func TestNormalizeOption_RefusesACountItsRuleDoesNotAdmit(t *testing.T) {
     cases := []struct {
         name   string
-        option Option
+        option Options
         field  string
     }{
-        {"negativeLimit", Option{Limit: bound.Of(-1)}, "Option.Limit"},
-        {"negativeOffset", Option{Offset: bound.Of(-1)}, "Option.Offset"},
-        {"unlimitedOffset", Option{Offset: bound.UnlimitedCount()}, "Option.Offset"},
-        {"zeroTableMaxWidth", Option{TableMaxWidth: bound.Of(0)}, "Option.TableMaxWidth"},
+        {"negativeLimit", Options{Limit: bound.Of(-1)}, "Options.Limit"},
+        {"negativeOffset", Options{Offset: bound.Of(-1)}, "Options.Offset"},
+        {"unlimitedOffset", Options{Offset: bound.UnlimitedCount()}, "Options.Offset"},
+        {"zeroTableMaxWidth", Options{TableMaxWidth: bound.Of(0)}, "Options.TableMaxWidth"},
     }
 
     for _, testCase := range cases {
@@ -73,7 +73,7 @@ func TestNormalizeOption_RefusesACountItsRuleDoesNotAdmit(t *testing.T) {
 }
 
 func TestNormalizeOption_AdmitsAZeroLimitAndTheUnlimitedCounts(t *testing.T) {
-    for _, option := range []Option{
+    for _, option := range []Options{
         {Limit: bound.Of(0)},
         {Limit: bound.UnlimitedCount()},
         {Offset: bound.Of(0)},
@@ -160,13 +160,13 @@ func TestParseOptionFromCommand_ReadsAZeroLimitAsAValue(t *testing.T) {
 func TestParseOptionFromCommand_ReturnsTheDefaultsForANilCommand(t *testing.T) {
     parsed := ParseOptionFromCommand(nil)
 
-    if (Option{}) != parsed {
+    if (Options{}) != parsed {
         t.Fatalf("expected the zero option, which reads as the default, got %#v", parsed)
     }
 }
 
 func TestNormalizeOption_ClampsANegativeVerbosityLevel(t *testing.T) {
-    normalized, normalizeErr := NormalizeOption(Option{Format: FormatTable, Order: SortOrderAscending, VerbosityLevel: -5})
+    normalized, normalizeErr := NormalizeOption(Options{Format: FormatTable, Order: SortOrderAscending, VerbosityLevel: -5})
     if nil != normalizeErr {
         t.Fatalf("expected the option admitted, got %v", normalizeErr)
     }

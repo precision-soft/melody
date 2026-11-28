@@ -2876,8 +2876,8 @@ func TestScope_CloseReturnsAtTheTimeoutAndReportsTheServiceThatDidNotFinish(t *t
             t.Fatalf("expected the service that ran out of budget reported")
         }
 
-        if false == strings.Contains(fmt.Sprint(exception.LogContext(closeErr, exception.LogContextConfig{})), "scoped.waiting") {
-            t.Fatalf("expected the failure to name the service, got %v", exception.LogContext(closeErr, exception.LogContextConfig{}))
+        if false == strings.Contains(fmt.Sprint(exception.LogContext(closeErr, exception.LogContextOptions{})), "scoped.waiting") {
+            t.Fatalf("expected the failure to name the service, got %v", exception.LogContext(closeErr, exception.LogContextOptions{}))
         }
     case <-time.After(DefaultScopeTeardownTimeout / 2):
         t.Fatalf("expected the close to return at its timeout")

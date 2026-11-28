@@ -7,7 +7,7 @@ import (
 )
 
 func TestOption_TheZeroValueReadsAsTheDefault(t *testing.T) {
-    normalized, normalizeErr := NormalizeOption(Option{})
+    normalized, normalizeErr := NormalizeOption(Options{})
     if nil != normalizeErr {
         t.Fatalf("expected the zero option admitted, got %v", normalizeErr)
     }

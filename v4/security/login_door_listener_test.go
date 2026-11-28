@@ -1907,7 +1907,7 @@ func TestLoginDoor_LockedSecondFactor_429WithRetryAfter(t *testing.T) {
         t.Fatalf("expected 429 with Retry-After 7 and no handler call, got %d %q and %d", recorder.Code, recorder.Header().Get("Retry-After"), fixture.login.calls)
     }
 
-    context := exception.LogContext(refusal, exception.LogContextConfig{})
+    context := exception.LogContext(refusal, exception.LogContextOptions{})
     if false == errors.Is(refusal, ErrSecondFactorLocked) || ReasonSecondFactorLocked != context["reason"] || "main" != context["firewallName"] {
         t.Fatalf("expected the locked refusal naming its reason and firewall, got %v: %v", context, refusal)
     }

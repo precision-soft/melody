@@ -373,7 +373,7 @@ func (instance *LeaderGate) reportCampaignError(runtimeInstance containercontrac
 
     instance.gateLogger(runtimeInstance).Warning(
         "leader gate campaign failed; backing off and campaigning again",
-        exception.LogContext(cause, exception.LogContextConfig{Extra: exceptioncontract.Context{"name": instance.name}}),
+        exception.LogContext(cause, exception.LogContextOptions{Extra: exceptioncontract.Context{"name": instance.name}}),
     )
 }
 
@@ -389,7 +389,7 @@ func (instance *LeaderGate) reportTtlRefusal(runtimeInstance containercontract.R
 
     instance.gateLogger(runtimeInstance).Error(
         "leader gate stopped: the lock refuses its unlimited ttl",
-        exception.LogContext(cause, exception.LogContextConfig{Extra: exceptioncontract.Context{"name": instance.name}}),
+        exception.LogContext(cause, exception.LogContextOptions{Extra: exceptioncontract.Context{"name": instance.name}}),
     )
 }
 
@@ -414,7 +414,7 @@ func (instance *LeaderGate) reportLost(runtimeInstance containercontract.Runtime
 
     instance.gateLogger(runtimeInstance).Warning(
         "leader gate lost its term; campaigning again",
-        exception.LogContext(cause, exception.LogContextConfig{Extra: exceptioncontract.Context{"name": instance.name}}),
+        exception.LogContext(cause, exception.LogContextOptions{Extra: exceptioncontract.Context{"name": instance.name}}),
     )
 }
 
@@ -430,7 +430,7 @@ func (instance *LeaderGate) reportLostWhileStopping(runtimeInstance containercon
 
     instance.gateLogger(runtimeInstance).Warning(
         "leader gate lost its term while stopping",
-        exception.LogContext(cause, exception.LogContextConfig{Extra: exceptioncontract.Context{"name": instance.name}}),
+        exception.LogContext(cause, exception.LogContextOptions{Extra: exceptioncontract.Context{"name": instance.name}}),
     )
 }
 
@@ -470,7 +470,7 @@ func (instance *LeaderGate) runHookShielded(runtimeInstance containercontract.Ru
 
         instance.gateLogger(runtimeInstance).Error(
             "leader gate hook panicked",
-            exception.LogContext(hookErr, exception.LogContextConfig{}),
+            exception.LogContext(hookErr, exception.LogContextOptions{}),
         )
     }()
 

@@ -73,7 +73,7 @@ func TestUrlGeneratorMustFromResolver_ResolvesTheRegisteredGenerator(t *testing.
         t.Fatalf("expected the url generator to resolve")
     }
 
-    generatedPath, generateErr := resolved.GeneratePath("article.show", httpcontract.PathConfig{Parameters: map[string]string{"id": "42"}})
+    generatedPath, generateErr := resolved.GeneratePath("article.show", httpcontract.PathOptions{Parameters: map[string]string{"id": "42"}})
     if nil != generateErr {
         t.Fatalf("unexpected generation error: %v", generateErr)
     }

@@ -551,7 +551,7 @@ func logoutOutcomeDispatcher(
                     "security logout failure event dispatch failed",
                     exception.LogContext(
                         dispatchErr,
-                        exception.LogContextConfig{
+                        exception.LogContextOptions{
                             Extra: exceptioncontract.Context{
                                 "firewallName": firewall.Name(),
                             },

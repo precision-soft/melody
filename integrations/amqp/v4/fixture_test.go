@@ -77,8 +77,8 @@ func expectErrorNamingField(t *testing.T, err error, field string) {
         t.Fatalf("expected a refusal naming %s, got none", field)
     }
 
-    if field != exception.LogContext(err, exception.LogContextConfig{})["field"] {
-        t.Fatalf("expected the refusal to name %s, got %v: %v", field, exception.LogContext(err, exception.LogContextConfig{}), err)
+    if field != exception.LogContext(err, exception.LogContextOptions{})["field"] {
+        t.Fatalf("expected the refusal to name %s, got %v: %v", field, exception.LogContext(err, exception.LogContextOptions{}), err)
     }
 }
 
@@ -93,7 +93,7 @@ func expectPanicNamingTheArgument(t *testing.T, argument string, callback func()
             t.Fatalf("expected a refusal naming the %s argument, got no error panic", argument)
         }
 
-        if context := exception.LogContext(recoveredErr, exception.LogContextConfig{}); argument != context["argument"] {
+        if context := exception.LogContext(recoveredErr, exception.LogContextOptions{}); argument != context["argument"] {
             t.Fatalf("expected a refusal naming the %s argument, got %v: %v", argument, context, recoveredErr)
         }
     }()
@@ -845,7 +845,7 @@ func expectARawDeliveryRequeuesCounted(t *testing.T, queueName string, rawHeader
     }
 
     retried := first.WithStamps([]messagebuscontract.Stamp{melodymessagebus.RedeliveryStamp{Count: 1}, melodymessagebus.HeadersStamp{Headers: added}})
-    if nackErr := transport.Nack(runtimeInstance, retried, messagebuscontract.NackConfig{Requeue: true}); nil != nackErr {
+    if nackErr := transport.Nack(runtimeInstance, retried, messagebuscontract.NackOptions{Requeue: true}); nil != nackErr {
         t.Fatalf("nack requeue: %v", nackErr)
     }
 

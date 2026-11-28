@@ -724,7 +724,7 @@ func fileCarriesOwnershipMarker(path string, marker string) (bool, error) {
 /* reportWrites is the generator's one report door, reached from the run's defer on every path: text lines, or the single machine-readable document under --format=json carrying the failure beside what was already written. The summary is the command's whole result, so --quiet does not silence it. The run's failure stays the returned verdict; a rendering failure becomes one only when the run succeeded, and in text mode the failure travels alone for the cli entry point to print. */
 func (instance *GenerateCommand) reportWrites(
     commandContext *clicontract.CommandContext,
-    option output.Option,
+    option output.Options,
     startedAt time.Time,
     writes []destinationWrite,
     pruned []string,

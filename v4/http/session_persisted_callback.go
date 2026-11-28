@@ -74,7 +74,7 @@ func runSessionPersistedCallbacks(
             if nil != logger {
                 logger.Error(
                     "session persisted callback failed and its error cannot replace the response",
-                    exception.LogContext(callbackErr, exception.LogContextConfig{}),
+                    exception.LogContext(callbackErr, exception.LogContextOptions{}),
                 )
             }
 

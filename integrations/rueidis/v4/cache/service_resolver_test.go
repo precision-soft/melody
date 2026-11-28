@@ -182,7 +182,7 @@ func TestRegisterBackendService_RefusesAtTheCall(t *testing.T) {
                         t.Fatal("expected the registration to panic with an error")
                     }
 
-                    if testCase.field != exception.LogContext(recoveredErr, exception.LogContextConfig{})["field"] {
+                    if testCase.field != exception.LogContext(recoveredErr, exception.LogContextOptions{})["field"] {
                         t.Fatalf("expected the refusal to name %s, got %v", testCase.field, recoveredErr)
                     }
                 }()

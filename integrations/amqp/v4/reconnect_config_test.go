@@ -85,7 +85,7 @@ func TestResolveReconnectOver_ACapLoweredUnderAnInheritedInitialIsRefusedNamingB
     _, resolveErr := resolveReconnectOver(parent, ReconnectConfig{Backoff: bound.Backoff{Max: bound.Of(500 * time.Millisecond)}})
     expectErrorNamingField(t, resolveErr, "ReconnectConfig.Backoff.Initial")
 
-    errorContext := exception.LogContext(resolveErr, exception.LogContextConfig{})
+    errorContext := exception.LogContext(resolveErr, exception.LogContextOptions{})
     if "ReconnectConfig.Backoff.Max" != errorContext["cappedBy"] {
         t.Fatalf("expected the refusal to name the cap, got %v", errorContext)
     }

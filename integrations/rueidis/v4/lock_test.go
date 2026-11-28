@@ -775,7 +775,7 @@ func TestRedisLock_AnUnlimitedTtlIsRefusedAtCreateLockNamingIt(t *testing.T) {
     name := lockTestName(t, "unlimited")
 
     lock, createErr := NewLocker(newTestConnection(newTokenStoreClient(t)), LockerConfig{}).CreateLock(name, lockcontract.CreateLockOptions{Ttl: bound.UnlimitedDuration()})
-    if nil != lock || nil == createErr || "CreateLockOptions.Ttl" != exception.LogContext(createErr, exception.LogContextConfig{})["field"] {
+    if nil != lock || nil == createErr || "CreateLockOptions.Ttl" != exception.LogContext(createErr, exception.LogContextOptions{})["field"] {
         t.Fatalf("expected an unlimited ttl to be refused naming it, got %v %v", lock, createErr)
     }
 
@@ -844,7 +844,7 @@ func TestRedisLock_ARefreshTheRuleRefusesIsAnsweredBeforeTheStoreNamingIt(t *tes
 
     for _, refused := range []bound.Duration{bound.Of(time.Duration(0)), bound.UnlimitedDuration()} {
         refreshErr := lock.Refresh(newLockRuntime(), lockcontract.RefreshOptions{Ttl: refused})
-        if nil == refreshErr || "RefreshOptions.Ttl" != exception.LogContext(refreshErr, exception.LogContextConfig{})["field"] {
+        if nil == refreshErr || "RefreshOptions.Ttl" != exception.LogContext(refreshErr, exception.LogContextOptions{})["field"] {
             t.Fatalf("expected the refresh ttl %s to be refused naming it, got %v", refused, refreshErr)
         }
     }

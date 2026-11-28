@@ -110,8 +110,8 @@ func TestModule_ANilTransportIsRefusedNamingItBeforeAnythingIsRegistered(t *test
 
         expectErrorNamingField(t, recoveredErr, "ModuleConfig.Transports")
 
-        if "discarded" != exception.LogContext(recoveredErr, exception.LogContextConfig{})["transport"] {
-            t.Fatalf("expected the refusal to name the transport, got %v", exception.LogContext(recoveredErr, exception.LogContextConfig{}))
+        if "discarded" != exception.LogContext(recoveredErr, exception.LogContextOptions{})["transport"] {
+            t.Fatalf("expected the refusal to name the transport, got %v", exception.LogContext(recoveredErr, exception.LogContextOptions{}))
         }
 
         if 0 != len(registrar.names) {
@@ -145,7 +145,7 @@ func TestModule_ABootModeWithoutAConnectionBuiltAtBootIsRefused(t *testing.T) {
                     t.Fatal("expected the boot mode refused")
                 }
 
-                context := exception.LogContext(recoveredErr, exception.LogContextConfig{})
+                context := exception.LogContext(recoveredErr, exception.LogContextOptions{})
                 if testCase.field != context["field"] || testCase.requires != context["requires"] || false == strings.Contains(recoveredErr.Error(), "has no connection built at boot") {
                     t.Fatalf("expected the refusal to name %s and %s, got %v: %v", testCase.field, testCase.requires, context, recoveredErr)
                 }
@@ -291,7 +291,7 @@ func TestModule_SeveralNilTransportsAreRefusedNamingTheFirstInNameOrder(t *testi
         func() {
             defer func() {
                 recoveredErr, _ := recover().(error)
-                if "alpha" != exception.LogContext(recoveredErr, exception.LogContextConfig{})["transport"] {
+                if "alpha" != exception.LogContext(recoveredErr, exception.LogContextOptions{})["transport"] {
                     t.Fatalf("expected the refusal to name alpha, got %v", recoveredErr)
                 }
             }()

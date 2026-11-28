@@ -199,7 +199,7 @@ func (instance *RelayCommand) logRunError(logger loggingcontract.Logger, runErr 
         "outbox relay batch failed",
         exception.LogContext(
             runErr,
-            exception.LogContextConfig{
+            exception.LogContextOptions{
                 Extra: exceptioncontract.Context{
                     "published": published,
                 },

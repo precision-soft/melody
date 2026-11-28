@@ -736,7 +736,7 @@ func TestLocalStorage_PutStoresAKeyWhoseLeafFillsTheFilesystemComponent(t *testi
 func TestLocalStorage_PresignedUrlIsRefusedAsUnsupported(t *testing.T) {
     local := NewLocalStorage(t.TempDir(), LocalStorageConfig{})
 
-    for _, config := range []storagecontract.PresignConfig{{}, {Method: http.MethodPut}} {
+    for _, config := range []storagecontract.PresignOptions{{}, {Method: http.MethodPut}} {
         url, presignErr := local.PresignedUrl(testRuntime(), "reports/report.csv", config)
         if false == exception.ChainIs(presignErr, storagecontract.ErrPresignUnsupported) || false == strings.Contains(presignErr.Error(), "presigned urls are not supported by local storage") {
             t.Fatalf("%v: expected the local storage to refuse a presigned url as unsupported, got %v", config, presignErr)
@@ -1599,7 +1599,7 @@ func TestLocalStorage_EveryDoorRefusesANilRuntimeFirst(t *testing.T) {
 
     _, getErr := local.Get(nil, "a.txt", storagecontract.GetOptions{})
     _, statErr := local.Stat(nil, "a.txt", storagecontract.StatOptions{})
-    _, presignErr := local.PresignedUrl(nil, "a.txt", storagecontract.PresignConfig{})
+    _, presignErr := local.PresignedUrl(nil, "a.txt", storagecontract.PresignOptions{})
     for door, doorErr := range map[string]error{
         "Put":          local.Put(nil, "a.txt", strings.NewReader("x"), 1, storagecontract.PutOptions{}),
         "Get":          getErr,

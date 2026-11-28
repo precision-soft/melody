@@ -93,8 +93,8 @@ func TestResolveRelayConfig_AnInitialBackoffAboveTheCapIsRefusedNamingBoth(t *te
     _, resolveErr := resolveRelayConfig(RelayConfig{Backoff: bound.Backoff{Initial: bound.Of(time.Second), Max: bound.Of(500 * time.Millisecond)}})
     expectErrorNamingField(t, resolveErr, "RelayConfig.Backoff.Initial")
 
-    if "RelayConfig.Backoff.Max" != exception.LogContext(resolveErr, exception.LogContextConfig{})["cappedBy"] {
-        t.Fatalf("expected the refusal to name the cap, got %v", exception.LogContext(resolveErr, exception.LogContextConfig{}))
+    if "RelayConfig.Backoff.Max" != exception.LogContext(resolveErr, exception.LogContextOptions{})["cappedBy"] {
+        t.Fatalf("expected the refusal to name the cap, got %v", exception.LogContext(resolveErr, exception.LogContextOptions{}))
     }
 
     if _, equalErr := resolveRelayConfig(RelayConfig{Backoff: bound.Backoff{Initial: bound.Of(time.Second), Max: bound.Of(time.Second)}}); nil != equalErr {
@@ -106,8 +106,8 @@ func TestResolveRelayConfig_AnUnavailableBackoffAboveItsMaximumIsRefusedNamingBo
     _, resolveErr := resolveRelayConfig(RelayConfig{UnavailableBackoff: bound.Backoff{Initial: bound.Of(time.Minute), Max: bound.Of(time.Second)}})
     expectErrorNamingField(t, resolveErr, "RelayConfig.UnavailableBackoff.Initial")
 
-    if "RelayConfig.UnavailableBackoff.Max" != exception.LogContext(resolveErr, exception.LogContextConfig{})["cappedBy"] {
-        t.Fatalf("expected the refusal to name the cap, got %v", exception.LogContext(resolveErr, exception.LogContextConfig{}))
+    if "RelayConfig.UnavailableBackoff.Max" != exception.LogContext(resolveErr, exception.LogContextOptions{})["cappedBy"] {
+        t.Fatalf("expected the refusal to name the cap, got %v", exception.LogContext(resolveErr, exception.LogContextOptions{}))
     }
 }
 
@@ -135,7 +135,7 @@ func TestResolveRelayConfig_AMaxDeliveryAttemptsBesideTheLargestMaxAttemptsNames
     _, resolveErr := resolveRelayConfig(RelayConfig{MaxAttempts: bound.Of(math.MaxInt), MaxDeliveryAttempts: bound.Of(math.MaxInt)})
     expectErrorNamingField(t, resolveErr, "RelayConfig.MaxDeliveryAttempts")
 
-    errorContext := exception.LogContext(resolveErr, exception.LogContextConfig{})
+    errorContext := exception.LogContext(resolveErr, exception.LogContextOptions{})
     if _, hasMinimum := errorContext["minimum"]; true == hasMinimum || "RelayConfig.MaxAttempts" != errorContext["flooredBy"] {
         t.Fatalf("expected a refusal naming MaxAttempts without an unrepresentable minimum, got %v", errorContext)
     }
@@ -160,7 +160,7 @@ func TestNewRelay_RefusesANilRequiredArgumentByName(t *testing.T) {
                     t.Fatalf("expected a refusal naming the %s argument, got no error panic", testCase.argument)
                 }
 
-                if context := exception.LogContext(recoveredErr, exception.LogContextConfig{}); testCase.argument != context["argument"] {
+                if context := exception.LogContext(recoveredErr, exception.LogContextOptions{}); testCase.argument != context["argument"] {
                     t.Fatalf("expected a refusal naming the %s argument, got %v", testCase.argument, context)
                 }
             }()

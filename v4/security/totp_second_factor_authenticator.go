@@ -31,7 +31,7 @@ type TotpSecondFactorAuthenticatorConfig struct {
     RecoveryHeaderName string
 
     /* Totp tunes the algorithm; a config outside its ranges is refused at construction naming the field. Its Clock is refused: the authenticator's Clock is the clock the code is verified against. */
-    Totp totp.Config
+    Totp totp.Options
 
     /* ReplayGuard enforces single use of an accepted code within its validity window (the same NonceGuard contract the HMAC source uses). Optional: defaults to an in-process guard, so supply a shared one for multi-instance deployments. */
     ReplayGuard securitycontract.NonceGuard
@@ -156,7 +156,7 @@ type TotpSecondFactorAuthenticator struct {
     enrollments        securitycontract.TwoFactorEnrollmentStore
     codeHeaderName     string
     recoveryHeaderName string
-    totpConfig         totp.Config
+    totpConfig         totp.Options
     codeValidityWindow time.Duration
     replayGuard        securitycontract.NonceGuard
     maxFailedAttempts  int
@@ -302,7 +302,7 @@ func (instance *TotpSecondFactorAuthenticator) forgetFailedAttempts(runtimeInsta
     if logger := logging.LoggerFromRuntime(runtimeInstance); nil != logger {
         logger.Warning(
             "two-factor failed attempt reset failed",
-            exception.LogContext(resetErr, exception.LogContextConfig{}),
+            exception.LogContext(resetErr, exception.LogContextOptions{}),
         )
     }
 }

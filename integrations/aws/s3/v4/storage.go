@@ -530,7 +530,7 @@ func (instance *Storage) Delete(
 func (instance *Storage) PresignedUrl(
     runtimeInstance containercontract.Runtime,
     key string,
-    config storagecontract.PresignConfig,
+    options storagecontract.PresignOptions,
 ) (string, error) {
     if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance, "awss3.Storage.PresignedUrl"); nil != refuseErr {
         return "", refuseErr
@@ -543,12 +543,12 @@ func (instance *Storage) PresignedUrl(
         return "", keyErr
     }
 
-    method, methodErr := storagecontract.ResolvePresignMethod(config.Method)
+    method, methodErr := storagecontract.ResolvePresignMethod(options.Method)
     if nil != methodErr {
         return "", methodErr
     }
 
-    expiry, expiryErr := storagecontract.ResolvePresignExpiry(config.Expiry)
+    expiry, expiryErr := storagecontract.ResolvePresignExpiry(options.Expiry)
     if nil != expiryErr {
         return "", expiryErr
     }

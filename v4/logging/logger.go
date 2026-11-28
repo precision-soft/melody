@@ -69,7 +69,7 @@ func LogError(logger loggingcontract.Logger, err error) {
     }
 
     /* the message is rendered with the context under a recover: this path runs from the recovery handlers, where Error() may dereference the very nil that caused the panic */
-    enrichedContext := exception.LogContext(err, exception.LogContextConfig{CauseChainDepth: causeChainDepth})
+    enrichedContext := exception.LogContext(err, exception.LogContextOptions{CauseChainDepth: causeChainDepth})
     renderedMessage, isRendered := enrichedContext["error"].(string)
     if false == isRendered || "" == renderedMessage {
         renderedMessage = "the error message could not be rendered"

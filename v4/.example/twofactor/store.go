@@ -128,7 +128,7 @@ func (instance *Store) Enroll(
         return "", "", nil, secretErr
     }
 
-    uri, uriErr := totp.OtpauthUri(issuer, userIdentifier, secret, totp.Config{})
+    uri, uriErr := totp.OtpauthUri(issuer, userIdentifier, secret, totp.Options{})
     if nil != uriErr {
         return "", "", nil, uriErr
     }

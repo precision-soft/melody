@@ -2989,7 +2989,7 @@ func TestContainer_VerifyDeclaredTeardownDependencies_RefusesADeclaredDependency
         t.Fatalf("expected the refusal to name what is missing, got: %v", verifyErr)
     }
 
-    refusalContext := exception.LogContext(verifyErr, exception.LogContextConfig{})
+    refusalContext := exception.LogContext(verifyErr, exception.LogContextOptions{})
     if "app.reporter" != refusalContext["serviceName"] || "app.stroage" != refusalContext["dependency"] || "service:app.stroage" != refusalContext["dependencyNodeKey"] {
         t.Fatalf("expected the refusal to carry the declaring service, the spelling it declared and the node key it stands for, got %v", refusalContext)
     }
@@ -3904,7 +3904,7 @@ func TestContainer_CloseWithContext_AFailureUnderAnOverrunCarriesTheDeadlineReco
         t.Fatalf("expected the failing close reported")
     }
 
-    errorContext := exception.LogContext(closeErr, exception.LogContextConfig{})
+    errorContext := exception.LogContext(closeErr, exception.LogContextOptions{})
 
     failures, hasFailures := errorContext["failures"].(map[string]string)
     if false == hasFailures || "" == failures["service:app.failing"] {
@@ -5183,7 +5183,7 @@ func TestContainer_Close_ADanglingDeclarationAloneIsTheAnswerAndEveryServiceClos
         t.Fatalf("expected the refusal as the teardown's answer, got %v", closeErr)
     }
 
-    refusalContext := exception.LogContext(closeErr, exception.LogContextConfig{})
+    refusalContext := exception.LogContext(closeErr, exception.LogContextOptions{})
     if "app.reporter" != refusalContext["serviceName"] || "app.missing" != refusalContext["dependency"] {
         t.Fatalf("expected the refusal to name the declaration, got %v", refusalContext)
     }

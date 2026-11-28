@@ -33,12 +33,12 @@ func GreetingHandler() melodyhttpcontract.Handler {
             name = "world"
         }
 
-        greeting, greetingErr := translate(translator, "greeting", melodytranslationcontract.TranslateConfig{Parameters: map[string]any{"name": name}, Locale: locale})
+        greeting, greetingErr := translate(translator, "greeting", melodytranslationcontract.TranslateOptions{Parameters: map[string]any{"name": name}, Locale: locale})
         if nil != greetingErr {
             return nil, greetingErr
         }
 
-        cart, cartErr := translate(translator, "cart.items", melodytranslationcontract.TranslateConfig{Parameters: map[string]any{"count": queryInt(request, "count")}, Locale: locale})
+        cart, cartErr := translate(translator, "cart.items", melodytranslationcontract.TranslateOptions{Parameters: map[string]any{"count": queryInt(request, "count")}, Locale: locale})
         if nil != cartErr {
             return nil, cartErr
         }
@@ -54,8 +54,8 @@ func GreetingHandler() melodyhttpcontract.Handler {
 }
 
 /* translate shows the message id for a message no catalog carries and answers every other error, so a pattern that cannot render is the request's failure rather than a half-rendered payload. */
-func translate(translator melodytranslationcontract.Translator, messageId string, config melodytranslationcontract.TranslateConfig) (string, error) {
-    message, translateErr := translator.Translate(messageId, config)
+func translate(translator melodytranslationcontract.Translator, messageId string, options melodytranslationcontract.TranslateOptions) (string, error) {
+    message, translateErr := translator.Translate(messageId, options)
     if nil != translateErr && false == errors.Is(translateErr, melodytranslation.ErrMessageNotFound) {
         return "", translateErr
     }

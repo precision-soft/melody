@@ -141,8 +141,8 @@ func newRecoveredPanicError(value any) *exception.Error {
     )
 }
 
-/* ExitConfig configures the step LogOnRecoverAndExit runs between the exit record and os.Exit; the zero value runs no hook. */
-type ExitConfig struct {
+/* ExitOptions configures the step LogOnRecoverAndExit runs between the exit record and os.Exit; the zero value runs no hook. */
+type ExitOptions struct {
     /* BeforeExit runs between the exit record and os.Exit, the one place after the record and before the exit; nil for none. */
     BeforeExit func(beforeExitContext context.Context)
 
@@ -150,12 +150,12 @@ type ExitConfig struct {
     BeforeExitBudget bound.Duration
 }
 
-/* LogOnRecoverAndExit logs the recovered value, runs the config's hook under its budget and exits with exitCode. The exit code, refused outside 1..255, and the budget, refused by name outside its rule, are checked before the no-panic return, so a bad one is caught on the first healthy pass. */
+/* LogOnRecoverAndExit logs the recovered value, runs the options' hook under their budget and exits with exitCode. The exit code, refused outside 1..255, and the budget, refused by name outside its rule, are checked before the no-panic return, so a bad one is caught on the first healthy pass. */
 func LogOnRecoverAndExit(
     logger loggingcontract.Logger,
     recovered any,
     exitCode int,
-    config ExitConfig,
+    options ExitOptions,
 ) {
     /* the code is checked as NewExitError checks it, since zero would make os.Exit report success; the check runs before the no-panic return, so a bad code is caught on the first healthy pass */
     if 1 > exitCode || 255 < exitCode {
@@ -171,9 +171,9 @@ func LogOnRecoverAndExit(
     }
 
     beforeExitBudget, beforeExitBudgetErr := bound.Resolve(
-        config.BeforeExitBudget,
+        options.BeforeExitBudget,
         bound.Rule[time.Duration]{
-            Name:    "ExitConfig.BeforeExitBudget",
+            Name:    "ExitOptions.BeforeExitBudget",
             Default: exitStepBudget,
             Minimum: bound.TimeoutMinimum,
         },
@@ -201,8 +201,8 @@ func LogOnRecoverAndExit(
         writeExitCertificate(logger, err, resolvedExitCode)
     })
 
-    if nil != config.BeforeExit {
-        runExitStepShieldedWithin(beforeExitBudget.Value, "running the before-exit hook", config.BeforeExit)
+    if nil != options.BeforeExit {
+        runExitStepShieldedWithin(beforeExitBudget.Value, "running the before-exit hook", options.BeforeExit)
     }
 
     /* the echo leaves a trace on the standard streams when the record went to a file. It runs under the package budget, not the hook's, and outside the shield, since the shield reports on stderr, the very channel this step can block on; an abandoned echo is followed by os.Exit, silently. */
@@ -232,18 +232,18 @@ func LogOnRecoverAndExit(
 /* exitStepBudget is how long one step of the exit handler may run before it is abandoned, and the default of the budgets a caller leaves out; tests replace it. It is a variable of this package because the package cannot read the configuration, which is loaded through the logger it builds. */
 var exitStepBudget = 10 * time.Second
 
-/* ShieldedStepConfig configures RunShieldedStep; the zero value is the framework's. */
-type ShieldedStepConfig struct {
+/* ShieldedStepOptions configures RunShieldedStep; the zero value is the framework's. */
+type ShieldedStepOptions struct {
     /* Budget bounds the step, its context's deadline falling at half of it; 10s when left out, at least 1ms, unlimited waits the step out with no deadline, as a process shutting down cleanly may. */
     Budget bound.Duration
 }
 
 /* RunShieldedStep runs a step under the exit handler's shield, containing a panic, echoing it to stderr best-effort, and abandoning a step that outlasts the budget. It answers whether the step ran to its end; false means the process holds something it cannot release and should end. The step keeps running after abandonment, and it is handed a context whose deadline falls at half the budget, so it can report before the shield abandons it. A budget outside its rule is not panicked, since the shield exists so nothing on the exit path panics: the refusal is echoed to stderr and the step runs under 10s. */
-func RunShieldedStep(stepName string, config ShieldedStepConfig, step func(stepContext context.Context)) bool {
+func RunShieldedStep(stepName string, options ShieldedStepOptions, step func(stepContext context.Context)) bool {
     budget, budgetErr := bound.Resolve(
-        config.Budget,
+        options.Budget,
         bound.Rule[time.Duration]{
-            Name:              "ShieldedStepConfig.Budget",
+            Name:              "ShieldedStepOptions.Budget",
             Default:           exitStepBudget,
             Minimum:           bound.TimeoutMinimum,
             UnlimitedAdmitted: true,
@@ -256,7 +256,7 @@ func RunShieldedStep(stepName string, config ShieldedStepConfig, step func(stepC
         go func() {
             defer close(echoDone)
 
-            _, _ = fmt.Fprintf(os.Stderr, "melody: %s refused ShieldedStepConfig.Budget (%s) and runs under %s\n", stepName, internal.EscapeControlCharacters(budgetErr.Error()), exitStepBudget)
+            _, _ = fmt.Fprintf(os.Stderr, "melody: %s refused ShieldedStepOptions.Budget (%s) and runs under %s\n", stepName, internal.EscapeControlCharacters(budgetErr.Error()), exitStepBudget)
         }()
 
         completed := runExitStepShielded(stepName, step)
@@ -464,7 +464,7 @@ func writeExitCertificate(logger loggingcontract.Logger, err *exception.Error, e
         "process exiting after unrecovered error",
         exception.LogContext(
             err,
-            exception.LogContextConfig{
+            exception.LogContextOptions{
                 Extra: map[string]any{
                     "exitCode": exitCode,
                 },
@@ -509,7 +509,7 @@ func echoExitToStderr(err error, exitCode int, causeChainDepth int) {
     var causeChain []string
     if nil != err {
         /* a recovered value's Error() can be the dereference that made it panic, so it is rendered through LogContext, under a recover */
-        errorContext := exception.LogContext(err, exception.LogContextConfig{CauseChainDepth: 2 * causeChainDepth})
+        errorContext := exception.LogContext(err, exception.LogContextOptions{CauseChainDepth: 2 * causeChainDepth})
         rendered, isRendered := errorContext["error"].(string)
         if true == isRendered && "" != rendered {
             message = rendered

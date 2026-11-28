@@ -40,7 +40,7 @@ func fileLoginFailureDispatchError(
             "security login failure event dispatch failed",
             exception.LogContext(
                 exception.NewError("security login failure event dispatch failed", extra, dispatchErr),
-                exception.LogContextConfig{Extra: exceptioncontract.Context{"statusCode": statusCode}},
+                exception.LogContextOptions{Extra: exceptioncontract.Context{"statusCode": statusCode}},
             ),
         )
     }

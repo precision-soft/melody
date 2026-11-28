@@ -16,8 +16,8 @@ type Query struct {
     Sql  string
 }
 
-/* RunnerOption shapes the per-query lines a migration prints: Writer, the run's own writer when left out — the posture the migrate command put on the context, else standard output; NoColor, true to print without colour, false to follow the run's posture. The zero value prints as the command prints. */
-type RunnerOption struct {
+/* RunnerOptions shapes the per-query lines a migration prints: Writer, the run's own writer when left out — the posture the migrate command put on the context, else standard output; NoColor, true to print without colour, false to follow the run's posture. The zero value prints as the command prints. */
+type RunnerOptions struct {
     Writer  io.Writer
     NoColor bool
 }
@@ -25,7 +25,7 @@ type RunnerOption struct {
 /* runnerOptionContextKey is the key under which a migrate command hands its parsed posture to the migrations it runs. A generated migration's signature is fixed by bun as (ctx, db) and cannot receive the parsed flags any other way, and bun passes the command's context into every migration unchanged, so the context is the one channel that reaches the migration and belongs to that run alone. */
 type runnerOptionContextKey struct{}
 
-/* emptyMigrationWarnerContextKey is the key under which a migrate command hands RunQueries the door an empty migration's warning goes through when the command's writer is discarded, under --format=json, so the machine document still carries it. It rides the context beside the option rather than inside it, since a function field would make RunnerOption incomparable. */
+/* emptyMigrationWarnerContextKey is the key under which a migrate command hands RunQueries the door an empty migration's warning goes through when the command's writer is discarded, under --format=json, so the machine document still carries it. It rides the context beside the option rather than inside it, since a function field would make RunnerOptions incomparable. */
 type emptyMigrationWarnerContextKey struct{}
 
 func withEmptyMigrationWarner(ctx context.Context, warn func(message string)) context.Context {
@@ -43,23 +43,23 @@ func emptyMigrationWarnerFromContext(ctx context.Context) func(message string) {
 }
 
 /* withRunnerOption returns a context carrying the option RunQueries reads first; the migrate commands derive it from their parsed flags and run the migrator under it. */
-func withRunnerOption(ctx context.Context, option RunnerOption) context.Context {
+func withRunnerOption(ctx context.Context, option RunnerOptions) context.Context {
     return context.WithValue(ctx, runnerOptionContextKey{}, option)
 }
 
 /* runnerOptionFromContext answers the option a migrate command put on the context, and false when the context carries none — a migration invoked outside any command, or one that dropped the context it receives. */
-func runnerOptionFromContext(ctx context.Context) (RunnerOption, bool) {
+func runnerOptionFromContext(ctx context.Context) (RunnerOptions, bool) {
     if nil == ctx {
-        return RunnerOption{}, false
+        return RunnerOptions{}, false
     }
 
-    option, present := ctx.Value(runnerOptionContextKey{}).(RunnerOption)
+    option, present := ctx.Value(runnerOptionContextKey{}).(RunnerOptions)
 
     return option, present
 }
 
 /* RunQueries executes the queries in order, printing each under the direction and the migration's name, and stops at the first failure naming the step. The posture is the option's where set, the command's otherwise: a migration passes on the context it is given, which carries the command's writer and colour, and one that drops it prints to standard output. It takes that context, never a runtime, since its caller is a bun migration function, whose signature is bun's. */
-func RunQueries(ctx context.Context, db *bun.DB, direction string, migrationName string, queries []Query, option RunnerOption) error {
+func RunQueries(ctx context.Context, db *bun.DB, direction string, migrationName string, queries []Query, option RunnerOptions) error {
     commandOption, _ := runnerOptionFromContext(ctx)
 
     /* an option that names no writer takes the one the command prints under, so a migration that passes its own option to set the colour alone does not print its per-query lines past the writer its command chose, into the middle of a --format=json document */
@@ -104,12 +104,12 @@ func RunQueries(ctx context.Context, db *bun.DB, direction string, migrationName
 }
 
 /* Up is RunQueries in the up direction, on the context of the bun migration function that calls it. */
-func Up(ctx context.Context, db *bun.DB, migrationName string, queries []Query, option RunnerOption) error {
+func Up(ctx context.Context, db *bun.DB, migrationName string, queries []Query, option RunnerOptions) error {
     return RunQueries(ctx, db, "up", migrationName, queries, option)
 }
 
 /* Down is RunQueries in the down direction, on the context of the bun migration function that calls it. */
-func Down(ctx context.Context, db *bun.DB, migrationName string, queries []Query, option RunnerOption) error {
+func Down(ctx context.Context, db *bun.DB, migrationName string, queries []Query, option RunnerOptions) error {
     return RunQueries(ctx, db, "down", migrationName, queries, option)
 }
 

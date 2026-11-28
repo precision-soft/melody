@@ -4,8 +4,8 @@ import (
     "github.com/precision-soft/melody/v4/bound"
 )
 
-/* Option is what a command's output is rendered with. The zero value is the default: a table, colour on, verbosity 0, ascending order, no item limit, no offset and a table 120 cells wide. */
-type Option struct {
+/* Options is what a command's output is rendered with. The zero value is the default: a table, colour on, verbosity 0, ascending order, no item limit, no offset and a table 120 cells wide. */
+type Options struct {
     /* Format is table, json or json-pretty; "" reads as table, as does a format no printer knows. */
     Format         Format
     NoColor        bool
@@ -26,7 +26,7 @@ type Option struct {
 
 func OptionLimitRule() bound.Rule[int] {
     return bound.Rule[int]{
-        Name:             "Option.Limit",
+        Name:             "Options.Limit",
         DefaultUnlimited: true,
         Minimum:          0,
     }
@@ -34,7 +34,7 @@ func OptionLimitRule() bound.Rule[int] {
 
 func OptionOffsetRule() bound.Rule[int] {
     return bound.Rule[int]{
-        Name:    "Option.Offset",
+        Name:    "Options.Offset",
         Default: 0,
         Minimum: 0,
     }
@@ -42,7 +42,7 @@ func OptionOffsetRule() bound.Rule[int] {
 
 func OptionTableMaxWidthRule() bound.Rule[int] {
     return bound.Rule[int]{
-        Name:              "Option.TableMaxWidth",
+        Name:              "Options.TableMaxWidth",
         Default:           defaultTableMaxWidth,
         Minimum:           1,
         UnlimitedAdmitted: true,

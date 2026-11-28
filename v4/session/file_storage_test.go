@@ -927,8 +927,8 @@ func TestNewFileStorage_RefusesAnEmptyPathOrANilFileNamingTheArgument(t *testing
                 t.Fatalf("expected %q, got %q", testCase.message, storageErr.Error())
             }
 
-            if testCase.argument != exception.LogContext(storageErr, exception.LogContextConfig{})["argument"] {
-                t.Fatalf("expected the refusal to name the %s argument, got %v", testCase.argument, exception.LogContext(storageErr, exception.LogContextConfig{}))
+            if testCase.argument != exception.LogContext(storageErr, exception.LogContextOptions{})["argument"] {
+                t.Fatalf("expected the refusal to name the %s argument, got %v", testCase.argument, exception.LogContext(storageErr, exception.LogContextOptions{}))
             }
         })
     }
@@ -1689,8 +1689,8 @@ func TestFileStorage_MaxSessionsRefusesANewIdAtTheCeilingAndKeepsTheStoredOnes(t
         t.Fatalf("expected the new id refused, got %v", saveErr)
     }
 
-    if "FileStorageConfig.MaxSessions" != exception.LogContext(saveErr, exception.LogContextConfig{})["field"] {
-        t.Fatalf("expected the refusal to name the field, got %v", exception.LogContext(saveErr, exception.LogContextConfig{}))
+    if "FileStorageConfig.MaxSessions" != exception.LogContext(saveErr, exception.LogContextOptions{})["field"] {
+        t.Fatalf("expected the refusal to name the field, got %v", exception.LogContext(saveErr, exception.LogContextOptions{}))
     }
 
     if _, found, _ := storage.Load(sessionRuntime(), "third"); true == found {
@@ -1755,7 +1755,7 @@ func TestNewFileStorage_MaxSessionsResolves(t *testing.T) {
     }
 
     _, refusedErr := NewFileStorage(filepath.Join(t.TempDir(), "sessions.json"), FileStorageConfig{MaxSessions: bound.Of(0)})
-    if nil == refusedErr || false == strings.Contains(fmt.Sprint(exception.LogContext(refusedErr, exception.LogContextConfig{})), "FileStorageConfig.MaxSessions") {
+    if nil == refusedErr || false == strings.Contains(fmt.Sprint(exception.LogContext(refusedErr, exception.LogContextOptions{})), "FileStorageConfig.MaxSessions") {
         t.Fatalf("expected a zero ceiling refused naming the field, got %v", refusedErr)
     }
 }
@@ -2150,7 +2150,7 @@ func TestNewFileStorage_RefusesAModeOutsideItsRuleNamingTheField(t *testing.T) {
                 t.Fatalf("expected %s %s refused", testCase.field, testCase.value)
             }
 
-            context := exception.LogContext(storageErr, exception.LogContextConfig{})
+            context := exception.LogContext(storageErr, exception.LogContextOptions{})
             if testCase.field != context["field"] || testCase.value != context["value"] {
                 t.Fatalf("expected the refusal to name %s and %s, got %v", testCase.field, testCase.value, context)
             }

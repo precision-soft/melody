@@ -207,7 +207,7 @@ func refusalLogContext(
     publicMessage string,
     causeErr error,
 ) melodyexceptioncontract.Context {
-    logContext := melodyexception.LogContext(causeErr, melodyexception.LogContextConfig{
+    logContext := melodyexception.LogContext(causeErr, melodyexception.LogContextOptions{
         Extra: map[string]any{
             "statusCode":    statusCode,
             "publicMessage": publicMessage,

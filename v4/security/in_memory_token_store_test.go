@@ -836,7 +836,7 @@ func TestInMemoryTokenStore_PutAtTheCeilingIsRefusedMarkedAndFull(t *testing.T) 
         t.Fatalf("expected a marked refusal carrying ErrTokenStoreFull, got %v", putErr)
     }
 
-    if refusalContext := exception.LogContext(putErr, exception.LogContextConfig{}); "InMemoryTokenStoreConfig.MaxEntries" != refusalContext["field"] || 2 != refusalContext["maxEntries"] {
+    if refusalContext := exception.LogContext(putErr, exception.LogContextOptions{}); "InMemoryTokenStoreConfig.MaxEntries" != refusalContext["field"] || 2 != refusalContext["maxEntries"] {
         t.Fatalf("expected the refusal to name the field and the ceiling, got %v", refusalContext)
     }
 }

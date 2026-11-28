@@ -50,7 +50,7 @@ func expectPanicNamingTheArgument(t *testing.T, argument string, callback func()
             t.Fatalf("expected a refusal naming the %s argument, got no error panic", argument)
         }
 
-        if context := exception.LogContext(recoveredErr, exception.LogContextConfig{}); argument != context["argument"] {
+        if context := exception.LogContext(recoveredErr, exception.LogContextOptions{}); argument != context["argument"] {
             t.Fatalf("expected a refusal naming the %s argument, got %v: %v", argument, context, recoveredErr)
         }
     }()
@@ -86,7 +86,7 @@ func expectPanicNamingArgument(t *testing.T, door string, argument string, callb
             t.Fatalf("expected %s to refuse %s, got no error panic", door, argument)
         }
 
-        context := exception.LogContext(recoveredErr, exception.LogContextConfig{})
+        context := exception.LogContext(recoveredErr, exception.LogContextOptions{})
         if door != context["door"] || argument != context["argument"] {
             t.Fatalf("expected %s to refuse %s, got %v: %v", door, argument, context, recoveredErr)
         }
@@ -102,8 +102,8 @@ func expectErrorNamingField(t *testing.T, err error, field string) {
         t.Fatalf("expected a refusal naming %s, got none", field)
     }
 
-    if field != exception.LogContext(err, exception.LogContextConfig{})["field"] {
-        t.Fatalf("expected the refusal to name %s, got %v: %v", field, exception.LogContext(err, exception.LogContextConfig{}), err)
+    if field != exception.LogContext(err, exception.LogContextOptions{})["field"] {
+        t.Fatalf("expected the refusal to name %s, got %v: %v", field, exception.LogContext(err, exception.LogContextOptions{}), err)
     }
 }
 

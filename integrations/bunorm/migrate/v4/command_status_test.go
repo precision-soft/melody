@@ -110,7 +110,7 @@ func TestStatusCommand_JsonFormatRendersOneMachineReadableDocument(t *testing.T)
 func TestStatusCommand_JsonFormatReportsTheFailureInTheDocument(t *testing.T) {
     runtimeInstance := newRuntimeWithDatabase(t, nil)
 
-    command := NewStatusCommand(migrate.NewMigrations(), Options{ManagerName: "missing", CommandPrefix: "db"})
+    command := NewStatusCommand(migrate.NewMigrations(), CommandConfig{ManagerName: "missing", CommandPrefix: "db"})
 
     rendered, runErr := runMigrationCommand(t, runtimeInstance, command, "--format=json")
     if nil == runErr {

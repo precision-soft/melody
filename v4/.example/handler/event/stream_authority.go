@@ -162,7 +162,7 @@ func checkStreamAuthority(runtimeInstance melodycontainercontract.Runtime, conne
     if nil != holdErr {
         logger.Warning(
             "event stream closed, the account could not be re-read",
-            melodyexception.LogContext(holdErr, melodyexception.LogContextConfig{Extra: melodyexceptioncontract.Context{"userId": authority.UserId(), "topic": topic}}),
+            melodyexception.LogContext(holdErr, melodyexception.LogContextOptions{Extra: melodyexceptioncontract.Context{"userId": authority.UserId(), "topic": topic}}),
         )
 
         return StreamAuthorityAccountUnreadable

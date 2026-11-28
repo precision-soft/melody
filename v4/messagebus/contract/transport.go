@@ -13,8 +13,8 @@ type Subscription interface {
     Err() error
 }
 
-/* NackConfig is how a delivery is refused; the zero value does not requeue. */
-type NackConfig struct {
+/* NackOptions is how a delivery is refused; the zero value does not requeue. */
+type NackOptions struct {
     /* Requeue hands the delivery back to the transport for another attempt. */
     Requeue bool
 }
@@ -28,7 +28,7 @@ type Transport interface {
 
     Ack(runtimeInstance containercontract.Runtime, envelope Envelope) error
 
-    Nack(runtimeInstance containercontract.Runtime, envelope Envelope, config NackConfig) error
+    Nack(runtimeInstance containercontract.Runtime, envelope Envelope, options NackOptions) error
 
     /* CloseWithContext takes no runtime: the container's ordered teardown calls it through the closer RegisterTransports registers, handing it the teardown's remaining budget. */
     CloseWithContext(closeContext context.Context) error

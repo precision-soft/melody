@@ -124,7 +124,7 @@ type middlewareListItem struct {
 
 /* populateDescription is the default listing: nothing is built and no factory runs. */
 func (instance *MiddlewareCommand) populateDescription(
-    option output.Option,
+    option output.Options,
     envelope *output.Envelope,
 ) {
     descriptions, report, describeErr := instance.descriptionProvider()
@@ -256,7 +256,7 @@ func (instance *MiddlewareCommand) populateDescription(
 
 /* populateBuiltChain runs the real build under a recover, so a panicking factory is rendered as a failure. */
 func (instance *MiddlewareCommand) populateBuiltChain(
-    option output.Option,
+    option output.Options,
     envelope *output.Envelope,
 ) {
     middlewares, buildErr := instance.runBuildProviderRecovered()

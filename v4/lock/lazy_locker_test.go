@@ -442,7 +442,7 @@ func TestLazyLocker_AnswersTheResolutionFailureWhenAsked(t *testing.T) {
     }
 
     shared, err = lockcontract.LeasesAcrossReplicas(nil, failingLazyLocker)
-    if true == shared || nil == err || "runtime is required to resolve the lazy locker" != err.Error() || ServiceLocker != exception.LogContext(err, exception.LogContextConfig{})["serviceName"] {
+    if true == shared || nil == err || "runtime is required to resolve the lazy locker" != err.Error() || ServiceLocker != exception.LogContext(err, exception.LogContextOptions{})["serviceName"] {
         t.Fatalf("expected a nil runtime to be refused naming the service, got %v and %v", shared, err)
     }
 

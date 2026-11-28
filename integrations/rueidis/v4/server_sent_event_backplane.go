@@ -224,7 +224,7 @@ func (instance *ServerSentEventBackplane) logError(message string, err error) {
         return
     }
 
-    instance.logger.Error(message, exception.LogContext(err, exception.LogContextConfig{}))
+    instance.logger.Error(message, exception.LogContext(err, exception.LogContextOptions{}))
 }
 
 func newBackplaneOrigin() string {

@@ -9,10 +9,10 @@ import (
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
 )
 
-/* PresignExpiryRule is the reading every backend gives PresignConfig.Expiry; its ceiling is the one of an S3 signature, so a link that signs on one backend signs on every other. */
+/* PresignExpiryRule is the reading every backend gives PresignOptions.Expiry; its ceiling is the one of an S3 signature, so a link that signs on one backend signs on every other. */
 func PresignExpiryRule() bound.Rule[time.Duration] {
     return bound.Rule[time.Duration]{
-        Name:    "PresignConfig.Expiry",
+        Name:    "PresignOptions.Expiry",
         Default: 15 * time.Minute,
         Minimum: bound.TtlMinimum,
         Maximum: 7 * 24 * time.Hour,
@@ -41,7 +41,7 @@ func ResolvePresignMethod(method string) (string, error) {
     return "", exception.NewError(
         "the presign method is not supported",
         exceptioncontract.Context{
-            "field":  "PresignConfig.Method",
+            "field":  "PresignOptions.Method",
             "method": method,
         },
         ErrPresignUnsupported,

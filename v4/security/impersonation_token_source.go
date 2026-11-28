@@ -202,7 +202,7 @@ func (instance *ImpersonationTokenSource) Resolve(
 
         logger := logging.LoggerFromRuntime(runtimeInstance)
         if nil != logger {
-            logger.Info("switch-user denied", exception.LogContext(resolutionErr, exception.LogContextConfig{}))
+            logger.Info("switch-user denied", exception.LogContext(resolutionErr, exception.LogContextOptions{}))
         }
 
         return NewAnonymousToken(), nil
@@ -226,7 +226,7 @@ func (instance *ImpersonationTokenSource) logDenied(
     if nil != logger {
         logger.Info(
             "switch-user denied",
-            exception.LogContext(exception.NewError(message, map[string]any{"target": internal.BoundDiagnosticText(target)}, nil), exception.LogContextConfig{}),
+            exception.LogContext(exception.NewError(message, map[string]any{"target": internal.BoundDiagnosticText(target)}, nil), exception.LogContextOptions{}),
         )
     }
 }

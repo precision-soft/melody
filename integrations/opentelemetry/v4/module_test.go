@@ -162,8 +162,8 @@ func TestModule_RegisterHttpRoutesRefusesAHalfDeclaredMetricsRouteNamingTheField
                     t.Fatalf("expected %s to be refused at boot", testCase.name)
                 }
 
-                if testCase.field != exception.LogContext(recoveredErr, exception.LogContextConfig{})["field"] {
-                    t.Fatalf("expected the refusal to name %s, got %v", testCase.field, exception.LogContext(recoveredErr, exception.LogContextConfig{}))
+                if testCase.field != exception.LogContext(recoveredErr, exception.LogContextOptions{})["field"] {
+                    t.Fatalf("expected the refusal to name %s, got %v", testCase.field, exception.LogContext(recoveredErr, exception.LogContextOptions{}))
                 }
 
                 if 0 != len(kernel.router.handled) {

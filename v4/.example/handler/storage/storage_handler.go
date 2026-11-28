@@ -177,7 +177,7 @@ func LinkHandler(storage *melodycontainer.LazyService[storagecontract.Storage]) 
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "could not read the object", statErr), nil
         }
 
-        link, presignErr := boundStorage.PresignedUrl(key, storagecontract.PresignConfig{Expiry: melodybound.Of(ttl)})
+        link, presignErr := boundStorage.PresignedUrl(key, storagecontract.PresignOptions{Expiry: melodybound.Of(ttl)})
         if nil != presignErr {
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "could not sign the link", presignErr), nil
         }

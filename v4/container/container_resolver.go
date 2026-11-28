@@ -297,7 +297,7 @@ func (instance *container) serviceWithCreationGuardLocked(
                         _ = recover()
                     }()
 
-                    context["recoveredContext"] = exception.LogContext(recoveredErr, exception.LogContextConfig{})
+                    context["recoveredContext"] = exception.LogContext(recoveredErr, exception.LogContextOptions{})
                 }()
             }
 

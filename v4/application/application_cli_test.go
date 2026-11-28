@@ -592,7 +592,7 @@ func TestBootCli_TheRegisteredContainerCommandDescribesTheApplicationsContainer(
         runtime.NewRun(context.Background(), scope),
         []string{"debug:container", "--format=json"},
         buffer,
-        cli.DispatchConfig{},
+        cli.DispatchOptions{},
     )
     if nil != dispatchErr {
         t.Fatalf("expected the registered command to run, got %v", dispatchErr)

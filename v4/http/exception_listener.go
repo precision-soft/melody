@@ -56,7 +56,7 @@ func builtInExceptionListener(runtimeInstance containercontract.Runtime, eventVa
             runtimeInstance,
             exceptionEvent.Request(),
             exceptionEvent.Err(),
-            ExceptionRenderConfig{
+            ExceptionRenderOptions{
                 DebugMode:             exceptionListenerDebugMode(runtimeInstance),
                 UnavailableRetryAfter: bound.Of(exceptionEvent.UnavailableRetryAfter()),
             },
@@ -117,7 +117,7 @@ func recordOccurrence(loggerInstance loggingcontract.Logger, request httpcontrac
 
     recordContext := exception.LogContext(
         occurrence,
-        exception.LogContextConfig{
+        exception.LogContextOptions{
             Extra: extra,
         },
     )
@@ -144,7 +144,7 @@ func exceptionListenerDebugMode(runtimeInstance containercontract.Runtime) bool 
     return config.EnvironmentDevelopment == configuration.Kernel().Environment()
 }
 
-type ExceptionRenderConfig struct {
+type ExceptionRenderOptions struct {
     /* DebugMode adds the context and cause of the nearest melody error, and shows a plain error's own text. */
     DebugMode bool
 
@@ -153,11 +153,11 @@ type ExceptionRenderConfig struct {
 }
 
 /* RenderExceptionResponse renders the answer an error earns: an error exception.AnswersUnavailable reads as unavailable is 503 service unavailable with Retry-After, whatever status lies beneath the mark; otherwise the status and message of the http exception its chain carries, its client-facing code, key and parameters, its validation errors projected for the client, and in debug mode the context and cause of the nearest melody error; any other error is a 500. The built-in listener answers with it and the kernel's final step renders with it; an application listener that wants the framework body for some errors calls it. */
-func RenderExceptionResponse(runtimeInstance containercontract.Runtime, request httpcontract.Request, err error, renderConfig ExceptionRenderConfig) httpcontract.Response {
+func RenderExceptionResponse(runtimeInstance containercontract.Runtime, request httpcontract.Request, err error, renderConfig ExceptionRenderOptions) httpcontract.Response {
     debugMode := renderConfig.DebugMode
 
     /* resolved for every error, so a refused delay meets its caller at the first error rendered rather than at the first outage */
-    unavailableRetryAfter, retryAfterErr := config.ResolveUnavailableRetryAfter(renderConfig.UnavailableRetryAfter, "ExceptionRenderConfig.UnavailableRetryAfter")
+    unavailableRetryAfter, retryAfterErr := config.ResolveUnavailableRetryAfter(renderConfig.UnavailableRetryAfter, "ExceptionRenderOptions.UnavailableRetryAfter")
     if nil != retryAfterErr {
         exception.Panic(exception.FromError(retryAfterErr))
     }

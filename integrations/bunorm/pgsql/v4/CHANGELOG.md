@@ -29,7 +29,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Breaking** — `lock.go`, `service_resolver.go`: `NewLocker` takes the database and a `LockerConfig`, a `ReleaseTimeout` outside its rule panicking naming the field where a non-positive one took 5s; `LockerOption` and `WithLockReleaseTimeout` are removed.
 - **Breaking** — `connection_config.go`: `ConnectionConfig`, `NewConnectionConfig` and the five getters are removed; the provider reads the `bunorm.ConnectionParameters` it is handed, and the failed-open errors carry its `SafeContext`, the pool and the deadlines named as `unlimited` or the value.
 - **Breaking** — `lock.go`: `Locker.CreateLock` and the lock's `Refresh` take the ttl as a `bound.Duration`, the fourth major's lock contract form; the session lock still ignores it, every state admitted, `bound.UnlimitedDuration()` its honest spelling.
-- `provider.go`: the log records are built through `exception.LogContext(err, exception.LogContextConfig{...})`, the fourth major's form, which takes the extra context in a struct; nothing of this module's own surface changes.
+- `provider.go`: the log records are built through `exception.LogContext(err, exception.LogContextOptions{...})`, the fourth major's form, which takes the extra context in a struct; nothing of this module's own surface changes.
 - **Breaking** — `retry_config.go`: `RetryConfig.InitialDelay`, `MaxDelay` and `BackoffMultiplier` are one `RetryConfig.Backoff bound.Backoff` (500ms, 5s, 2), resolved by `bound.ResolveBackoff` and refused naming `RetryConfig.Backoff.<field>`; a `Max` below `Initial` is refused where the first wait was capped; the open retry waits `ResolvedBackoff.Delay(attempt)`, the sequence on the defaults unchanged.
 
 ### Fixed

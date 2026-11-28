@@ -21,7 +21,7 @@ func TestRegistry_RejectsInvalidDefaultTableName(t *testing.T) {
             t.Fatalf("expected a panic for an invalid default table name")
         }
 
-        if "RegistryConfig.DefaultTable" != exception.LogContext(recoveredErr, exception.LogContextConfig{})["field"] {
+        if "RegistryConfig.DefaultTable" != exception.LogContext(recoveredErr, exception.LogContextOptions{})["field"] {
             t.Fatalf("expected the refusal to name RegistryConfig.DefaultTable, got %v", recoveredErr)
         }
     }()
@@ -36,7 +36,7 @@ func TestRegistry_RejectsInvalidEntityTableName(t *testing.T) {
             t.Fatalf("expected a panic for an invalid entity table name")
         }
 
-        if "EntityOptions.Table" != exception.LogContext(recoveredErr, exception.LogContextConfig{})["field"] {
+        if "EntityOptions.Table" != exception.LogContext(recoveredErr, exception.LogContextOptions{})["field"] {
             t.Fatalf("expected the refusal to name EntityOptions.Table, got %v", recoveredErr)
         }
     }()
@@ -138,7 +138,7 @@ func TestRegistry_EnsureSchemaNamesTheTableItCouldNotCreate(t *testing.T) {
         t.Fatalf("expected the failure to say which step broke, got: %v", schemaErr)
     }
 
-    logContext := exception.LogContext(schemaErr, exception.LogContextConfig{})
+    logContext := exception.LogContext(schemaErr, exception.LogContextOptions{})
     if DefaultTransactionTable != logContext["table"] {
         t.Fatalf("expected the failure to name the table, got context: %v", logContext)
     }

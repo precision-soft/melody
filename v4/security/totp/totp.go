@@ -26,8 +26,8 @@ const (
 
 var base32NoPadding = base32.StdEncoding.WithPadding(base32.NoPadding)
 
-/* Config tunes the TOTP algorithm (RFC 6238); the zero value is the interoperable default authenticator apps assume: a 30s period, 6 digits, one step of skew, the system clock. A field outside its range is refused naming it. */
-type Config struct {
+/* Options tunes the TOTP algorithm (RFC 6238); the zero value is the interoperable default authenticator apps assume: a 30s period, 6 digits, one step of skew, the system clock. A field outside its range is refused naming it. */
+type Options struct {
     /* Period is the step length: 30s by default, at least 1s and at most 24h, in whole seconds, since a longer step makes one code a day-long credential, unlimited refused. */
     Period bound.Duration
 
@@ -41,7 +41,7 @@ type Config struct {
     Clock clockcontract.Clock
 }
 
-/* Resolved is a Config decided against its rules: the values the algorithm runs with. */
+/* Resolved is an Options decided against its rules: the values the algorithm runs with. */
 type Resolved struct {
     Period time.Duration
     Digits int
@@ -50,28 +50,28 @@ type Resolved struct {
 }
 
 var periodRule = bound.Rule[time.Duration]{
-    Name:    "totp.Config.Period",
+    Name:    "totp.Options.Period",
     Default: 30 * time.Second,
     Minimum: bound.TtlMinimum,
     Maximum: 24 * time.Hour,
 }
 
 var digitsRule = bound.Rule[int]{
-    Name:    "totp.Config.Digits",
+    Name:    "totp.Options.Digits",
     Default: 6,
     Minimum: 6,
     Maximum: 8,
 }
 
 var skewRule = bound.Rule[int]{
-    Name:    "totp.Config.Skew",
+    Name:    "totp.Options.Skew",
     Default: 1,
     Minimum: 0,
     Maximum: 10,
 }
 
 /* Resolve answers the config the algorithm runs with, every field decided against its rule; a field outside its range is answered as the error, naming it. A caller that sizes anything on the window Verify accepts, a replay-guard ttl above all, resolves through it. */
-func (instance Config) Resolve() (Resolved, error) {
+func (instance Options) Resolve() (Resolved, error) {
     period, periodErr := bound.Resolve(instance.Period, periodRule)
     if nil != periodErr {
         return Resolved{}, periodErr
@@ -98,7 +98,7 @@ func (instance Config) Resolve() (Resolved, error) {
         return Resolved{}, skewErr
     }
 
-    clockInstance, clockErr := clock.ResolveOptionalClock(instance.Clock, "totp", "totp.Config.Clock")
+    clockInstance, clockErr := clock.ResolveOptionalClock(instance.Clock, "totp", "totp.Options.Clock")
     if nil != clockErr {
         return Resolved{}, clockErr
     }
@@ -122,8 +122,8 @@ func GenerateSecret() (string, error) {
 }
 
 /* Verify reports whether code is a valid TOTP for secret at the config's clock, accepting codes within the configured skew on either side; a config outside its ranges is answered as the error. Whitespace anywhere in the submitted code is stripped before the constant-time comparison, since authenticator apps display "123 456" and a digit code never contains whitespace. */
-func Verify(secret string, code string, config Config) (bool, error) {
-    resolved, resolveErr := config.Resolve()
+func Verify(secret string, code string, options Options) (bool, error) {
+    resolved, resolveErr := options.Resolve()
     if nil != resolveErr {
         return false, resolveErr
     }
@@ -162,8 +162,8 @@ func NormalizeCode(code string) string {
 }
 
 /* GenerateCodeAt produces the TOTP for secret at the given instant; it renders a code for a client or a test, so it takes the instant rather than the clock. A config outside its ranges is answered as the error. */
-func GenerateCodeAt(secret string, at time.Time, config Config) (string, error) {
-    resolved, resolveErr := config.Resolve()
+func GenerateCodeAt(secret string, at time.Time, options Options) (string, error) {
+    resolved, resolveErr := options.Resolve()
     if nil != resolveErr {
         return "", resolveErr
     }
@@ -182,8 +182,8 @@ func GenerateCodeAt(secret string, at time.Time, config Config) (string, error) 
 }
 
 /* OtpauthUri builds the otpauth:// URI an authenticator app consumes (typically rendered as a QR code) during enrollment; a config outside its ranges is answered as the error. */
-func OtpauthUri(issuer string, accountName string, secret string, config Config) (string, error) {
-    resolved, resolveErr := config.Resolve()
+func OtpauthUri(issuer string, accountName string, secret string, options Options) (string, error) {
+    resolved, resolveErr := options.Resolve()
     if nil != resolveErr {
         return "", resolveErr
     }

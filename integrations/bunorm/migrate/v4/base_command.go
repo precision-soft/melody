@@ -48,25 +48,25 @@ func unlockMigrations(ctx context.Context, unlocker migrationUnlocker, outputIns
 
 type baseCommand struct {
     migrations    *migrate.Migrations
-    options       Options
+    config        CommandConfig
     unlockTimeout time.Duration
 }
 
-/* newBaseCommand fills the options' left-out strings with their defaults and resolves UnlockTimeout once, so every command constructor takes Options{} as RegisterCommands does, and a value outside its rule panics where the command is built, naming the field. */
-func newBaseCommand(migrations *migrate.Migrations, options Options) baseCommand {
-    if "" == options.ManagerFlagName {
-        options.ManagerFlagName = DefaultManagerFlagName
+/* newBaseCommand fills the config's left-out strings with their defaults and resolves UnlockTimeout once, so every command constructor takes CommandConfig{} as RegisterCommands does, and a value outside its rule panics where the command is built, naming the field. */
+func newBaseCommand(migrations *migrate.Migrations, config CommandConfig) baseCommand {
+    if "" == config.ManagerFlagName {
+        config.ManagerFlagName = DefaultManagerFlagName
     }
 
-    if "" == options.CommandPrefix {
-        options.CommandPrefix = DefaultCommandPrefix
+    if "" == config.CommandPrefix {
+        config.CommandPrefix = DefaultCommandPrefix
     }
 
-    if "" == options.ManagerRegistryServiceId {
-        options.ManagerRegistryServiceId = DefaultManagerRegistryServiceId
+    if "" == config.ManagerRegistryServiceId {
+        config.ManagerRegistryServiceId = DefaultManagerRegistryServiceId
     }
 
-    return baseCommand{migrations: migrations, options: options, unlockTimeout: mustResolveUnlockTimeout(options)}
+    return baseCommand{migrations: migrations, config: config, unlockTimeout: mustResolveUnlockTimeout(config)}
 }
 
 type migrationRun func(
@@ -153,27 +153,27 @@ func (instance *baseCommand) printDatabaseIdentity(
 
 func (instance *baseCommand) managerFlag() clicontract.Flag {
     usage := "manager name (defaults to registry default)"
-    if "" != instance.options.ManagerName {
-        usage = "manager name (defaults to the pinned manager: " + instance.options.ManagerName + ")"
+    if "" != instance.config.ManagerName {
+        usage = "manager name (defaults to the pinned manager: " + instance.config.ManagerName + ")"
     }
 
     return &clicontract.StringFlag{
-        Name:  instance.options.ManagerFlagName,
+        Name:  instance.config.ManagerFlagName,
         Usage: usage,
         Value: "",
     }
 }
 
-func (instance *baseCommand) optionFromCommand(commandContext *clicontract.CommandContext) (output.Option, error) {
+func (instance *baseCommand) optionFromCommand(commandContext *clicontract.CommandContext) (output.Options, error) {
     return output.NormalizeOption(output.ParseOptionFromCommand(commandContext))
 }
 
 func (instance *baseCommand) resolveRegistry(runtimeInstance containercontract.Runtime) (*bunorm.ManagerRegistry, error) {
-    if "" == instance.options.ManagerRegistryServiceId {
+    if "" == instance.config.ManagerRegistryServiceId {
         return nil, errors.New("manager registry service id is required")
     }
 
-    return runtime.FromRuntime[*bunorm.ManagerRegistry](runtimeInstance, instance.options.ManagerRegistryServiceId)
+    return runtime.FromRuntime[*bunorm.ManagerRegistry](runtimeInstance, instance.config.ManagerRegistryServiceId)
 }
 
 /* resolveDatabase answers the connection this command runs on, the label the output names it by, and the release its caller must defer, which releases the run's hold on the dedicated migration connection: that connection lifts the driver deadlines and recycles nothing, so it must not outlive the run. The release reports a failed close through the command's output as a warning, not as the verdict, and it runs before the json document is rendered, since the command defers it after the frame defers finish. */
@@ -193,9 +193,9 @@ func (instance *baseCommand) resolveDatabase(
         return nil, "", noRelease, errors.New("manager registry service is nil")
     }
 
-    managerName := commandContext.String(instance.options.ManagerFlagName)
+    managerName := commandContext.String(instance.config.ManagerFlagName)
     if "" == managerName {
-        managerName = instance.options.ManagerName
+        managerName = instance.config.ManagerName
     }
 
     /* the migration commands run on the provider's migration connection, opened under the run's runtime so a cancelled run refuses before the dial: the request pool carries driver deadlines sized for requests, and a DDL statement that legitimately runs past them is cut mid-statement */
@@ -244,9 +244,9 @@ const defaultManagerLabel = "<default>"
 
 /* managerLabel answers the name the output labels a manager by — the --manager flag, else the pinned manager, else defaultManagerLabel — the same label resolveDatabase answers for a run that opens the connection, for a command that does not. */
 func (instance *baseCommand) managerLabel(commandContext *clicontract.CommandContext) string {
-    managerName := commandContext.String(instance.options.ManagerFlagName)
+    managerName := commandContext.String(instance.config.ManagerFlagName)
     if "" == managerName {
-        managerName = instance.options.ManagerName
+        managerName = instance.config.ManagerName
     }
 
     if "" == managerName {

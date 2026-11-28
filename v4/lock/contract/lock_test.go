@@ -31,8 +31,8 @@ func TestResolveLeaseTtl_RefusesAnUnlimitedTtlAndOneBelowTheMinimumNamingIt(t *t
             t.Fatalf("expected the ttl %s to be refused, got %s", refusedTtl, ttl)
         }
 
-        if "CreateLockOptions.Ttl" != exception.LogContext(err, exception.LogContextConfig{})["field"] {
-            t.Fatalf("expected the refusal of %s to name the ttl, got %v", refusedTtl, exception.LogContext(err, exception.LogContextConfig{}))
+        if "CreateLockOptions.Ttl" != exception.LogContext(err, exception.LogContextOptions{})["field"] {
+            t.Fatalf("expected the refusal of %s to name the ttl, got %v", refusedTtl, exception.LogContext(err, exception.LogContextOptions{}))
         }
     }
 }
@@ -47,7 +47,7 @@ func TestLockTtlRule_AdmitsUnlimitedForTheSessionLockers(t *testing.T) {
 func TestResolveLeaseRefreshTtl_RefusesNamingTheRefreshTtl(t *testing.T) {
     for _, refusedTtl := range []bound.Duration{bound.UnlimitedDuration(), bound.Of(time.Duration(0))} {
         _, err := ResolveLeaseRefreshTtl(refusedTtl)
-        if nil == err || "RefreshOptions.Ttl" != exception.LogContext(err, exception.LogContextConfig{})["field"] {
+        if nil == err || "RefreshOptions.Ttl" != exception.LogContext(err, exception.LogContextOptions{})["field"] {
             t.Fatalf("expected the refresh ttl %s to be refused naming RefreshOptions.Ttl, got %v", refusedTtl, err)
         }
     }

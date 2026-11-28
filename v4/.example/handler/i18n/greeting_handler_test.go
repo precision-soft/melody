@@ -23,11 +23,11 @@ type failingTranslator struct {
     err error
 }
 
-func (instance failingTranslator) Translate(messageId string, config melodytranslationcontract.TranslateConfig) (string, error) {
+func (instance failingTranslator) Translate(messageId string, options melodytranslationcontract.TranslateOptions) (string, error) {
     return "", instance.err
 }
 
-func (instance failingTranslator) HasMessage(messageId string, config melodytranslationcontract.TranslateConfig) bool {
+func (instance failingTranslator) HasMessage(messageId string, options melodytranslationcontract.TranslateOptions) bool {
     return true
 }
 

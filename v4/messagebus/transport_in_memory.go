@@ -159,7 +159,7 @@ func (instance *InMemoryTransport) handBack(envelopeInstance messagebuscontract.
             logger = logging.EmergencyLogger()
         }
 
-        logger.Error("in-memory transport dropped a delivery its stopped subscription took", exception.LogContext(requeueErr, exception.LogContextConfig{}))
+        logger.Error("in-memory transport dropped a delivery its stopped subscription took", exception.LogContext(requeueErr, exception.LogContextOptions{}))
     }
 }
 
@@ -199,9 +199,9 @@ func (instance *InMemoryTransport) Ack(
 func (instance *InMemoryTransport) Nack(
     runtimeInstance containercontract.Runtime,
     envelopeInstance messagebuscontract.Envelope,
-    config messagebuscontract.NackConfig,
+    options messagebuscontract.NackOptions,
 ) error {
-    if false == config.Requeue {
+    if false == options.Requeue {
         return nil
     }
 
@@ -290,7 +290,7 @@ func (instance *InMemoryTransport) requeueAfter(
         }
 
         if requeueErr := requeue(envelopeInstance); nil != requeueErr {
-            logger.Error("in-memory transport dropped a delayed requeue", exception.LogContext(requeueErr, exception.LogContextConfig{}))
+            logger.Error("in-memory transport dropped a delayed requeue", exception.LogContext(requeueErr, exception.LogContextOptions{}))
         }
     case <-instance.done:
         /* the transport closed while the message waited out its delay, so the requeue is dropped and the loss is journaled */

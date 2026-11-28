@@ -353,7 +353,7 @@ func (instance *RunnerCommand) askAndWarnOverALockerThatIsNotASharedLease(runtim
 }
 
 func (instance *RunnerCommand) warnTickDedupLockerAskFailed(runtimeInstance containercontract.Runtime, dedupRun *tickDedupRun, askErr error) {
-    warningContext := exception.LogContext(askErr, exception.LogContextConfig{Extra: instance.tickDedupLockerWarningContext(dedupRun)})
+    warningContext := exception.LogContext(askErr, exception.LogContextOptions{Extra: instance.tickDedupLockerWarningContext(dedupRun)})
 
     writeTickDedupWarning(runtimeInstance, TickDedupLockerAskFailedBootWarningName, tickDedupLockerAskFailedWarningMessage, warningContext)
 }
@@ -608,7 +608,7 @@ func (instance *RunnerCommand) releaseWonTick(runtimeInstance containercontract.
     if logger := logging.LoggerFromRuntime(runtimeInstance); nil != logger {
         logger.Warning(
             "cron runner could not release a won tick; the marker lapses with its ttl",
-            exception.LogContext(releaseErr, exception.LogContextConfig{Extra: exceptioncontract.Context{"tickDedupKey": key}}),
+            exception.LogContext(releaseErr, exception.LogContextOptions{Extra: exceptioncontract.Context{"tickDedupKey": key}}),
         )
     }
 }
@@ -694,7 +694,7 @@ func warnTickRunsWithoutItsMarker(runtimeInstance containercontract.Runtime, una
     if logger := logging.LoggerFromRuntime(runtimeInstance); nil != logger {
         logger.Warning(
             "cron runner could not reach the tick dedup locker and runs the tick without its marker",
-            exception.LogContext(unavailable, exception.LogContextConfig{}),
+            exception.LogContext(unavailable, exception.LogContextOptions{}),
         )
     }
 }

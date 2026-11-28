@@ -574,7 +574,7 @@ func TestResolveByAcceptHeader_TheMemberCapFollowsMaxAcceptMembers(t *testing.T)
     for name, configured := range map[string]bound.Count{"below its minimum": bound.Of(0), "unlimited": bound.UnlimitedCount()} {
         t.Run(name, func(t *testing.T) {
             _, refusal := NewSerializerManager(serializers, SerializerManagerConfig{MaxAcceptMembers: configured})
-            if nil == refusal || "SerializerManagerConfig.MaxAcceptMembers" != exception.LogContext(refusal, exception.LogContextConfig{})["field"] {
+            if nil == refusal || "SerializerManagerConfig.MaxAcceptMembers" != exception.LogContext(refusal, exception.LogContextOptions{})["field"] {
                 t.Fatalf("expected the refusal naming SerializerManagerConfig.MaxAcceptMembers, got %v", refusal)
             }
         })

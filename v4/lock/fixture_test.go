@@ -149,7 +149,7 @@ func (instance *noLockLocker) CreateLock(name string, options lockcontract.Creat
 
 /* namesNoLock reports whether a refusal's cause chain carries the no-lock refusal */
 func namesNoLock(err error) bool {
-    return nil != err && true == strings.Contains(fmt.Sprint(exception.LogContext(err, exception.LogContextConfig{})), "the locker answered no lock")
+    return nil != err && true == strings.Contains(fmt.Sprint(exception.LogContext(err, exception.LogContextOptions{})), "the locker answered no lock")
 }
 
 type namespaceEnvironmentSource struct {

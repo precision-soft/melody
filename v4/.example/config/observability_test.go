@@ -46,7 +46,7 @@ func TestBuildMetricsAuth_RefusesTheCommittedTokenOutsideDevelopment(t *testing.
             t.Fatalf("%q: expected the boot refused naming the key, got %v", value, refusal)
         }
 
-        logged := fmt.Sprintf("%v %v", refusal, melodyexception.LogContext(refusal, melodyexception.LogContextConfig{}))
+        logged := fmt.Sprintf("%v %v", refusal, melodyexception.LogContext(refusal, melodyexception.LogContextOptions{}))
         if true == strings.Contains(logged, developmentMetricsToken) {
             t.Fatalf("the refusal carries the value: %v", logged)
         }

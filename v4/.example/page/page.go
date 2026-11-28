@@ -57,7 +57,7 @@ func Html(runtimeInstance melodycontainercontract.Runtime, request melodyhttpcon
         routesJson = exampleurl.EmptyRoutesJson
         examplejournal.LoggerOr(runtimeInstance, melodylogging.EmergencyLogger()).Warning(
             "page rendered without its route manifest",
-            melodyexception.LogContext(routesJsonErr, melodyexception.LogContextConfig{Extra: melodyloggingcontract.Context{"page": fileName}}),
+            melodyexception.LogContext(routesJsonErr, melodyexception.LogContextOptions{Extra: melodyloggingcontract.Context{"page": fileName}}),
         )
     }
 
@@ -78,7 +78,7 @@ func Html(runtimeInstance melodycontainercontract.Runtime, request melodyhttpcon
             csrfToken = ""
             examplejournal.LoggerOr(runtimeInstance, melodylogging.EmergencyLogger()).Warning(
                 "page rendered without its csrf token",
-                melodyexception.LogContext(csrfTokenErr, melodyexception.LogContextConfig{Extra: melodyloggingcontract.Context{"page": fileName}}),
+                melodyexception.LogContext(csrfTokenErr, melodyexception.LogContextOptions{Extra: melodyloggingcontract.Context{"page": fileName}}),
             )
         }
 

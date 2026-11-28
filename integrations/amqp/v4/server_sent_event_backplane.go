@@ -729,18 +729,18 @@ func (instance *ServerSentEventBackplane) logError(message string, err error) {
         return
     }
 
-    instance.logger.Error(message, exception.LogContext(err, exception.LogContextConfig{}))
+    instance.logger.Error(message, exception.LogContext(err, exception.LogContextOptions{}))
 }
 
 /* logTerminal reports a permanent capability loss: an absent logger was resolved to the emergency one at construction, so the receive half never dies with no signal. */
 func (instance *ServerSentEventBackplane) logTerminal(message string, err error) {
     if nil == instance.logger {
-        logging.EmergencyLogger().Emergency(message, exception.LogContext(err, exception.LogContextConfig{}))
+        logging.EmergencyLogger().Emergency(message, exception.LogContext(err, exception.LogContextOptions{}))
 
         return
     }
 
-    instance.logger.Error(message, exception.LogContext(err, exception.LogContextConfig{}))
+    instance.logger.Error(message, exception.LogContext(err, exception.LogContextOptions{}))
 }
 
 func newServerSentEventBackplaneOrigin() string {

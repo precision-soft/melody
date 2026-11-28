@@ -60,7 +60,7 @@ func TestResolveBackoff_RefusesWhatItsRuleRefusesNamingTheField(t *testing.T) {
             t.Fatalf("%s: expected a refusal", testCase.name)
         }
 
-        rendered := fmt.Sprintf("%v", exception.LogContext(resolveErr, exception.LogContextConfig{}))
+        rendered := fmt.Sprintf("%v", exception.LogContext(resolveErr, exception.LogContextOptions{}))
         if false == strings.Contains(rendered, testCase.field) {
             t.Fatalf("%s: expected the refusal to name %s, got %s", testCase.name, testCase.field, rendered)
         }
@@ -73,7 +73,7 @@ func TestResolveBackoff_AMaxBelowTheInitialNamesBoth(t *testing.T) {
         t.Fatal("expected a max below the initial refused")
     }
 
-    rendered := fmt.Sprintf("%v", exception.LogContext(resolveErr, exception.LogContextConfig{}))
+    rendered := fmt.Sprintf("%v", exception.LogContext(resolveErr, exception.LogContextOptions{}))
     if false == strings.Contains(rendered, "TestConfig.Backoff.Initial") || false == strings.Contains(rendered, "TestConfig.Backoff.Max") {
         t.Fatalf("expected the refusal to name both fields, got %s", rendered)
     }

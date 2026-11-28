@@ -308,7 +308,7 @@ func TestServerSentEventHub_ANilRuntimePanicsNamingTheDoor(t *testing.T) {
     }
 
     panicErr := exception.PanicCause(recoveredValue)
-    if "http.ServerSentEventHub.Broadcast" != exception.LogContext(panicErr, exception.LogContextConfig{})["door"] {
+    if "http.ServerSentEventHub.Broadcast" != exception.LogContext(panicErr, exception.LogContextOptions{})["door"] {
         t.Fatalf("expected the refusal to name the door, got %v", panicErr)
     }
 

@@ -11,8 +11,8 @@ import (
     "github.com/precision-soft/melody/v4/internal"
 )
 
-/* DispatchConfig.ApplicationVersion is what the dispatched command reads as the application's version, "" undeclared. */
-type DispatchConfig struct {
+/* DispatchOptions.ApplicationVersion is what the dispatched command reads as the application's version, "" undeclared. */
+type DispatchOptions struct {
     ApplicationVersion string
 }
 
@@ -23,7 +23,7 @@ func DispatchCommand(
     runtimeInstance containercontract.Runtime,
     arguments []string,
     writer io.Writer,
-    config DispatchConfig,
+    options DispatchOptions,
 ) error {
     if true == internal.IsNilInterface(command) {
         exception.Panic(
@@ -69,7 +69,7 @@ func DispatchCommand(
         /* as in NewCommandContext: the engine's default would end the process on any error the command returns */
         ExitErrHandler: inertExitHandler,
         /* the dispatched command is the root of its own tree */
-        Metadata: map[string]any{output.MetadataApplicationVersion: config.ApplicationVersion},
+        Metadata: map[string]any{output.MetadataApplicationVersion: options.ApplicationVersion},
     }
 
     return engineCommand.Run(ctx, NormalizeVerbosityArguments(arguments))

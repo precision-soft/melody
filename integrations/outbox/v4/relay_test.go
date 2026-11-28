@@ -254,7 +254,7 @@ func (instance *fakeTransport) Ack(_ containercontract.Runtime, _ messagebuscont
     return nil
 }
 
-func (instance *fakeTransport) Nack(_ containercontract.Runtime, _ messagebuscontract.Envelope, _ messagebuscontract.NackConfig) error {
+func (instance *fakeTransport) Nack(_ containercontract.Runtime, _ messagebuscontract.Envelope, _ messagebuscontract.NackOptions) error {
     return nil
 }
 
@@ -528,7 +528,7 @@ func TestNewRelay_RefusesAMaxDeliveryAttemptsAtOrBelowMaxAttemptsNamingBoth(t *t
     }
 
     _, resolveErr := resolveRelayConfig(RelayConfig{MaxAttempts: bound.Of(5), MaxDeliveryAttempts: bound.Of(5)})
-    errorContext := exception.LogContext(resolveErr, exception.LogContextConfig{})
+    errorContext := exception.LogContext(resolveErr, exception.LogContextOptions{})
     if "RelayConfig.MaxAttempts" != errorContext["flooredBy"] || "6" != errorContext["minimum"] {
         t.Fatalf("expected the refusal to name MaxAttempts and the least admitted value 6, got %v", errorContext)
     }
@@ -616,8 +616,8 @@ func TestRelay_ALostLeaseDrainsTheClaimedBatchThenReportsTheFailure(t *testing.T
     if 1 != lock.refreshCalls {
         t.Fatalf("expected the refresh not to be tried again after it failed, got %d calls", lock.refreshCalls)
     }
-    if "melody:outbox:test" != exception.LogContext(runErr, exception.LogContextConfig{})["lock"] {
-        t.Fatalf("expected the reported failure to name the lock, got %v", exception.LogContext(runErr, exception.LogContextConfig{}))
+    if "melody:outbox:test" != exception.LogContext(runErr, exception.LogContextOptions{})["lock"] {
+        t.Fatalf("expected the reported failure to name the lock, got %v", exception.LogContext(runErr, exception.LogContextOptions{}))
     }
 }
 
@@ -645,8 +645,8 @@ func TestRelay_ARepositoryFailureAfterALostLeaseCarriesTheRefreshFailure(t *test
     if false == strings.Contains(runErr.Error(), "lease refresh had already failed") {
         t.Fatalf("expected the outcome to say the lease had been lost, got %v", runErr)
     }
-    if "lease lost" != exception.LogContext(runErr, exception.LogContextConfig{})["refreshError"] {
-        t.Fatalf("expected the refresh failure in the context, got %v", exception.LogContext(runErr, exception.LogContextConfig{}))
+    if "lease lost" != exception.LogContext(runErr, exception.LogContextOptions{})["refreshError"] {
+        t.Fatalf("expected the refresh failure in the context, got %v", exception.LogContext(runErr, exception.LogContextOptions{}))
     }
     if 1 != published {
         t.Fatalf("expected the run to end at the failing resolution, published %d", published)
@@ -871,7 +871,7 @@ func TestRelay_AFailedResolutionWriteStillCarriesTheDeliveryFailure(t *testing.T
         t.Fatalf("expected the failed resolution write surfaced with its cause, got %v", runErr)
     }
 
-    rendered := fmt.Sprintf("%v", exception.LogContext(runErr, exception.LogContextConfig{}))
+    rendered := fmt.Sprintf("%v", exception.LogContext(runErr, exception.LogContextOptions{}))
     if false == strings.Contains(rendered, "NO_ROUTE to queue welcome_email") {
         t.Fatalf("expected the delivery failure to survive beside the write failure instead of being replaced by it; got %q", rendered)
     }
@@ -1376,7 +1376,7 @@ func TestRelay_AFailedHoldWriteEndsTheRun(t *testing.T) {
         t.Fatalf("expected the failed row rescheduled, the hold refused at row 2 and row 3 left claimed, got %+v", repository.calls)
     }
 
-    logContext := exception.LogContext(runErr, exception.LogContextConfig{})
+    logContext := exception.LogContext(runErr, exception.LogContextOptions{})
     if false == strings.Contains(runErr.Error(), "hold write failed") || int64(1) != logContext["failedId"] || int64(2) != logContext["heldId"] {
         t.Fatalf("expected the failure framed as a hold write naming the failed and the held row, got %v %v", runErr, logContext)
     }
@@ -1459,8 +1459,8 @@ func TestRelay_AFailedHoldWriteAfterALostLeaseCarriesTheRefreshFailure(t *testin
         t.Fatalf("expected the hold failure reported as a batch failure after a lost lease, got %v", runErr)
     }
 
-    if "lease lost" != exception.LogContext(runErr, exception.LogContextConfig{})["refreshError"] {
-        t.Fatalf("expected the refresh failure in the context, got %v", exception.LogContext(runErr, exception.LogContextConfig{}))
+    if "lease lost" != exception.LogContext(runErr, exception.LogContextOptions{})["refreshError"] {
+        t.Fatalf("expected the refresh failure in the context, got %v", exception.LogContext(runErr, exception.LogContextOptions{}))
     }
 }
 

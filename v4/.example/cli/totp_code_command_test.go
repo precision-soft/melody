@@ -20,7 +20,7 @@ func TestTotpCodeCommand_ReadsTheSecretFromItsInput(t *testing.T) {
     instant := time.Date(2026, time.November, 16, 12, 0, 0, 0, time.UTC)
     captured := &bytes.Buffer{}
 
-    expected, expectedErr := totp.GenerateCodeAt(totpCodeCommandTestSecret, instant, totp.Config{})
+    expected, expectedErr := totp.GenerateCodeAt(totpCodeCommandTestSecret, instant, totp.Options{})
     if nil != expectedErr {
         t.Fatalf("generate the expected code: %v", expectedErr)
     }
@@ -75,12 +75,12 @@ func TestTotpCodeCommand_GeneratesAtTheContainersClock(t *testing.T) {
     }
 
     first := codeAt()
-    firstExpected, _ := totp.GenerateCodeAt(totpCodeCommandTestSecret, clockInstance.Now(), totp.Config{})
+    firstExpected, _ := totp.GenerateCodeAt(totpCodeCommandTestSecret, clockInstance.Now(), totp.Options{})
 
     clockInstance.Advance(30 * time.Second)
 
     second := codeAt()
-    secondExpected, _ := totp.GenerateCodeAt(totpCodeCommandTestSecret, clockInstance.Now(), totp.Config{})
+    secondExpected, _ := totp.GenerateCodeAt(totpCodeCommandTestSecret, clockInstance.Now(), totp.Options{})
 
     if firstExpected != first || secondExpected != second || first == second {
         t.Fatalf("expected the codes of the two frozen instants %q and %q, got %q and %q", firstExpected, secondExpected, first, second)

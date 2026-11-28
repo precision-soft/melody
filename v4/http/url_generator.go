@@ -44,7 +44,7 @@ type UrlGenerator struct {
     publicBase    *url.URL
 }
 
-func (instance *UrlGenerator) GeneratePath(routeName string, pathConfig httpcontract.PathConfig) (string, error) {
+func (instance *UrlGenerator) GeneratePath(routeName string, pathConfig httpcontract.PathOptions) (string, error) {
     generatedPath, generateErr := instance.generateRoutePath(routeName, pathConfig.Parameters)
     if nil != generateErr {
         return "", generateErr
@@ -53,7 +53,7 @@ func (instance *UrlGenerator) GeneratePath(routeName string, pathConfig httpcont
     return composeReference(url.URL{}, generatedPath, pathConfig), nil
 }
 
-func (instance *UrlGenerator) GenerateUrl(routeName string, pathConfig httpcontract.PathConfig) (string, error) {
+func (instance *UrlGenerator) GenerateUrl(routeName string, pathConfig httpcontract.PathOptions) (string, error) {
     if nil == instance.publicBase {
         return "", exception.NewError(
             "an absolute url needs the public url",
@@ -71,7 +71,7 @@ func (instance *UrlGenerator) GenerateUrl(routeName string, pathConfig httpcontr
 }
 
 /* composeReference writes the escaped path, the query without its empty key and the fragment through url.URL, so each part is escaped where it stands. */
-func composeReference(reference url.URL, escapedPath string, pathConfig httpcontract.PathConfig) string {
+func composeReference(reference url.URL, escapedPath string, pathConfig httpcontract.PathOptions) string {
     reference.Path, _ = url.PathUnescape(escapedPath)
     reference.RawPath = escapedPath
 

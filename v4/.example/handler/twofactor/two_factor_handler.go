@@ -274,7 +274,7 @@ func releaseFactorBudget(runtimeInstance melodycontainercontract.Runtime, budget
     }
 
     if logger := melodylogging.LoggerFromRuntime(runtimeInstance); nil != logger {
-        logger.Error("second factor budget release failed", melodyexception.LogContext(releaseErr, melodyexception.LogContextConfig{}))
+        logger.Error("second factor budget release failed", melodyexception.LogContext(releaseErr, melodyexception.LogContextOptions{}))
     }
 }
 
@@ -362,7 +362,7 @@ func acceptTotpCode(
     code string,
     replayGuard melodysecuritycontract.NonceGuard,
 ) melodyhttpcontract.Response {
-    verified, verifyErr := totp.Verify(secret, code, totp.Config{})
+    verified, verifyErr := totp.Verify(secret, code, totp.Options{})
     if nil != verifyErr {
         return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "could not verify the code", verifyErr)
     }
@@ -395,7 +395,7 @@ func unavailableStore(runtimeInstance melodycontainercontract.Runtime, request m
 
 /* totpCodeValidityWindow is how long an accepted code stays verifiable, (2*skew+1) periods, and so how long a spent code stays burned; it resolves through the totp package, so it matches what Verify honours. */
 func totpCodeValidityWindow() (time.Duration, error) {
-    resolved, resolveErr := totp.Config{}.Resolve()
+    resolved, resolveErr := totp.Options{}.Resolve()
     if nil != resolveErr {
         return 0, resolveErr
     }

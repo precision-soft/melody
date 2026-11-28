@@ -20,7 +20,7 @@ func rememberEntityOrAbsence[T any](
     return melodycache.Remember(
         boundCache,
         cacheKey,
-        melodycache.RememberConfig{
+        melodycache.RememberOptions{
             /* the short bound is the default, so a path that forgets to raise it leaves an entry that expires soon rather than an absence kept for long */
             Ttl: melodybound.Of(absenceCacheTtl),
         },

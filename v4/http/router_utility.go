@@ -529,12 +529,12 @@ func writeResponse(
             if true == isClientAbortWriteError(request, err) {
                 logger.Warning(
                     "failed to write response; client disconnected",
-                    exception.LogContext(err, exception.LogContextConfig{Extra: writeLogContext}),
+                    exception.LogContext(err, exception.LogContextOptions{Extra: writeLogContext}),
                 )
             } else {
                 logger.Error(
                     "failed to write response",
-                    exception.LogContext(err, exception.LogContextConfig{Extra: writeLogContext}),
+                    exception.LogContext(err, exception.LogContextOptions{Extra: writeLogContext}),
                 )
             }
         }
@@ -762,12 +762,12 @@ func logSessionPersistenceEvent(
     }
 
     if loggingcontract.LevelWarning == level {
-        logger.Warning(message, exception.LogContext(err, exception.LogContextConfig{Extra: recordContext}))
+        logger.Warning(message, exception.LogContext(err, exception.LogContextOptions{Extra: recordContext}))
 
         return
     }
 
-    logger.Error(message, exception.LogContext(err, exception.LogContextConfig{Extra: recordContext}))
+    logger.Error(message, exception.LogContext(err, exception.LogContextOptions{Extra: recordContext}))
 }
 
 func markResponsePrivateForSessionCookie(response httpcontract.Response) {
@@ -911,7 +911,7 @@ func closeDiscardedResponseBody(response httpcontract.Response, logger loggingco
 
     logger.Error(
         "failed to close discarded response body",
-        exception.LogContext(closeErr, exception.LogContextConfig{}),
+        exception.LogContext(closeErr, exception.LogContextOptions{}),
     )
 }
 

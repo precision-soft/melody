@@ -283,8 +283,8 @@ func TestImpersonation_AMarkedResolverFailureIsUnavailable(t *testing.T) {
     }
 
     cause := expectUnavailableToken(t, token)
-    if "anyone" != exception.LogContext(cause, exception.LogContextConfig{})["target"] {
-        t.Fatalf("expected the cause to name the target, got %v", exception.LogContext(cause, exception.LogContextConfig{}))
+    if "anyone" != exception.LogContext(cause, exception.LogContextOptions{})["target"] {
+        t.Fatalf("expected the cause to name the target, got %v", exception.LogContext(cause, exception.LogContextOptions{}))
     }
 
     if "" != token.UserIdentifier() || 0 != len(token.Roles()) {
@@ -430,7 +430,7 @@ func TestImpersonation_ADifferentHierarchyIsRefusedNamingBothFirewalls(t *testin
         bindErr := source.BindRoleHierarchy("admin", testCase.second)
         expectErrorNamingField(t, bindErr, "ImpersonationTokenSourceConfig.RoleHierarchy")
 
-        logContext := exception.LogContext(bindErr, exception.LogContextConfig{})
+        logContext := exception.LogContext(bindErr, exception.LogContextOptions{})
         if "admin" != logContext["firewallName"] || "api" != logContext["boundFirewallName"] {
             t.Fatalf("%s: expected both firewalls named, got %v", testCase.name, logContext)
         }

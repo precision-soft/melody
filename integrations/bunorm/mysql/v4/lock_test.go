@@ -900,8 +900,8 @@ func TestMysqlLock_ReleaseEndsAtTheCallersEarlierDeadlineAndEndsTheSession(t *te
         t.Fatalf("expected the release to end at the caller's 20ms deadline, it took %s", elapsed)
     }
 
-    if "5s" != exception.LogContext(releaseErr, exception.LogContextConfig{})["releaseTimeout"] {
-        t.Fatalf("expected the failure to name the locker's budget beside the deadline, got %v", exception.LogContext(releaseErr, exception.LogContextConfig{}))
+    if "5s" != exception.LogContext(releaseErr, exception.LogContextOptions{})["releaseTimeout"] {
+        t.Fatalf("expected the failure to name the locker's budget beside the deadline, got %v", exception.LogContext(releaseErr, exception.LogContextOptions{}))
     }
 
     if _, closes, _ := connector.counts(); 1 != closes {

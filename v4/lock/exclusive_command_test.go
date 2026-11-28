@@ -311,7 +311,7 @@ func TestNewExclusiveCommand_HandsTheProbeIntervalOnAndRefusesItBesideALeaseTtl(
 
     defer func() {
         recoveredErr, isError := recover().(error)
-        if false == isError || "ExclusiveCommandConfig.ProbeInterval" != exception.LogContext(recoveredErr, exception.LogContextConfig{})["field"] {
+        if false == isError || "ExclusiveCommandConfig.ProbeInterval" != exception.LogContext(recoveredErr, exception.LogContextOptions{})["field"] {
             t.Fatalf("expected the refusal naming ExclusiveCommandConfig.ProbeInterval, got %v", recoveredErr)
         }
     }()

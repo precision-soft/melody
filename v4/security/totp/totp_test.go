@@ -15,7 +15,7 @@ const rfc6238Secret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
 
 func TestVerify_Rfc6238KnownAnswer(t *testing.T) {
     /* the RFC's SHA-1 8-digit code at T=59 is 94287082; truncated to 6 digits it is 287082 */
-    ok, verifyErr := Verify(rfc6238Secret, "287082", Config{Clock: clock.NewFrozenClock(time.Unix(59, 0))})
+    ok, verifyErr := Verify(rfc6238Secret, "287082", Options{Clock: clock.NewFrozenClock(time.Unix(59, 0))})
     if nil != verifyErr {
         t.Fatalf("verify: %v", verifyErr)
     }
@@ -33,12 +33,12 @@ func TestGenerateAndVerifyRoundTrip(t *testing.T) {
 
     now := time.Now()
 
-    code, codeErr := GenerateCodeAt(secret, now, Config{})
+    code, codeErr := GenerateCodeAt(secret, now, Options{})
     if nil != codeErr {
         t.Fatalf("generate code: %v", codeErr)
     }
 
-    ok, verifyErr := Verify(secret, code, Config{Clock: clock.NewFrozenClock(now)})
+    ok, verifyErr := Verify(secret, code, Options{Clock: clock.NewFrozenClock(now)})
     if nil != verifyErr || false == ok {
         t.Fatalf("expected a freshly generated code to verify, ok=%v err=%v", ok, verifyErr)
     }
@@ -49,9 +49,9 @@ func TestVerify_AcceptsCodeWithinSkew(t *testing.T) {
     now := time.Unix(1_700_000_000, 0)
 
     /* a code from the previous 30s step must still verify with the default ±1 skew */
-    previous, _ := GenerateCodeAt(secret, now.Add(-30*time.Second), Config{})
+    previous, _ := GenerateCodeAt(secret, now.Add(-30*time.Second), Options{})
 
-    ok, _ := Verify(secret, previous, Config{Clock: clock.NewFrozenClock(now)})
+    ok, _ := Verify(secret, previous, Options{Clock: clock.NewFrozenClock(now)})
     if false == ok {
         t.Fatal("expected a previous-step code to verify within skew")
     }
@@ -62,16 +62,16 @@ func TestVerify_RejectsCodeOutsideSkew(t *testing.T) {
     secret, _ := GenerateSecret()
     now := time.Unix(1_700_000_000, 0)
 
-    stale, _ := GenerateCodeAt(secret, now.Add(-60*time.Second), Config{})
+    stale, _ := GenerateCodeAt(secret, now.Add(-60*time.Second), Options{})
 
-    ok, _ := Verify(secret, stale, Config{Clock: clock.NewFrozenClock(now)})
+    ok, _ := Verify(secret, stale, Options{Clock: clock.NewFrozenClock(now)})
     if true == ok {
         t.Fatal("expected a code two steps old — the first offset outside the default window — to be rejected")
     }
 
-    ahead, _ := GenerateCodeAt(secret, now.Add(60*time.Second), Config{})
+    ahead, _ := GenerateCodeAt(secret, now.Add(60*time.Second), Options{})
 
-    okAhead, _ := Verify(secret, ahead, Config{Clock: clock.NewFrozenClock(now)})
+    okAhead, _ := Verify(secret, ahead, Options{Clock: clock.NewFrozenClock(now)})
     if true == okAhead {
         t.Fatal("expected a code two steps ahead to be rejected as well")
     }
@@ -80,7 +80,7 @@ func TestVerify_RejectsCodeOutsideSkew(t *testing.T) {
 func TestVerify_RejectsWrongCode(t *testing.T) {
     secret, _ := GenerateSecret()
 
-    ok, _ := Verify(secret, "000000", Config{Clock: clock.NewFrozenClock(time.Unix(59, 0))})
+    ok, _ := Verify(secret, "000000", Options{Clock: clock.NewFrozenClock(time.Unix(59, 0))})
     if true == ok {
         /* astronomically unlikely to be the real code; guards against an always-true bug */
         t.Fatal("expected an arbitrary code to be rejected")
@@ -88,7 +88,7 @@ func TestVerify_RejectsWrongCode(t *testing.T) {
 }
 
 func TestOtpauthUri_ContainsSecretAndIssuer(t *testing.T) {
-    uri, uriErr := OtpauthUri("Melody", "alice@example.com", rfc6238Secret, Config{})
+    uri, uriErr := OtpauthUri("Melody", "alice@example.com", rfc6238Secret, Options{})
     if nil != uriErr {
         t.Fatalf("otpauth uri: %v", uriErr)
     }
@@ -123,7 +123,7 @@ func TestGenerateRecoveryCodes_UniqueAndFormatted(t *testing.T) {
 }
 
 func TestOtpauthUri_RendersTheResolvedPeriodInSeconds(t *testing.T) {
-    uri, uriErr := OtpauthUri("Melody", "alice@example.com", rfc6238Secret, Config{Period: bound.Of(90 * time.Second), Digits: bound.Of(8)})
+    uri, uriErr := OtpauthUri("Melody", "alice@example.com", rfc6238Secret, Options{Period: bound.Of(90 * time.Second), Digits: bound.Of(8)})
     if nil != uriErr {
         t.Fatalf("otpauth uri: %v", uriErr)
     }
@@ -133,13 +133,13 @@ func TestOtpauthUri_RendersTheResolvedPeriodInSeconds(t *testing.T) {
     }
 }
 
-func TestOtpauthUri_AnswersARefusedConfigAsTheError(t *testing.T) {
-    _, uriErr := OtpauthUri("Melody", "alice@example.com", rfc6238Secret, Config{Digits: bound.Of(9)})
-    expectRefusalNamingField(t, uriErr, "totp.Config.Digits")
+func TestOtpauthUri_AnswersRefusedOptionsAsTheError(t *testing.T) {
+    _, uriErr := OtpauthUri("Melody", "alice@example.com", rfc6238Secret, Options{Digits: bound.Of(9)})
+    expectRefusalNamingField(t, uriErr, "totp.Options.Digits")
 }
 
 func TestResolve_TheZeroValueIsTheInteroperableDefault(t *testing.T) {
-    resolved, resolveErr := Config{}.Resolve()
+    resolved, resolveErr := Options{}.Resolve()
     if nil != resolveErr {
         t.Fatalf("resolve: %v", resolveErr)
     }
@@ -150,7 +150,7 @@ func TestResolve_TheZeroValueIsTheInteroperableDefault(t *testing.T) {
 }
 
 func TestResolve_AValueInsideItsRangeIsKept(t *testing.T) {
-    resolved, resolveErr := Config{Period: bound.Of(90 * time.Second), Digits: bound.Of(8), Skew: bound.Of(10)}.Resolve()
+    resolved, resolveErr := Options{Period: bound.Of(90 * time.Second), Digits: bound.Of(8), Skew: bound.Of(10)}.Resolve()
     if nil != resolveErr {
         t.Fatalf("resolve: %v", resolveErr)
     }
@@ -161,19 +161,19 @@ func TestResolve_AValueInsideItsRangeIsKept(t *testing.T) {
 }
 
 func TestResolve_AValueOutsideItsRangeIsRefusedNamingTheField(t *testing.T) {
-    for field, config := range map[string]Config{
-        "totp.Config.Period": {Period: bound.Of(25 * time.Hour)},
-        "totp.Config.Digits": {Digits: bound.Of(9)},
-        "totp.Config.Skew":   {Skew: bound.Of(11)},
+    for field, config := range map[string]Options{
+        "totp.Options.Period": {Period: bound.Of(25 * time.Hour)},
+        "totp.Options.Digits": {Digits: bound.Of(9)},
+        "totp.Options.Skew":   {Skew: bound.Of(11)},
     } {
         _, resolveErr := config.Resolve()
         expectRefusalNamingField(t, resolveErr, field)
     }
 
-    for field, config := range map[string]Config{
-        "totp.Config.Period": {Period: bound.Of(time.Duration(0))},
-        "totp.Config.Digits": {Digits: bound.Of(5)},
-        "totp.Config.Skew":   {Skew: bound.Of(-1)},
+    for field, config := range map[string]Options{
+        "totp.Options.Period": {Period: bound.Of(time.Duration(0))},
+        "totp.Options.Digits": {Digits: bound.Of(5)},
+        "totp.Options.Skew":   {Skew: bound.Of(-1)},
     } {
         _, resolveErr := config.Resolve()
         expectRefusalNamingField(t, resolveErr, field)
@@ -181,10 +181,10 @@ func TestResolve_AValueOutsideItsRangeIsRefusedNamingTheField(t *testing.T) {
 }
 
 func TestResolve_UnlimitedIsRefusedOnEveryField(t *testing.T) {
-    for field, config := range map[string]Config{
-        "totp.Config.Period": {Period: bound.UnlimitedDuration()},
-        "totp.Config.Digits": {Digits: bound.UnlimitedCount()},
-        "totp.Config.Skew":   {Skew: bound.UnlimitedCount()},
+    for field, config := range map[string]Options{
+        "totp.Options.Period": {Period: bound.UnlimitedDuration()},
+        "totp.Options.Digits": {Digits: bound.UnlimitedCount()},
+        "totp.Options.Skew":   {Skew: bound.UnlimitedCount()},
     } {
         _, resolveErr := config.Resolve()
         expectRefusalNamingField(t, resolveErr, field)
@@ -192,8 +192,8 @@ func TestResolve_UnlimitedIsRefusedOnEveryField(t *testing.T) {
 }
 
 func TestResolve_APeriodOfAFractionOfASecondIsRefused(t *testing.T) {
-    _, resolveErr := Config{Period: bound.Of(1500 * time.Millisecond)}.Resolve()
-    expectRefusalNamingField(t, resolveErr, "totp.Config.Period")
+    _, resolveErr := Options{Period: bound.Of(1500 * time.Millisecond)}.Resolve()
+    expectRefusalNamingField(t, resolveErr, "totp.Options.Period")
 }
 
 /* each instant is counter 1 under its period, the counter of the RFC 6238 known answer */
@@ -203,7 +203,7 @@ func TestVerify_ANonDefaultPeriodStepsTheCounterByItsSeconds(t *testing.T) {
         60 * time.Second: 118,
         24 * time.Hour:   86400,
     } {
-        config := Config{Period: bound.Of(period), Skew: bound.Of(0), Clock: clock.NewFrozenClock(time.Unix(at, 0))}
+        config := Options{Period: bound.Of(period), Skew: bound.Of(0), Clock: clock.NewFrozenClock(time.Unix(at, 0))}
 
         code, codeErr := GenerateCodeAt(rfc6238Secret, time.Unix(at, 0), config)
         if nil != codeErr || "287082" != code {
@@ -221,36 +221,36 @@ func TestVerify_ASkewOfZeroAcceptsTheCurrentStepAlone(t *testing.T) {
     secret, _ := GenerateSecret()
     now := time.Unix(1_700_000_010, 0)
 
-    current, _ := GenerateCodeAt(secret, now, Config{})
-    previous, _ := GenerateCodeAt(secret, now.Add(-30*time.Second), Config{})
+    current, _ := GenerateCodeAt(secret, now, Options{})
+    previous, _ := GenerateCodeAt(secret, now.Add(-30*time.Second), Options{})
 
-    ok, verifyErr := Verify(secret, current, Config{Skew: bound.Of(0), Clock: clock.NewFrozenClock(now)})
+    ok, verifyErr := Verify(secret, current, Options{Skew: bound.Of(0), Clock: clock.NewFrozenClock(now)})
     if nil != verifyErr || false == ok {
         t.Fatalf("expected the current step to verify under a zero skew, ok=%v err=%v", ok, verifyErr)
     }
 
-    ok, verifyErr = Verify(secret, previous, Config{Skew: bound.Of(0), Clock: clock.NewFrozenClock(now)})
+    ok, verifyErr = Verify(secret, previous, Options{Skew: bound.Of(0), Clock: clock.NewFrozenClock(now)})
     if nil != verifyErr || true == ok {
         t.Fatalf("expected the previous step to be refused under a zero skew, ok=%v err=%v", ok, verifyErr)
     }
 }
 
-func TestVerify_AnswersARefusedConfigAsTheError(t *testing.T) {
-    _, verifyErr := Verify(rfc6238Secret, "287082", Config{Skew: bound.Of(11)})
-    expectRefusalNamingField(t, verifyErr, "totp.Config.Skew")
+func TestVerify_AnswersRefusedOptionsAsTheError(t *testing.T) {
+    _, verifyErr := Verify(rfc6238Secret, "287082", Options{Skew: bound.Of(11)})
+    expectRefusalNamingField(t, verifyErr, "totp.Options.Skew")
 }
 
-func TestGenerateCodeAt_AnswersARefusedConfigAsTheError(t *testing.T) {
-    _, codeErr := GenerateCodeAt(rfc6238Secret, time.Unix(59, 0), Config{Period: bound.Of(25 * time.Hour)})
-    expectRefusalNamingField(t, codeErr, "totp.Config.Period")
+func TestGenerateCodeAt_AnswersRefusedOptionsAsTheError(t *testing.T) {
+    _, codeErr := GenerateCodeAt(rfc6238Secret, time.Unix(59, 0), Options{Period: bound.Of(25 * time.Hour)})
+    expectRefusalNamingField(t, codeErr, "totp.Options.Period")
 }
 
 func TestVerify_ANilClockReadsTheSystemClock(t *testing.T) {
     secret, _ := GenerateSecret()
 
-    code, _ := GenerateCodeAt(secret, time.Now(), Config{})
+    code, _ := GenerateCodeAt(secret, time.Now(), Options{})
 
-    ok, verifyErr := Verify(secret, code, Config{})
+    ok, verifyErr := Verify(secret, code, Options{})
     if nil != verifyErr || false == ok {
         t.Fatalf("expected a code for now to verify on the system clock, ok=%v err=%v", ok, verifyErr)
     }
@@ -277,7 +277,7 @@ func containsAll(haystack string, needles ...string) bool {
 func TestVerify_ToleratesWhitespaceInTheSubmittedCode(t *testing.T) {
     at := time.Unix(1111111109, 0)
 
-    code, codeErr := GenerateCodeAt(rfc6238Secret, at, Config{})
+    code, codeErr := GenerateCodeAt(rfc6238Secret, at, Options{})
     if nil != codeErr {
         t.Fatalf("unexpected code error: %v", codeErr)
     }
@@ -291,7 +291,7 @@ func TestVerify_ToleratesWhitespaceInTheSubmittedCode(t *testing.T) {
     }
 
     for _, variant := range variants {
-        valid, verifyErr := Verify(rfc6238Secret, variant, Config{Clock: clock.NewFrozenClock(at)})
+        valid, verifyErr := Verify(rfc6238Secret, variant, Options{Clock: clock.NewFrozenClock(at)})
         if nil != verifyErr {
             t.Fatalf("unexpected verify error for %q: %v", variant, verifyErr)
         }
@@ -305,7 +305,7 @@ func TestVerify_ToleratesWhitespaceInTheSubmittedCode(t *testing.T) {
 func TestVerify_StillRejectsWrongAndShortCodes(t *testing.T) {
     at := time.Unix(1111111109, 0)
 
-    code, codeErr := GenerateCodeAt(rfc6238Secret, at, Config{})
+    code, codeErr := GenerateCodeAt(rfc6238Secret, at, Options{})
     if nil != codeErr {
         t.Fatalf("unexpected code error: %v", codeErr)
     }
@@ -314,7 +314,7 @@ func TestVerify_StillRejectsWrongAndShortCodes(t *testing.T) {
     flipped := code[:5] + string('0'+(code[5]-'0'+1)%10)
 
     for _, invalid := range []string{"12 34", "  ", flipped[:3] + " " + flipped[3:]} {
-        valid, verifyErr := Verify(rfc6238Secret, invalid, Config{Clock: clock.NewFrozenClock(at)})
+        valid, verifyErr := Verify(rfc6238Secret, invalid, Options{Clock: clock.NewFrozenClock(at)})
         if nil != verifyErr {
             t.Fatalf("unexpected verify error for %q: %v", invalid, verifyErr)
         }

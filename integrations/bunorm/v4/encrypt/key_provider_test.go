@@ -86,7 +86,7 @@ func TestStaticKeyProvider_RefusesAnAllZeroKey(t *testing.T) {
         }
 
         recoveredErr, isErr := recovered.(error)
-        if false == isErr || false == strings.Contains(recoveredErr.Error(), "encryption key is all zero bytes") || "zeroed" != exception.LogContext(recoveredErr, exception.LogContextConfig{})["keyId"] {
+        if false == isErr || false == strings.Contains(recoveredErr.Error(), "encryption key is all zero bytes") || "zeroed" != exception.LogContext(recoveredErr, exception.LogContextOptions{})["keyId"] {
             t.Fatalf("expected the refusal to name the shape and the key id, got: %v", recovered)
         }
     }()
@@ -127,7 +127,7 @@ func TestStaticKeyProvider_RefusesARingNamingTheField(t *testing.T) {
                     t.Fatalf("expected the refusal %q, got %v", testCase.message, recovered)
                 }
 
-                logContext := exception.LogContext(recoveredErr, exception.LogContextConfig{})
+                logContext := exception.LogContext(recoveredErr, exception.LogContextOptions{})
                 if testCase.field != logContext["field"] || testCase.keyId != logContext["keyId"] {
                     t.Fatalf("expected field %q and key id %v, got %v", testCase.field, testCase.keyId, logContext)
                 }

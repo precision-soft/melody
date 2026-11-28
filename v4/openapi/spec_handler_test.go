@@ -168,7 +168,7 @@ func TestSpecificationHandler_AContainerWithNoRegistryFailsTheRequestNamingTheSe
     }()
 
     recoveredErr, isError := recovered.(error)
-    if false == isError || false == strings.Contains(fmt.Sprintf("%+v", exception.LogContext(recoveredErr, exception.LogContextConfig{})), ServiceOpenApiRegistry) {
+    if false == isError || false == strings.Contains(fmt.Sprintf("%+v", exception.LogContext(recoveredErr, exception.LogContextOptions{})), ServiceOpenApiRegistry) {
         t.Fatalf("expected a refusal naming %s, got %v", ServiceOpenApiRegistry, recovered)
     }
 }

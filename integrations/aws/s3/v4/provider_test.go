@@ -106,7 +106,7 @@ func TestEnsureBucketTreatsALostCreationRaceAsSuccessWhenTheBucketIsUsable(t *te
         t.Fatalf("could not build the client: %v", clientErr)
     }
 
-    if ensureErr := EnsureBucket(bucketTestRuntime(), client, "raced-bucket", EnsureBucketConfig{}); nil != ensureErr {
+    if ensureErr := EnsureBucket(bucketTestRuntime(), client, "raced-bucket", EnsureBucketOptions{}); nil != ensureErr {
         t.Fatalf("expected the lost creation race to read as success once the bucket is usable, got %v", ensureErr)
     }
 }
@@ -151,7 +151,7 @@ func TestEnsureBucketStillRefusesANameOwnedElsewhere(t *testing.T) {
         t.Fatalf("could not build the client: %v", clientErr)
     }
 
-    if ensureErr := EnsureBucket(bucketTestRuntime(), client, "foreign-bucket", EnsureBucketConfig{}); nil == ensureErr {
+    if ensureErr := EnsureBucket(bucketTestRuntime(), client, "foreign-bucket", EnsureBucketOptions{}); nil == ensureErr {
         t.Fatal("expected a conflict on a bucket the re-check cannot see to stay an error")
     }
 }
@@ -235,7 +235,7 @@ func TestEnsureBucketNamesAReCheckThatCouldNotComplete(t *testing.T) {
         t.Fatalf("could not build the client: %v", clientErr)
     }
 
-    ensureErr := EnsureBucket(bucketTestRuntime(), client, "contested-bucket", EnsureBucketConfig{})
+    ensureErr := EnsureBucket(bucketTestRuntime(), client, "contested-bucket", EnsureBucketOptions{})
     if nil == ensureErr || false == strings.Contains(ensureErr.Error(), "the re-check of its existence could not complete") {
         t.Fatalf("expected the refusal to name the failed re-check, got %v", ensureErr)
     }
@@ -299,7 +299,7 @@ func TestEnsureBucket_TheConfiguredRegionReachesTheCreation(t *testing.T) {
         t.Fatalf("could not build the client: %v", clientErr)
     }
 
-    if ensureErr := EnsureBucket(bucketTestRuntime(), client, "regional-bucket", EnsureBucketConfig{Region: "eu-west-1"}); nil != ensureErr {
+    if ensureErr := EnsureBucket(bucketTestRuntime(), client, "regional-bucket", EnsureBucketOptions{Region: "eu-west-1"}); nil != ensureErr {
         t.Fatalf("unexpected error: %v", ensureErr)
     }
 
@@ -316,7 +316,7 @@ func bucketTestRuntime() containercontract.Runtime {
 }
 
 func TestEnsureBucket_RefusesANilRuntime(t *testing.T) {
-    if ensureErr := EnsureBucket(nil, nil, "any-bucket", EnsureBucketConfig{}); nil == ensureErr {
+    if ensureErr := EnsureBucket(nil, nil, "any-bucket", EnsureBucketOptions{}); nil == ensureErr {
         t.Fatalf("expected a nil runtime to be refused")
     }
 }
@@ -380,7 +380,7 @@ func TestEnsureBucket_EachOfItsThreeCallsEndsWithTheRuntimesContext(t *testing.T
 
         done := make(chan error, 1)
         go func() {
-            done <- EnsureBucket(runtimeInstance, client, "phase-bucket", EnsureBucketConfig{})
+            done <- EnsureBucket(runtimeInstance, client, "phase-bucket", EnsureBucketOptions{})
         }()
 
         select {

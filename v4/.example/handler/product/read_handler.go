@@ -146,7 +146,7 @@ func recordedViews(runtimeInstance melodycontainercontract.Runtime, recorder pro
     if nil != recordErr {
         examplejournal.LoggerOr(runtimeInstance, melodylogging.EmergencyLogger()).Warning(
             "the product view could not be counted",
-            melodyexception.LogContext(recordErr, melodyexception.LogContextConfig{Extra: melodyexceptioncontract.Context{"productId": productId}}),
+            melodyexception.LogContext(recordErr, melodyexception.LogContextOptions{Extra: melodyexceptioncontract.Context{"productId": productId}}),
         )
 
         return nil, nil, nil

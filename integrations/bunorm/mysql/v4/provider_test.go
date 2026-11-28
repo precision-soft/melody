@@ -271,7 +271,7 @@ func TestProvider_ARuntimeWithoutAScopeIsRefusedBeforeThePostBuildHookNamingTheA
             t.Fatalf("%s: expected a runtime without a scope to be refused", door)
         }
 
-        context := exception.LogContext(openErr, exception.LogContextConfig{})
+        context := exception.LogContext(openErr, exception.LogContextOptions{})
         if "runtimeInstance" != context["argument"] || door != context["door"] || "ProviderConfig.PostBuildHook" != context["field"] {
             t.Fatalf("%s: expected the refusal to name the argument, the door and the hook's field, got %v: %v", door, context, openErr)
         }
@@ -1858,7 +1858,7 @@ func TestOpen_TheCancellationRefusalsCarryTheCallersCause(t *testing.T) {
 /* the migration door names itself when handed no runtime, not the open it delegates to */
 func TestProvider_OpenForMigrationNamesItselfWhenHandedNoRuntime(t *testing.T) {
     _, openErr := NewProvider(ProviderConfig{}).OpenForMigration(nil, bunorm.ConnectionParameters{}, nil)
-    if "mysql.Provider.OpenForMigration" != exception.LogContext(openErr, exception.LogContextConfig{})["door"] {
+    if "mysql.Provider.OpenForMigration" != exception.LogContext(openErr, exception.LogContextOptions{})["door"] {
         t.Fatalf("expected the refusal to name the migration door, got %v", openErr)
     }
 }

@@ -50,7 +50,7 @@ Userland takes a lock through [`RunExclusive`](#run-a-block-exclusively) or [`Le
 ```go
 locker := lock.NewInMemoryLocker(lock.InMemoryLockerConfig{})
 
-ran, runErr := lock.RunExclusive(runtimeInstance, locker, "picking:order:42", lock.ExclusiveConfig{Ttl: bound.Of(30 * time.Second)}, func(heldRuntime containercontract.Runtime) error {
+ran, runErr := lock.RunExclusive(runtimeInstance, locker, "picking:order:42", lock.ExclusiveOptions{Ttl: bound.Of(30 * time.Second)}, func(heldRuntime containercontract.Runtime) error {
     return pickOrder(heldRuntime, "42")
 })
 ```
@@ -86,7 +86,7 @@ ran, runErr := lock.RunExclusive(
     runtimeInstance,
     locker,
     "billing:settle",
-    lock.ExclusiveConfig{
+    lock.ExclusiveOptions{
         Ttl: bound.Of(30 * time.Second),
     },
     func(childRuntime containercontract.Runtime) error {
@@ -98,7 +98,7 @@ ran, runErr := lock.RunExclusive(
 While the callback runs, the lease is refreshed on a background goroutine at half the `ttl`. What decides is the lease clock: `RunExclusive` remembers the instant the last renewal it saw land lapses, dated from when that renewal was issued, and the lease's **demotion instant** is half a cadence before it — a quarter of the `ttl`. A timer demotes at that instant if no renewal has landed by then, whatever the store is doing, and every renewal is issued under a deadline that ends there, so a store that accepts the call and never answers cannot carry the demotion to the lapse, when a contender may already acquire. A renewal that fails is retried once, halfway to the demotion instant, so a single dropped renewal is survived by the one behind it; a renewal that answers only after the demotion instant does not save the lease, because nothing could tell in time that it would. A store whose renewals ignore their context cannot hold the demotion back either: each renewal runs on its own
 goroutine, the callback is told to stop at the instant, and the lock is released once the renewal still on the wire has answered, so the release never overtakes it.
 
-A stop ends the work, not the lease: the callback's runtime is cancelled, while the renewal runs on a context detached from the stop, so the lease is still renewed while the callback winds down and the lock is released when it returns; no peer acquires it in between. `ExclusiveConfig.StopRenewalLimit` bounds that renewal, 30s by default, at least 1ms and not below the refresh interval, unlimited renewing until the callback returns: past it the renewal ends, the lease lapses by itself and the run answers `exclusive run lost the lock lease while running` with the limit in its cause, since a callback that ignores its context can then overlap a peer. The runtime does not hand the lock package the application's teardown timeout, so align the two by hand: on defaults the teardown timeout is 10s, the limit 30s and Kubernetes' grace period 30s, so set the limit strictly below the forced exit of the process, or the release never lands and the limit never fires. When the limit passes a warning is written at once, since the work may never return to carry the error. A session-style lock (an unlimited ttl) has no lease to lapse: its probe runs until the callback returns and the limit is not armed. A renewal that fails while the work winds down is judged by the lease clock like any other, so the lock store has to stay open until the work returns: a client closed under it reads as a lost lease. The leader gate's blocking `OnElected` hook is under the same rule, through `LeaderGateConfig.StopRenewalLimit`, and `OnLost` receives the limit's error.
+A stop ends the work, not the lease: the callback's runtime is cancelled, while the renewal runs on a context detached from the stop, so the lease is still renewed while the callback winds down and the lock is released when it returns; no peer acquires it in between. `ExclusiveOptions.StopRenewalLimit` bounds that renewal, 30s by default, at least 1ms and not below the refresh interval, unlimited renewing until the callback returns: past it the renewal ends, the lease lapses by itself and the run answers `exclusive run lost the lock lease while running` with the limit in its cause, since a callback that ignores its context can then overlap a peer. The runtime does not hand the lock package the application's teardown timeout, so align the two by hand: on defaults the teardown timeout is 10s, the limit 30s and Kubernetes' grace period 30s, so set the limit strictly below the forced exit of the process, or the release never lands and the limit never fires. When the limit passes a warning is written at once, since the work may never return to carry the error. A session-style lock (an unlimited ttl) has no lease to lapse: its probe runs until the callback returns and the limit is not armed. A renewal that fails while the work winds down is judged by the lease clock like any other, so the lock store has to stay open until the work returns: a client closed under it reads as a lost lease. The leader gate's blocking `OnElected` hook is under the same rule, through `LeaderGateConfig.StopRenewalLimit`, and `OnLost` receives the limit's error.
 
 Once the lease can no longer be saved, the demotion **cancels the child runtime** handed to the callback — the lease may now belong to another instance, so leader-only work must stop rather than keep going alongside it — and `RunExclusive` returns `(true, <exclusive run lost the lock lease while running>)` wrapping the renewal failure and carrying the callback's own error in its context.
 
@@ -108,7 +108,7 @@ The threshold covers the one case the lease clock cannot see: a gate configured 
 
 An `Acquire` that errors fails **closed**: `(false, err)`, because an unreachable store must not double-run the work. A shutdown is not an error: when the runtime context is already cancelled, an `Acquire` that fails with that cancellation returns `(false, nil)`, so a graceful stop does not read as a failed run. The release always runs on a context detached from the run's cancellation, with no deadline of the helper's, the locker bounding its own release (the mysql and pgsql lockers by `LockerConfig.ReleaseTimeout`, the redis one by its call timeout), so a `SIGTERM` between a cron tick and its release cannot leave the lock held until the `ttl` lapses; a release that fails anyway — a store hiccup exactly at release time — is logged with the lock name and the cause, because the lock then does stay held for up to a full `ttl` and the skips it causes would otherwise blame a run that is not happening.
 
-[`ExclusiveConfig`](../../lock/run_exclusive.go) is everything the run declares beyond its locker and its lock name, its zero value the default: `Ttl`, 30s, at least 2ms, since under it the renewal cadence is floored at 1ms and a lease of 1.5ms or less is demoted before its first renewal, unlimited the session-style lock. An unlimited `Ttl` selects session-lock behaviour: there is no lease to extend, so the renewal becomes a liveness probe every `ProbeInterval`, 15s when left out, at least 1ms, unlimited refused, since a session never probed is lost unnoticed; `ProbeInterval` set beside a lease `Ttl`, which is renewed and never probed, is refused naming the field.
+[`ExclusiveOptions`](../../lock/run_exclusive.go) is everything the run declares beyond its locker and its lock name, its zero value the default: `Ttl`, 30s, at least 2ms, since under it the renewal cadence is floored at 1ms and a lease of 1.5ms or less is demoted before its first renewal, unlimited the session-style lock. An unlimited `Ttl` selects session-lock behaviour: there is no lease to extend, so the renewal becomes a liveness probe every `ProbeInterval`, 15s when left out, at least 1ms, unlimited refused, since a session never probed is lost unnoticed; `ProbeInterval` set beside a lease `Ttl`, which is renewed and never probed, is refused naming the field.
 
 ### Decorate a CLI command
 
@@ -124,7 +124,7 @@ command := lock.NewExclusiveCommand(
 )
 ```
 
-[`ExclusiveCommandConfig`](../../lock/exclusive_command.go) carries `LockName`, `Ttl`, `StopRenewalLimit` and `ProbeInterval` (set it to the cron runner's `ShutdownTimeout` when its commands may wind down longer than 30s), read as `ExclusiveConfig` reads them and resolved when the command is built, a refusal panicking naming the field. `LockName` left empty is the application namespace, `:command:` and the wrapped command's name, read at each run from the runtime's configuration, `melody:command:<name>` under the default namespace or with no configuration; a name set is used verbatim. Name one for when two differently-named commands must share one lock or one command needs distinct locks per deployment. `Name`, `Description` and `Flags` delegate to the wrapped command, so the decorator is transparent to the CLI.
+[`ExclusiveCommandConfig`](../../lock/exclusive_command.go) carries `LockName`, `Ttl`, `StopRenewalLimit` and `ProbeInterval` (set it to the cron runner's `ShutdownTimeout` when its commands may wind down longer than 30s), read as `ExclusiveOptions` reads them and resolved when the command is built, a refusal panicking naming the field. `LockName` left empty is the application namespace, `:command:` and the wrapped command's name, read at each run from the runtime's configuration, `melody:command:<name>` under the default namespace or with no configuration; a name set is used verbatim. Name one for when two differently-named commands must share one lock or one command needs distinct locks per deployment. `Name`, `Description` and `Flags` delegate to the wrapped command, so the decorator is transparent to the CLI.
 
 ### Elect a leader
 
@@ -150,7 +150,7 @@ gate := lock.NewLeaderGate(
 
 go func() {
     if runErr := gate.Run(runtimeInstance); nil != runErr {
-        logger.Error("leader gate stopped", exception.LogContext(runErr, exception.LogContextConfig{}))
+        logger.Error("leader gate stopped", exception.LogContext(runErr, exception.LogContextOptions{}))
     }
 }()
 ```
@@ -247,8 +247,8 @@ defer pickingLock.Release(runtime.WithContext(runtimeInstance, context.WithoutCa
 
 ### Exclusive execution (`lock`)
 
-- [`RunExclusive(runtimeInstance containercontract.Runtime, locker lockcontract.Locker, name string, config ExclusiveConfig, callback func(containercontract.Runtime) error) (bool, error)`](../../lock/run_exclusive.go)
-- [`ExclusiveConfig`](../../lock/run_exclusive.go) — `Ttl`, `StopRenewalLimit`, `ProbeInterval`
+- [`RunExclusive(runtimeInstance containercontract.Runtime, locker lockcontract.Locker, name string, config ExclusiveOptions, callback func(containercontract.Runtime) error) (bool, error)`](../../lock/run_exclusive.go)
+- [`ExclusiveOptions`](../../lock/run_exclusive.go) — `Ttl`, `StopRenewalLimit`, `ProbeInterval`
 - [`ExclusiveCommand`](../../lock/exclusive_command.go) — implements `cli/contract.Command`
     - [`NewExclusiveCommand(command clicontract.Command, locker lockcontract.Locker, config ExclusiveCommandConfig) *ExclusiveCommand`](../../lock/exclusive_command.go)
 - [`ExclusiveCommandConfig`](../../lock/exclusive_command.go) — `LockName`, `Ttl`

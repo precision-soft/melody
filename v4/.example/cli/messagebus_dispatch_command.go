@@ -144,7 +144,7 @@ func (instance *MessageBusDispatchCommand) Run(
             _, consumeErr := instance.consumeBus.Dispatch(runtimeInstance, envelopeInstance, melodymessagebuscontract.DispatchOptions{})
             if nil != consumeErr {
                 /* no requeue: the queue dead-letters by default, so a message its handler refuses is not redelivered to this loop */
-                nackErr := instance.transport.Nack(runtimeInstance, envelopeInstance, melodymessagebuscontract.NackConfig{})
+                nackErr := instance.transport.Nack(runtimeInstance, envelopeInstance, melodymessagebuscontract.NackOptions{})
 
                 return errors.Join(consumeErr, nackErr)
             }

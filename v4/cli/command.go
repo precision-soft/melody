@@ -222,7 +222,7 @@ func runCommandAction(
         /* the error line is written whatever quiet says and whatever the format: quiet governs decoration, StandardFlags defaults it to true, and for a failing command this line is its one answer on the terminal, so it goes to the error stream, never into the document on the output stream; the error itself still returns to the exit path */
         errorBanner := commandBanner{writer: commandErrorWriter(commandContext), noColor: resolvedOption.NoColor}
         causeChainDepth := errorLineCauseChainDepth(commandContext)
-        causeChain, _ := exception.LogContext(aggregatedErr, exception.LogContextConfig{CauseChainDepth: 2 * causeChainDepth})["causeChain"].([]string)
+        causeChain, _ := exception.LogContext(aggregatedErr, exception.LogContextOptions{CauseChainDepth: 2 * causeChainDepth})["causeChain"].([]string)
         errorBanner.printStatusLine(AnsiBackgroundRed, internal.AppendCauseChain(internal.EscapeControlCharacters(fmt.Sprintf("[error] %s", aggregatedErr.Error())), causeChain, causeChainDepth))
         return aggregatedErr
     }

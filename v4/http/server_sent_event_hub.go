@@ -550,7 +550,7 @@ func logServerSentEventHubError(
         return
     }
 
-    logger.Error(message, exception.LogContext(causeErr, exception.LogContextConfig{Extra: context}))
+    logger.Error(message, exception.LogContext(causeErr, exception.LogContextOptions{Extra: context}))
 }
 
 func logServerSentEventHubWarning(logger loggingcontract.Logger, message string, context loggingcontract.Context) {

@@ -140,7 +140,7 @@ func TestModule_RegisterHttpRoutesRefusesASubSecondIdleTimeout(t *testing.T) {
             t.Fatalf("expected the panic value to be an error, got %T", recovered)
         }
 
-        if false == strings.Contains(fmt.Sprintf("%v", exception.LogContext(recoveredErr, exception.LogContextConfig{})), "StreamHandlerConfig.IdleTimeout") {
+        if false == strings.Contains(fmt.Sprintf("%v", exception.LogContext(recoveredErr, exception.LogContextOptions{})), "StreamHandlerConfig.IdleTimeout") {
             t.Fatalf("expected the refusal to name StreamHandlerConfig.IdleTimeout, got %v", recoveredErr)
         }
     }()
@@ -350,8 +350,8 @@ func assertRefusalNamesField(t *testing.T, field string, register func()) {
             t.Fatalf("expected the panic value to be an error, got %T", recovered)
         }
 
-        if field != exception.LogContext(recoveredErr, exception.LogContextConfig{})["field"] {
-            t.Fatalf("expected the refusal to name %s, got %v", field, exception.LogContext(recoveredErr, exception.LogContextConfig{}))
+        if field != exception.LogContext(recoveredErr, exception.LogContextOptions{})["field"] {
+            t.Fatalf("expected the refusal to name %s, got %v", field, exception.LogContext(recoveredErr, exception.LogContextOptions{}))
         }
     }()
 
